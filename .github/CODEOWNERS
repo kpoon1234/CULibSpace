@@ -1,0 +1,7 @@
+# บังคับ Lead ตรวจตามโฟลเดอร์
+/apps/web/        @Sirawit6322
+/apps/api/        @puntaut
+/prisma/          @puntaut
+
+# ไฟล์คอนฟิกร่วมที่ Root
+/package.json     @kpoon1234
