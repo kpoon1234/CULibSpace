@@ -20,9 +20,10 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
-        
+
       - name: Generate Prisma Client
-        run: npx prisma generate --schema=./apps/backend/prisma/schema.prisma
+        run: npx prisma generate
+        working-directory: ./apps/backend
 
       - name: Typecheck Backend
         run: npx tsc --noEmit
@@ -30,3 +31,5 @@ jobs:
 
       - name: Build Frontend
         run: npm run build --workspace=apps/frontend
+        env:
+          NEXT_PUBLIC_API_URL: "http://localhost:8080"
