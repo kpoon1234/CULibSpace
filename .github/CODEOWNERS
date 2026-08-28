@@ -1,6 +1,6 @@
-# บังคับ Lead ตรวจตามโฟลเดอร์
-apps/frontend/        @DisisSadoiEngJa @kpoon1234
-apps/backend/         @puntaut @kpoon1234
+# Global owners
+* @kpoon1234
 
-# ไฟล์คอนฟิกร่วมที่ Root
-package.json          @kpoon1234
+# App leads
+apps/frontend/ @DisisSadoiEngJa @kpoon1234
+apps/backend/ @puntaut @kpoon1234
