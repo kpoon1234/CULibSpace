@@ -15,21 +15,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Dependencies
         run: npm ci
 
-      # Step 1: สั่ง Generate Prisma Client ให้ Type ใน Backend ใช้งานได้
       - name: Generate Prisma Client
-        run: npx prisma generate --schema=./prisma/schema.prisma
+        run: npx prisma generate
+        working-directory: ./apps/backend
 
-      # Step 2: ตรวจสอบ Type Safety ในฝั่ง Backend (Express)
       - name: Typecheck Backend
         run: npx tsc --noEmit
         working-directory: ./apps/backend
 
-      # Step 3: ทดลองสั่ง Build ฝั่ง Frontend (Next.js)
       - name: Build Frontend
         run: npm run build --workspace=apps/frontend
+        env:
+          NEXT_PUBLIC_API_URL: "http://localhost:8080"
