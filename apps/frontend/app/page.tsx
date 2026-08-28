@@ -5,6 +5,7 @@ import { useState } from 'react';
 export default function Home() {
   const [responseMessage, setResponseMessage] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const testHusky = 'hello';
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
