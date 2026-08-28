@@ -4,12 +4,17 @@
     "lint-staged": "^17.4.1",
     "prettier": "^3.9.6"
   },
-    "scripts": {
+  "scripts": {
     "prepare": "husky"
   },
   "lint-staged": {
     "apps/**/*.{js,jsx,ts,tsx,json,css,md}": [
       "prettier --write"
     ]
-  }
+  },
+  "name": "culibspace",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
 }
