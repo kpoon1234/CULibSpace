@@ -30,6 +30,7 @@ jobs:
         working-directory: ./apps/backend
 
       - name: Build Frontend
-        run: npm run build --workspace=apps/frontend
+        run: npm run build
+        working-directory: ./apps/frontend
         env:
           NEXT_PUBLIC_API_URL: "http://localhost:8080"
