@@ -1,3 +1,6 @@
+// Prisma Schema for CU LibSpace
+// Database: PostgreSQL with Prisma ORM
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,9 +10,339 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum UserType {
+  UNIVERSITY
+  THAI
+  FOREIGN
+
+  @@map("user_type_enum")
+}
+
+enum Role {
+  USER
+  ADMIN
+
+  @@map("role_enum")
+}
+
+enum TableStatus {
+  AVAILABLE  @map("Available")
+  RESERVED   @map("Reserved")
+  OCCUPIED   @map("Occupied")
+  CLOSED     @map("Closed")
+
+  @@map("table_status_enum")
+}
+
+enum BookingStatus {
+  PENDING    @map("Pending")
+  ACTIVE     @map("Active")
+  COMPLETED  @map("Completed")
+  CANCELLED  @map("Cancelled")
+  NO_SHOW    @map("No-show")
+
+  @@map("booking_status_enum")
+}
+
+enum TicketStatus {
+  PAID       @map("Paid")
+  UNPAID     @map("Unpaid")
+
+  @@map("ticket_status_enum")
+}
+
+enum ZoneType {
+  SILENT     @map("Silent")
+  GROUP      @map("Group")
+  COMMON     @map("Common")
+
+  @@map("zone_type_enum")
+}
+
+// ==========================================
+// MODELS: USER & POLYMORPHIC INHERITANCE
+// ==========================================
+
 model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  createdAt DateTime @default(now())
+  uid            Int             @id @default(autoincrement()) @map("uid")
+  phone          String          @unique @db.VarChar(10) @map("phone")
+  behaviourScore Decimal         @default(100.0) @db.Decimal(4, 1) @map("behaviour_score")
+  email          String          @unique @db.VarChar(100) @map("email")
+  password       String?         @db.VarChar(255) @map("password") // bcrypt hash for Outside Users (null for University Google SSO)
+  firstname      String          @db.VarChar(50) @map("firstname")
+  lastname       String          @db.VarChar(50) @map("lastname")
+  userType       UserType        @map("user_type")
+  role           Role            @default(USER) @map("role")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  // Polymorphic Subtype Relations (Class Table Inheritance)
+  universityUser UniversityUser?
+  outsideUser    OutsideUser?
+
+  // Domain Relations
+  bookings       Booking[]
+  issueReports   IssueReport[]
+  manageScores   ManageScore[]
+
+  // Indexes for User Lookup & Admin Filters
+  @@index([firstname, lastname], name: "idx_user_name_search")
+  @@index([userType, role], name: "idx_user_type_role")
+  @@map("user")
+}
+
+model UniversityUser {
+  uid       Int      @id @map("uid")
+  studentId String   @unique @db.VarChar(10) @map("studentid")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User     @relation(fields: [uid], references: [uid], onDelete: Cascade)
+
+  @@map("university_user")
+}
+
+model OutsideUser {
+  uid         Int          @id @map("uid")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [uid], references: [uid], onDelete: Cascade)
+  thai        ThaiUser?
+  foreignUser ForeignUser?
+  tickets     Ticket[]
+
+  @@map("outside_user")
+}
+
+model ThaiUser {
+  uid         Int         @id @map("uid")
+  citizenId   String      @unique @db.VarChar(13) @map("citizenid")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  outsideUser OutsideUser @relation(fields: [uid], references: [uid], onDelete: Cascade)
+
+  @@map("thai")
+}
+
+model ForeignUser {
+  uid         Int         @id @map("uid")
+  passportId  String      @unique @db.VarChar(9) @map("passportid")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  outsideUser OutsideUser @relation(fields: [uid], references: [uid], onDelete: Cascade)
+
+  @@map("foreign_user")
+}
+
+model Admin {
+  adminId      Int           @id @default(autoincrement()) @map("adminid")
+  email        String        @unique @db.VarChar(100) @map("email")
+  password     String?       @db.VarChar(255) @map("password")
+  firstname    String        @db.VarChar(50) @map("firstname")
+  lastname     String        @db.VarChar(50) @map("lastname")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  managedIssues ManageIssue[]
+  managedScores ManageScore[]
+
+  @@map("admin")
+}
+
+// ==========================================
+// MODELS: SPATIAL ZONE & TABLE
+// ==========================================
+
+model Zone {
+  zoneId    Int      @id @default(autoincrement()) @map("zoneid")
+  zoneType  ZoneType @map("zone_type")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tables    Table[]
+
+  @@map("zone")
+}
+
+model Table {
+  tableId      Int         @id @default(autoincrement()) @map("tableid")
+  zoneId       Int         @map("zoneid")
+  status       TableStatus @default(AVAILABLE) @map("status")
+  numberOfSeat Int         @map("number_of_seat")
+  plugCap      Int?        @map("plug_cap")
+  hasTvScreen  Boolean     @default(false) @map("has_tv_screen")
+
+  // Temporary Hold Lock Mechanism (Double Booking Prevention / Concurrency)
+  lockToken    String?     @map("lock_token")
+  lockedUntil  DateTime?   @map("locked_until")
+
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  zone         Zone          @relation(fields: [zoneId], references: [zoneId])
+  bookings     Booking[]
+  issueReports IssueReport[]
+
+  // Indexes for Real-time Availability & SWR Polling Filters
+  @@index([zoneId, status], name: "idx_table_zone_status")
+  @@index([status, plugCap, hasTvScreen], name: "idx_table_amenity_filter")
+  @@index([lockedUntil], name: "idx_table_locked_until")
+  @@map("table")
+}
+
+// ==========================================
+// MODELS: BOOKING & CONCURRENCY
+// ==========================================
+
+model Booking {
+  bookingId     Int           @id @default(autoincrement()) @map("bookingid")
+  uid           Int           @map("uid")
+  tableId       Int           @map("tableid")
+  startDateTime DateTime      @map("startdatetime")
+  endDateTime   DateTime      @map("enddatetime")
+  arriveTime    DateTime?     @map("arrive_time")
+  status        BookingStatus @default(PENDING) @map("status")
+  timestamp     DateTime      @default(now()) @map("timestamp")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  user          User          @relation(fields: [uid], references: [uid])
+  table         Table         @relation(fields: [tableId], references: [tableId])
+
+  // 1. ตรวจสอบโต๊ะว่าง/ช่วงเวลาจองทับซ้อน (Table Availability & Overlap Check)
+  @@index([tableId, status, startDateTime, endDateTime], name: "idx_booking_table_overlap")
+
+  // 2. นโยบาย 1 บัญชี 1 ที่นั่ง & ตรวจสอบการจองของผู้ใช้ (User Active & Overlap Check)
+  @@index([uid, status, startDateTime, endDateTime], name: "idx_booking_user_overlap")
+
+  // 3. ดึงประวัติการจองของผู้ใช้เรียงตามเวลาล่าสุด (User Booking History Timeline)
+  @@index([uid, timestamp(sort: Desc)], name: "idx_booking_user_history")
+
+  // 4. ค้นหาผู้ไม่มาแสดงตัวสำหรับ Cron/Worker Auto No-show Release
+  @@index([status, startDateTime], name: "idx_booking_noshow_worker")
+
+  @@map("booking")
+}
+
+// ==========================================
+// MODELS: VISITOR TICKETING
+// ==========================================
+
+model Ticket {
+  ticketId      Int          @id @default(autoincrement()) @map("ticketid")
+  uid           Int          @map("uid")
+  paymentDetail String?      @db.VarChar(255) @map("payment_detail")
+  status        TicketStatus @default(UNPAID) @map("status")
+  startDateTime DateTime     @map("startdatetime")
+  endDateTime   DateTime     @map("enddatetime")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  outsideUser   OutsideUser  @relation(fields: [uid], references: [uid])
+
+  // ตรวจสอบสิทธิ์ตั๋ว Active ที่ครอบคลุมช่วงเวลาจองของบุคคลภายนอก (fn_check_ticket_for_outsider)
+  @@index([uid, status, startDateTime, endDateTime], name: "idx_ticket_active_coverage")
+  @@map("ticket")
+}
+
+// ==========================================
+// MODELS: FACILITY & AUDIT LOGS
+// ==========================================
+
+model IssueReport {
+  issueId          Int           @id @default(autoincrement()) @map("issueid")
+  uid              Int           @map("uid")
+  time             DateTime      @default(now()) @map("time")
+  tableId          Int           @map("tableid")
+  issueInformation String        @db.Text @map("issue_information")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  user             User          @relation(fields: [uid], references: [uid])
+  table            Table         @relation(fields: [tableId], references: [tableId])
+  manageIssues     ManageIssue[]
+
+  @@index([tableId], name: "idx_issue_table")
+  @@index([uid], name: "idx_issue_user")
+  @@map("issue_report")
+}
+
+model ManageIssue {
+  issueId   Int         @map("issueid")
+  adminId   Int         @map("adminid")
+  timestamp DateTime    @default(now()) @map("timestamp")
+  info      String      @db.Text @map("info")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  issueReport IssueReport @relation(fields: [issueId], references: [issueId])
+  admin       Admin       @relation(fields: [adminId], references: [adminId])
+
+  @@id([issueId, adminId, timestamp])
+  @@map("manage_issue")
+}
+
+model ManageScore {
+  uid         Int      @map("uid")
+  adminId     Int      @map("adminid")
+  timestamp   DateTime @default(now()) @map("timestamp")
+  scoreChange Int      @map("score_change")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user        User     @relation(fields: [uid], references: [uid])
+  admin       Admin    @relation(fields: [adminId], references: [adminId])
+
+  @@id([uid, adminId, timestamp])
+  @@map("manage_score")
+}
+
+// ==========================================
+// MODELS: OPERATING SCHEDULE (ตารางเวลาเปิด-ปิดตามช่วงวัน)
+// ==========================================
+
+model OperatingSchedule {
+  scheduleId  Int      @id @default(autoincrement()) @map("schedule_id")
+  name        String   @map("name") @db.VarChar(100) // เช่น "ช่วงสอบกลางภาค 1/2569", "เวลาทำการปกติ"
+  startDate   DateTime @map("start_date") @db.Date    // วันเริ่มต้นที่มีผล
+  endDate     DateTime @map("end_date") @db.Date      // วันสิ้นสุดที่มีผล
+  openTime    String   @default("08:00") @map("open_time") @db.VarChar(5) // "08:00"
+  closeTime   String   @default("21:00") @map("close_time") @db.VarChar(5)// "21:00"
+  is24Hours   Boolean  @default(false) @map("is_24h") // true = เปิด 24 ชม.
+  isClosed    Boolean  @default(false) @map("is_closed") // true = ปิดปรับปรุง/วันหยุด
+  priority    Int      @default(1) @map("priority")   // 1=ปกติ, 2=ช่วงสอบ, 3=วันหยุดพิเศษ/ปิดปรับปรุง
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([startDate, endDate, priority], name: "idx_schedule_lookup")
+  @@map("operating_schedule")
+}
+
+// ==========================================
+// MODELS: SYSTEM CONFIGURATION
+// ==========================================
+
+model SystemConfig {
+  configId                  Int      @id @default(autoincrement()) @map("configid")
+  maxBookingDurationMinutes Int      @default(120) @map("max_booking_duration_minutes")
+  lateThresholdMinutes      Int      @default(15) @map("late_threshold_minutes")
+  earlyCheckInMinutes       Int      @default(15) @map("early_checkin_minutes")
+  minScoreToBook            Decimal  @default(50.0) @db.Decimal(4, 1) @map("min_score_to_book")
+  maxAdvanceBookingDays     Int      @default(7) @map("max_advance_booking_days")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@map("system_config")
 }
