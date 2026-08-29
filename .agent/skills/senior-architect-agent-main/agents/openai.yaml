@@ -1,0 +1,4 @@
+interface:
+  display_name: "Senior Architect Agent"
+  short_description: "Architecture mapping for existing systems"
+  default_prompt: "Use $senior-architect-agent to inspect and map this system before proposing architecture changes."

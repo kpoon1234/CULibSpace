@@ -1,0 +1,25 @@
+flowchart LR
+  %% Observed from provided file tree and signals.
+  %% Future Backend API and Future Database are not observed.
+  %% Dotted edges are open questions, not confirmed architecture.
+
+  User[User] --> App
+
+  subgraph BrowserBoundary[Observed Browser Boundary]
+    App[React App]
+    TodoList[TodoList Component]
+    TodoStorage[todoStorage Service]
+    BrowserStorage[(Browser Storage)]
+
+    App --> TodoList
+    TodoList --> TodoStorage
+    TodoStorage --> BrowserStorage
+  end
+
+  BackendAPI[Future Backend API]:::unknown
+  Database[(Future Database)]:::unknown
+
+  TodoStorage -.-> BackendAPI
+  BackendAPI -.-> Database
+
+  classDef unknown stroke-dasharray: 5 5;
