@@ -4,10 +4,10 @@ import { useState, FormEvent } from 'react';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
 
-type Role = 'student' | 'admin';
+type Role = 'user' | 'admin';
 
 export default function LogIn() {
-  const [role, setRole] = useState<Role>('student');
+  const [role, setRole] = useState<Role>('user');
   const [emailError, setEmailError] = useState(false);
   const [emailErrorMessage, setEmailErrorMessage] = useState('');
   const [passwordError, setPasswordError] = useState(false);
@@ -54,13 +54,13 @@ export default function LogIn() {
       password: data.get('password'),
     };
 
-    // ยิงคนละ endpoint ตาม role ที่เลือก
+    // ยิงคนละ endpoint ตาม role ที่เลือก — backend เป็นคนเช็คเองว่าอีเมลที่ login มาเป็นของมหาลัยหรือภายนอก
     const endpoint = role === 'admin' ? '/api/admin/login' : '/api/login';
     console.log(endpoint, payload);
   };
 
   return (
-    <div className="relative flex min-h-dvh flex-col items-center justify-between bg-pink-100 p-4 sm:p-8">
+    <div className="relative flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-between bg-pink-100 p-4 sm:p-8">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10"
@@ -79,12 +79,12 @@ export default function LogIn() {
         <div className="flex rounded-md bg-gray-100 p-1">
           <button
             type="button"
-            onClick={() => setRole('student')}
+            onClick={() => setRole('user')}
             className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              role === 'student' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+              role === 'user' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
             }`}
           >
-            Student
+            User
           </button>
           <button
             type="button"
@@ -131,7 +131,7 @@ export default function LogIn() {
                 placeholder="••••••"
                 autoComplete="current-password"
                 required
-                className={`w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
                   passwordError
                     ? 'border-red-500 focus:ring-red-200'
                     : 'border-gray-300 focus:ring-rose-200'
@@ -157,14 +157,13 @@ export default function LogIn() {
             </button>
           </form>
         ) : (
-          <button
-            type="button"
-            onClick={() => alert('Sign in with Google')}
+          <a
+            href="/api/auth/google"
             className="flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50"
           >
             <GoogleIcon />
             Sign in with Google
-          </button>
+          </a>
         )}
       </div>
 
