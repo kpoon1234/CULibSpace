@@ -24,8 +24,8 @@ async function main() {
 
   console.log('🧹 Cleaned existing records.');
 
-  // Precomputed bcrypt hash for test password: "password123"
-  const defaultPasswordHash = '$2a$10$vI8aWBnW3fID.ZQ4/zo1G.q1lRps.9cGLcZEiGDMVr5yUP1KUOYTa';
+  // Precomputed bcrypt hash for admin test password: "password123"
+  const defaultAdminPasswordHash = '$2a$10$vI8aWBnW3fID.ZQ4/zo1G.q1lRps.9cGLcZEiGDMVr5yUP1KUOYTa';
 
   // 2. Seed Operating Schedules (Priority Hierarchy)
   const now = new Date();
@@ -88,7 +88,7 @@ async function main() {
     data: {
       adminId: 1,
       email: 'admin1@chula.ac.th',
-      password: defaultPasswordHash,
+      password: defaultAdminPasswordHash,
       firstname: 'Library',
       lastname: 'Master',
     },
@@ -98,7 +98,7 @@ async function main() {
     data: {
       adminId: 2,
       email: 'somsak@chula.ac.th',
-      password: defaultPasswordHash,
+      password: defaultAdminPasswordHash,
       firstname: 'Somsak',
       lastname: 'Jaidee',
     },
@@ -143,7 +143,7 @@ async function main() {
   }
   console.log(`✅ Seeded ${tablesData.length} Tables with amenities (plugCap & hasTvScreen)`);
 
-  // 7. Seed Users & Subtypes (Polymorphic Class Table Inheritance)
+  // 7. Seed Users & Subtypes (All Users authenticate via Google OAuth)
   // UID 1: Alice (University Student, Score 90.0)
   const user1 = await prisma.user.create({
     data: {
@@ -151,7 +151,6 @@ async function main() {
       phone: '0811111111',
       behaviourScore: 90.0,
       email: 'alice@student.chula.ac.th',
-      password: null, // Google SSO
       firstname: 'Alice',
       lastname: 'wonderland',
       userType: UserType.UNIVERSITY,
@@ -171,7 +170,6 @@ async function main() {
       phone: '0822222222',
       behaviourScore: 100.0,
       email: 'Bobby@student.chula.ac.th',
-      password: null, // Google SSO
       firstname: 'Bobby',
       lastname: 'dekdee',
       userType: UserType.UNIVERSITY,
@@ -191,7 +189,6 @@ async function main() {
       phone: '0833333333',
       behaviourScore: 40.0,
       email: 'lowscore@student.chula.ac.th',
-      password: null,
       firstname: 'Lowscore',
       lastname: 'Student',
       userType: UserType.UNIVERSITY,
@@ -204,14 +201,13 @@ async function main() {
     },
   });
 
-  // UID 4: Thai Outside User without ticket (Password: password123)
+  // UID 4: Thai Outside User without ticket (Google Sign-In with personal Gmail)
   const user4 = await prisma.user.create({
     data: {
       uid: 4,
       phone: '0844444444',
       behaviourScore: 100.0,
       email: 'thai.noticket@gmail.com',
-      password: defaultPasswordHash,
       firstname: 'pomkonThai',
       lastname: 'NoTicket',
       userType: UserType.THAI,
@@ -228,14 +224,13 @@ async function main() {
     },
   });
 
-  // UID 5: Foreign Outside User with active ticket (Password: password123)
+  // UID 5: Foreign Outside User with active ticket (Google Sign-In with personal Gmail)
   const user5 = await prisma.user.create({
     data: {
       uid: 5,
       phone: '0855555555',
       behaviourScore: 100.0,
       email: 'foreign.hasticket@gmail.com',
-      password: defaultPasswordHash,
       firstname: 'pomkonForeign',
       lastname: 'HasTicket',
       userType: UserType.FOREIGN,
@@ -259,7 +254,6 @@ async function main() {
       phone: '0866666666',
       behaviourScore: 100.0,
       email: 'cancelking@student.chula.ac.th',
-      password: null,
       firstname: 'Cancel',
       lastname: 'King',
       userType: UserType.UNIVERSITY,
@@ -272,7 +266,7 @@ async function main() {
     },
   });
 
-  console.log('✅ Seeded 6 Users (University, Thai, Foreign, Low-score, Cancel King)');
+  console.log('✅ Seeded 6 Users (All authenticating via Google Sign-In: University, Thai, Foreign)');
 
   // 8. Seed Visitor Ticket for UID 5 (Paid, Active 30 days from today)
   const ticket1 = await prisma.ticket.create({
@@ -367,7 +361,7 @@ async function main() {
   });
   console.log('✅ Seeded Manage Score Audit Logs');
 
-  console.log('🎉 Database seeding completed successfully! Test Password for Admins/Visitors: "password123"');
+  console.log('🎉 Database seeding completed successfully! Admin Login: admin1@chula.ac.th / "password123"');
 }
 
 main()
