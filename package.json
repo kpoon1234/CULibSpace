@@ -5,7 +5,13 @@
     "prettier": "^3.9.6"
   },
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "dev": "npm run dev --workspace=apps/backend & npm run dev --workspace=apps/frontend",
+    "dev:backend": "npm run dev --workspace=apps/backend",
+    "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:fresh": "docker compose up -d && npm run db:fresh --workspace=apps/backend"
   },
   "lint-staged": {
     "apps/**/*.{js,jsx,ts,tsx,json,css,md}": [

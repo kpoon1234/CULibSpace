@@ -10,3 +10,7 @@ out/
 
 # OS Files
 .DS_Store
+
+# Agent & Local Documentation
+.agent/
+docs/
