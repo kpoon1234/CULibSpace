@@ -3,7 +3,7 @@ import { PrismaClient, UserType, TableStatus, BookingStatus, TicketStatus, ZoneT
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Seeding CU LibSpace database with test dataset...');
+  console.log('🌱 Seeding CU LibSpace database with comprehensive developer test dataset...');
 
   // 1. Clean existing data in reverse dependency order
   await prisma.operatingSchedule.deleteMany();
@@ -24,14 +24,20 @@ async function main() {
 
   console.log('🧹 Cleaned existing records.');
 
+  // Precomputed bcrypt hash for test password: "password123"
+  const defaultPasswordHash = '$2a$10$vI8aWBnW3fID.ZQ4/zo1G.q1lRps.9cGLcZEiGDMVr5yUP1KUOYTa';
+
   // 2. Seed Operating Schedules (Priority Hierarchy)
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
   await prisma.operatingSchedule.createMany({
     data: [
       {
         scheduleId: 1,
         name: 'เวลาทำการปกติ (Default Regular Semester)',
-        startDate: new Date('2026-01-01T00:00:00Z'),
-        endDate: new Date('2026-12-31T00:00:00Z'),
+        startDate: new Date(`${currentYear}-01-01T00:00:00Z`),
+        endDate: new Date(`${currentYear}-12-31T00:00:00Z`),
         openTime: '08:00',
         closeTime: '21:00',
         is24Hours: false,
@@ -40,9 +46,9 @@ async function main() {
       },
       {
         scheduleId: 2,
-        name: 'ช่วงสอบกลางภาค 1/2569 (Midterm Exam 24 Hours)',
-        startDate: new Date('2026-09-01T00:00:00Z'),
-        endDate: new Date('2026-09-14T00:00:00Z'),
+        name: 'ช่วงสอบกลางภาค (Midterm Exam 24 Hours)',
+        startDate: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), // ครอบคลุมปัจจุบัน
+        endDate: new Date(now.getTime() + 12 * 24 * 60 * 60 * 1000),
         openTime: '00:00',
         closeTime: '23:59',
         is24Hours: true,
@@ -52,8 +58,8 @@ async function main() {
       {
         scheduleId: 3,
         name: 'วันแรงงานแห่งชาติ (National Labor Day - Closed)',
-        startDate: new Date('2026-05-01T00:00:00Z'),
-        endDate: new Date('2026-05-01T00:00:00Z'),
+        startDate: new Date(`${currentYear}-05-01T00:00:00Z`),
+        endDate: new Date(`${currentYear}-05-01T00:00:00Z`),
         openTime: '00:00',
         closeTime: '00:00',
         is24Hours: false,
@@ -77,11 +83,12 @@ async function main() {
   });
   console.log('✅ Seeded System Configuration');
 
-  // 4. Seed Admin Accounts
+  // 4. Seed Admin Accounts (Password: password123)
   const admin1 = await prisma.admin.create({
     data: {
       adminId: 1,
       email: 'admin1@chula.ac.th',
+      password: defaultPasswordHash,
       firstname: 'Library',
       lastname: 'Master',
     },
@@ -91,11 +98,12 @@ async function main() {
     data: {
       adminId: 2,
       email: 'somsak@chula.ac.th',
+      password: defaultPasswordHash,
       firstname: 'Somsak',
       lastname: 'Jaidee',
     },
   });
-  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname}`);
+  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: password123)`);
 
   // 5. Seed Zones
   const zoneSilent = await prisma.zone.create({
@@ -133,7 +141,7 @@ async function main() {
   for (const t of tablesData) {
     await prisma.table.create({ data: t });
   }
-  console.log(`✅ Seeded ${tablesData.length} Tables`);
+  console.log(`✅ Seeded ${tablesData.length} Tables with amenities (plugCap & hasTvScreen)`);
 
   // 7. Seed Users & Subtypes (Polymorphic Class Table Inheritance)
   // UID 1: Alice (University Student, Score 90.0)
@@ -143,6 +151,7 @@ async function main() {
       phone: '0811111111',
       behaviourScore: 90.0,
       email: 'alice@student.chula.ac.th',
+      password: null, // Google SSO
       firstname: 'Alice',
       lastname: 'wonderland',
       userType: UserType.UNIVERSITY,
@@ -162,6 +171,7 @@ async function main() {
       phone: '0822222222',
       behaviourScore: 100.0,
       email: 'Bobby@student.chula.ac.th',
+      password: null, // Google SSO
       firstname: 'Bobby',
       lastname: 'dekdee',
       userType: UserType.UNIVERSITY,
@@ -181,6 +191,7 @@ async function main() {
       phone: '0833333333',
       behaviourScore: 40.0,
       email: 'lowscore@student.chula.ac.th',
+      password: null,
       firstname: 'Lowscore',
       lastname: 'Student',
       userType: UserType.UNIVERSITY,
@@ -193,13 +204,14 @@ async function main() {
     },
   });
 
-  // UID 4: Thai Outside User without ticket
+  // UID 4: Thai Outside User without ticket (Password: password123)
   const user4 = await prisma.user.create({
     data: {
       uid: 4,
       phone: '0844444444',
       behaviourScore: 100.0,
       email: 'thai.noticket@gmail.com',
+      password: defaultPasswordHash,
       firstname: 'pomkonThai',
       lastname: 'NoTicket',
       userType: UserType.THAI,
@@ -216,13 +228,14 @@ async function main() {
     },
   });
 
-  // UID 5: Foreign Outside User with active ticket
+  // UID 5: Foreign Outside User with active ticket (Password: password123)
   const user5 = await prisma.user.create({
     data: {
       uid: 5,
       phone: '0855555555',
       behaviourScore: 100.0,
       email: 'foreign.hasticket@gmail.com',
+      password: defaultPasswordHash,
       firstname: 'pomkonForeign',
       lastname: 'HasTicket',
       userType: UserType.FOREIGN,
@@ -246,6 +259,7 @@ async function main() {
       phone: '0866666666',
       behaviourScore: 100.0,
       email: 'cancelking@student.chula.ac.th',
+      password: null,
       firstname: 'Cancel',
       lastname: 'King',
       userType: UserType.UNIVERSITY,
@@ -260,21 +274,22 @@ async function main() {
 
   console.log('✅ Seeded 6 Users (University, Thai, Foreign, Low-score, Cancel King)');
 
-  // 8. Seed Visitor Ticket for UID 5 (Paid, Active 30 days)
+  // 8. Seed Visitor Ticket for UID 5 (Paid, Active 30 days from today)
   const ticket1 = await prisma.ticket.create({
     data: {
       ticketId: 1,
       uid: user5.uid,
       paymentDetail: 'Credit Card: **** 5678',
       status: TicketStatus.PAID,
-      startDateTime: new Date('2026-04-28T00:00:00Z'),
-      endDateTime: new Date('2026-05-28T00:00:00Z'),
+      startDateTime: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000),
+      endDateTime: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
     },
   });
-  console.log(`✅ Seeded Ticket ID 1 for User UID ${user5.uid}`);
+  console.log(`✅ Seeded Ticket ID 1 for User UID ${user5.uid} (Active for 30 days)`);
 
-  // 9. Seed Bookings
+  // 9. Seed Bookings (Historical test cases + Live Upcoming Bookings)
   const bookingsData = [
+    // Historical completed & failed bookings (from original DB test suite)
     { bookingId: 10, uid: 1, tableId: 101, startDateTime: new Date('2026-04-25T09:00:00Z'), endDateTime: new Date('2026-04-25T11:00:00Z'), arriveTime: new Date('2026-04-25T09:05:00Z'), status: BookingStatus.COMPLETED },
     { bookingId: 11, uid: 1, tableId: 102, startDateTime: new Date('2026-04-26T13:00:00Z'), endDateTime: new Date('2026-04-26T15:00:00Z'), arriveTime: new Date('2026-04-26T12:55:00Z'), status: BookingStatus.COMPLETED },
     { bookingId: 20, uid: 2, tableId: 101, startDateTime: new Date('2026-04-27T10:00:00Z'), endDateTime: new Date('2026-04-27T12:00:00Z'), arriveTime: new Date('2026-04-27T10:08:00Z'), status: BookingStatus.COMPLETED },
@@ -287,12 +302,32 @@ async function main() {
     { bookingId: 555, uid: 1, tableId: 101, startDateTime: new Date('2026-04-28T16:50:21Z'), endDateTime: new Date('2026-04-28T18:55:21Z'), arriveTime: new Date('2026-04-28T16:56:19Z'), status: BookingStatus.ACTIVE },
     { bookingId: 999, uid: 1, tableId: 201, startDateTime: new Date('2026-04-28T16:25:21Z'), endDateTime: new Date('2026-04-28T17:55:21Z'), arriveTime: new Date('2026-04-28T16:56:24Z'), status: BookingStatus.NO_SHOW },
     { bookingId: 3, uid: 5, tableId: 202, startDateTime: new Date('2026-04-28T10:00:00Z'), endDateTime: new Date('2026-04-28T11:00:00Z'), arriveTime: null, status: BookingStatus.PENDING },
+
+    // Live Upcoming Bookings for Frontend UI Dashboard & Check-in Testing
+    {
+      bookingId: 1001,
+      uid: 1, // Alice
+      tableId: 101,
+      startDateTime: new Date(now.getTime() + 10 * 60 * 1000), // อีก 10 นาที (อยู่ใน Check-in Window)
+      endDateTime: new Date(now.getTime() + 130 * 60 * 1000),
+      arriveTime: null,
+      status: BookingStatus.PENDING,
+    },
+    {
+      bookingId: 1002,
+      uid: 2, // Bobby
+      tableId: 201,
+      startDateTime: new Date(now.getTime() + 24 * 60 * 60 * 1000), // พรุ่งนี้
+      endDateTime: new Date(now.getTime() + 26 * 60 * 60 * 1000),
+      arriveTime: null,
+      status: BookingStatus.PENDING,
+    },
   ];
 
   for (const b of bookingsData) {
     await prisma.booking.create({ data: b });
   }
-  console.log(`✅ Seeded ${bookingsData.length} Bookings`);
+  console.log(`✅ Seeded ${bookingsData.length} Bookings (Historical + Live Upcoming Test Slots)`);
 
   // 10. Seed Issue Reports & Management Logs
   const issue1 = await prisma.issueReport.create({
@@ -332,7 +367,7 @@ async function main() {
   });
   console.log('✅ Seeded Manage Score Audit Logs');
 
-  console.log('🎉 Database seeding completed successfully!');
+  console.log('🎉 Database seeding completed successfully! Test Password for Admins/Visitors: "password123"');
 }
 
 main()
