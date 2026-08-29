@@ -1,4 +1,4 @@
-import { PrismaClient, UserType, TableStatus, BookingStatus, TicketStatus, ZoneType, Role } from '@prisma/client';
+import { PrismaClient, UserType, TableStatus, BookingStatus, TicketStatus, ZoneType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -143,7 +143,7 @@ async function main() {
   }
   console.log(`✅ Seeded ${tablesData.length} Tables with amenities (plugCap & hasTvScreen)`);
 
-  // 7. Seed Users & Subtypes (All Users authenticate via Google OAuth)
+  // 7. Seed Users & Subtypes (All Users authenticate via Google Sign-In)
   // UID 1: Alice (University Student, Score 90.0)
   const user1 = await prisma.user.create({
     data: {
@@ -154,7 +154,6 @@ async function main() {
       firstname: 'Alice',
       lastname: 'wonderland',
       userType: UserType.UNIVERSITY,
-      role: Role.USER,
       universityUser: {
         create: {
           studentId: '6731315721',
@@ -173,7 +172,6 @@ async function main() {
       firstname: 'Bobby',
       lastname: 'dekdee',
       userType: UserType.UNIVERSITY,
-      role: Role.USER,
       universityUser: {
         create: {
           studentId: '6731332321',
@@ -192,7 +190,6 @@ async function main() {
       firstname: 'Lowscore',
       lastname: 'Student',
       userType: UserType.UNIVERSITY,
-      role: Role.USER,
       universityUser: {
         create: {
           studentId: '6700000003',
@@ -211,7 +208,6 @@ async function main() {
       firstname: 'pomkonThai',
       lastname: 'NoTicket',
       userType: UserType.THAI,
-      role: Role.USER,
       outsideUser: {
         create: {
           thai: {
@@ -234,7 +230,6 @@ async function main() {
       firstname: 'pomkonForeign',
       lastname: 'HasTicket',
       userType: UserType.FOREIGN,
-      role: Role.USER,
       outsideUser: {
         create: {
           foreignUser: {
@@ -257,7 +252,6 @@ async function main() {
       firstname: 'Cancel',
       lastname: 'King',
       userType: UserType.UNIVERSITY,
-      role: Role.USER,
       universityUser: {
         create: {
           studentId: '6700000006',

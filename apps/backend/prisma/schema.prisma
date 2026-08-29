@@ -22,13 +22,6 @@ enum UserType {
   @@map("user_type_enum")
 }
 
-enum Role {
-  USER
-  ADMIN
-
-  @@map("role_enum")
-}
-
 enum TableStatus {
   AVAILABLE  @map("Available")
   RESERVED   @map("Reserved")
@@ -75,7 +68,6 @@ model User {
   firstname      String          @db.VarChar(50) @map("firstname")
   lastname       String          @db.VarChar(50) @map("lastname")
   userType       UserType        @map("user_type")
-  role           Role            @default(USER) @map("role")
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
 
@@ -90,7 +82,7 @@ model User {
 
   // Indexes for User Lookup & Admin Filters
   @@index([firstname, lastname], name: "idx_user_name_search")
-  @@index([userType, role], name: "idx_user_type_role")
+  @@index([userType], name: "idx_user_type")
   @@map("user")
 }
 

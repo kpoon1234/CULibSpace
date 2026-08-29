@@ -2,9 +2,6 @@
 CREATE TYPE "user_type_enum" AS ENUM ('UNIVERSITY', 'THAI', 'FOREIGN');
 
 -- CreateEnum
-CREATE TYPE "role_enum" AS ENUM ('USER', 'ADMIN');
-
--- CreateEnum
 CREATE TYPE "table_status_enum" AS ENUM ('Available', 'Reserved', 'Occupied', 'Closed');
 
 -- CreateEnum
@@ -22,11 +19,9 @@ CREATE TABLE "user" (
     "phone" VARCHAR(10) NOT NULL,
     "behaviour_score" DECIMAL(4,1) NOT NULL DEFAULT 100.0,
     "email" VARCHAR(100) NOT NULL,
-    "password" VARCHAR(255),
     "firstname" VARCHAR(50) NOT NULL,
     "lastname" VARCHAR(50) NOT NULL,
     "user_type" "user_type_enum" NOT NULL,
-    "role" "role_enum" NOT NULL DEFAULT 'USER',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -76,7 +71,7 @@ CREATE TABLE "foreign_user" (
 CREATE TABLE "admin" (
     "adminid" SERIAL NOT NULL,
     "email" VARCHAR(100) NOT NULL,
-    "password" VARCHAR(255),
+    "password" VARCHAR(255) NOT NULL,
     "firstname" VARCHAR(50) NOT NULL,
     "lastname" VARCHAR(50) NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -218,7 +213,7 @@ CREATE UNIQUE INDEX "user_email_key" ON "user"("email");
 CREATE INDEX "idx_user_name_search" ON "user"("firstname", "lastname");
 
 -- CreateIndex
-CREATE INDEX "idx_user_type_role" ON "user"("user_type", "role");
+CREATE INDEX "idx_user_type" ON "user"("user_type");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "university_user_studentid_key" ON "university_user"("studentid");
