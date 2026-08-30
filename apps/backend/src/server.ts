@@ -2,6 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
+import authRoutes from './routes/authRoutes.js';
+import {
+  authenticateToken,
+  requireRoles,
+  AuthenticatedRequest,
+} from './middlewares/authMiddleware.js';
 
 dotenv.config();
 
@@ -15,6 +21,41 @@ app.use(
   })
 );
 app.use(express.json());
+
+// Mount Authentication & Role Management Routes
+app.use('/api/auth', authRoutes);
+
+// Example / Test Protected Endpoints to demonstrate RBAC
+app.get('/api/protected/profile', authenticateToken, (req: AuthenticatedRequest, res) => {
+  res.json({
+    message: 'Access granted to authenticated profile',
+    user: req.user,
+  });
+});
+
+app.get(
+  '/api/protected/student-only',
+  authenticateToken,
+  requireRoles('STUDENT'),
+  (req: AuthenticatedRequest, res) => {
+    res.json({
+      message: 'Access granted: Student area',
+      studentId: req.user?.studentId,
+    });
+  }
+);
+
+app.get(
+  '/api/protected/admin-only',
+  authenticateToken,
+  requireRoles('ADMIN'),
+  (req: AuthenticatedRequest, res) => {
+    res.json({
+      message: 'Access granted: Admin area',
+      adminId: req.user?.adminId,
+    });
+  }
+);
 
 // API Endpoint ตัวอย่างสำหรับส่งข้อมูลไป Frontend
 app.get('/api/users', async (req, res) => {
