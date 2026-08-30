@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
+import { useSession, signIn, signOut } from 'next-auth/react';
 
 type Role = 'user' | 'admin';
 
@@ -157,13 +158,14 @@ export default function LogIn() {
             </button>
           </form>
         ) : (
-          <a
-            href="/api/auth/google"
+          <button
+            type="button"
+            onClick={() => signIn('google', { callbackUrl: '/' })}
             className="flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50"
           >
             <GoogleIcon />
             Sign in with Google
-          </a>
+          </button>
         )}
       </div>
 

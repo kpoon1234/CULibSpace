@@ -22,5 +22,9 @@
   "private": true,
   "workspaces": [
     "apps/*"
-  ]
+  ],
+  "dependencies": {
+    "@react-oauth/google": "^0.13.5",
+    "next-auth": "^4.24.15"
+  }
 }
