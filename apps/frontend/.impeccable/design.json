@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-31T00:00:00Z",
+  "title": "Design System: CULibSpace",
+  "extensions": {
+    "colorMeta": {
+      "chula-pink": {
+        "role": "primary",
+        "displayName": "Chula Pink",
+        "canonical": "#f472b6",
+        "tonalRamp": ["#831843", "#9d174d", "#be185d", "#db2777", "#f472b6", "#f9a8d4", "#fbcfe8", "#fce7f3"]
+      },
+      "chula-pink-hover": {
+        "role": "primary",
+        "displayName": "Chula Pink Hover",
+        "canonical": "#f9a8d4",
+        "tonalRamp": ["#831843", "#9d174d", "#be185d", "#db2777", "#f472b6", "#f9a8d4", "#fbcfe8", "#fce7f3"]
+      },
+      "reading-rose": {
+        "role": "secondary",
+        "displayName": "Reading Rose",
+        "canonical": "#e11d48",
+        "tonalRamp": ["#4c0519", "#881337", "#9f1239", "#be123c", "#e11d48", "#fb7185", "#fda4af", "#fecdd3"]
+      },
+      "reading-rose-deep": {
+        "role": "secondary",
+        "displayName": "Reading Rose Deep",
+        "canonical": "#be123c",
+        "tonalRamp": ["#4c0519", "#881337", "#9f1239", "#be123c", "#e11d48", "#fb7185", "#fda4af", "#fecdd3"]
+      },
+      "reading-rose-focus": {
+        "role": "secondary",
+        "displayName": "Reading Rose Focus",
+        "canonical": "#fecdd3",
+        "tonalRamp": ["#4c0519", "#881337", "#9f1239", "#be123c", "#e11d48", "#fb7185", "#fda4af", "#fecdd3"]
+      },
+      "reading-rose-tint": {
+        "role": "secondary",
+        "displayName": "Reading Rose Tint",
+        "canonical": "#fff1f2",
+        "tonalRamp": ["#4c0519", "#881337", "#9f1239", "#be123c", "#e11d48", "#fb7185", "#fecdd3", "#fff1f2"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#f3f4f6", "#ffffff"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#171717",
+        "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#f3f4f6", "#ffffff"]
+      },
+      "neutral-900": { "role": "neutral", "displayName": "Neutral 900", "canonical": "#111827", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-700": { "role": "neutral", "displayName": "Neutral 700", "canonical": "#374151", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-600": { "role": "neutral", "displayName": "Neutral 600", "canonical": "#4b5563", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-500": { "role": "neutral", "displayName": "Neutral 500", "canonical": "#6b7280", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-400": { "role": "neutral", "displayName": "Neutral 400", "canonical": "#9ca3af", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-300": { "role": "neutral", "displayName": "Neutral 300", "canonical": "#d1d5db", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-200": { "role": "neutral", "displayName": "Neutral 200", "canonical": "#e5e7eb", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-100": { "role": "neutral", "displayName": "Neutral 100", "canonical": "#f3f4f6", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "error": { "role": "error", "displayName": "Error", "canonical": "#dc2626", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#fecaca"] },
+      "error-border": { "role": "error", "displayName": "Error Border", "canonical": "#ef4444", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#fecaca"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Home hero title over the banner image. Not yet used elsewhere." },
+      "title": { "displayName": "Title", "purpose": "Page/card-level heading, e.g. the login card's \"Login\" / \"Admin Login\"." },
+      "headline": { "displayName": "Headline", "purpose": "Dialog and section headings, e.g. the Forgot Password modal title." },
+      "body": { "displayName": "Body", "purpose": "Default UI text: labels, nav items, button labels, modal copy." },
+      "label": { "displayName": "Label", "purpose": "Smallest role; field error/helper text." }
+    },
+    "shadows": [
+      { "name": "card-float", "value": "0 5px 15px 0 hsla(220,30%,5%,0.05), 0 15px 35px -5px hsla(220,25%,10%,0.05)", "purpose": "Soft, diffused lift for the login card off the page." },
+      { "name": "modal", "value": "0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)", "purpose": "Tailwind shadow-xl; elevates the Forgot Password dialog off its scrim." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default color/background transitions on nav items, buttons, and tabs (Tailwind's transition-colors default)." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Reading Rose filled button for the main commit action (e.g. modal \"Continue\").",
+      "html": "<button class=\"ds-btn-primary\">Continue</button>",
+      "css": ".ds-btn-primary { background: #e11d48; color: #ffffff; padding: 8px 12px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; border: none; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-primary:hover { background: #be123c; } .ds-btn-primary:focus-visible { outline: 2px solid #fecdd3; outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Outline button for an alternate action (e.g. \"Sign in with Google\").",
+      "html": "<button class=\"ds-btn-secondary\">Sign in with Google</button>",
+      "css": ".ds-btn-secondary { background: #ffffff; color: #1f2937; padding: 8px 16px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; border: 1px solid #d1d5db; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-secondary:hover { background: #f9fafb; } .ds-btn-secondary:focus-visible { outline: 2px solid #fecdd3; outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "No-fill text button for a low-emphasis action (e.g. \"Forgot your password?\", modal \"Cancel\").",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: #4b5563; padding: 8px 12px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; border: none; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-ghost:hover { background: #f3f4f6; }"
+    },
+    {
+      "name": "Segmented Tabs",
+      "kind": "custom",
+      "refersTo": "segmented-tab",
+      "description": "Role switch (User / Admin) on the login page: a gray track with a white active pill.",
+      "html": "<div class=\"ds-segmented\"><button class=\"ds-segmented-item ds-segmented-item--active\">User</button><button class=\"ds-segmented-item\">Admin</button></div>",
+      "css": ".ds-segmented { display: flex; background: #f3f4f6; border-radius: 6px; padding: 4px; gap: 4px; } .ds-segmented-item { flex: 1; padding: 6px 12px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; color: #6b7280; background: transparent; border: none; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1), color 0.2s; } .ds-segmented-item--active { background: #ffffff; color: #111827; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "Labeled text field with a rose focus ring and a red error state.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\">Email</label><input class=\"ds-field-input\" type=\"email\" placeholder=\"admin@chula.ac.th\" /></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } .ds-field-label { font-size: 14px; font-weight: 500; color: #374151; } .ds-field-input { width: 100%; border-radius: 6px; border: 1px solid #d1d5db; padding: 8px 12px; font-size: 14px; color: #171717; outline: none; } .ds-field-input::placeholder { color: #9ca3af; } .ds-field-input:focus { box-shadow: 0 0 0 2px #fecdd3; } .ds-field-input.error { border-color: #ef4444; } .ds-field-input.error:focus { box-shadow: 0 0 0 2px #fca5a5; }"
+    },
+    {
+      "name": "Card Surface",
+      "kind": "card",
+      "refersTo": "card-surface",
+      "description": "The floating container that holds the login form — the only card-level surface in the current implementation.",
+      "html": "<div class=\"ds-card\">Card content</div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 5px 15px 0 hsla(220,30%,5%,0.05), 0 15px 35px -5px hsla(220,25%,10%,0.05); }"
+    },
+    {
+      "name": "Top Navigation",
+      "kind": "nav",
+      "refersTo": "nav-topmenu",
+      "description": "Sticky site header: logo left, horizontal nav tabs right, on Chula Pink.",
+      "html": "<header class=\"ds-topmenu\"><div class=\"ds-topmenu-logo\"></div><a class=\"ds-topmenu-item ds-topmenu-item--active\" href=\"#\">Home</a><a class=\"ds-topmenu-item\" href=\"#\">Login</a></header>",
+      "css": ".ds-topmenu { position: sticky; top: 0; display: flex; align-items: stretch; height: 64px; background: #f472b6; padding: 0 16px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } .ds-topmenu-logo { width: 48px; margin: 8px 16px 8px 0; } .ds-topmenu-item { display: flex; align-items: center; justify-content: center; width: 150px; font-size: 14px; font-weight: 500; color: #ffffff; text-decoration: none; transition: background-color 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-topmenu-item:hover { background: #f9a8d4; } .ds-topmenu-item--active { background: #fff1f2; color: #be123c; }"
+    },
+    {
+      "name": "Hero Banner",
+      "kind": "custom",
+      "refersTo": "hero-banner",
+      "description": "Full-bleed image with a dark scrim and centered white content — the home page hero.",
+      "html": "<section class=\"ds-hero\"><div class=\"ds-hero-scrim\"></div><h1 class=\"ds-hero-title\">CULibSpace</h1></section>",
+      "css": ".ds-hero { position: relative; width: 100%; height: 500px; overflow: hidden; background: #9ca3af center/cover; } .ds-hero-scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.4); } .ds-hero-title { position: relative; display: flex; height: 100%; align-items: center; justify-content: center; color: #ffffff; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 48px; font-weight: 700; text-align: center; text-shadow: 0 4px 12px rgba(0,0,0,0.3); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Reading Room",
+    "overview": "CULibSpace's baseline mood is calm and utilitarian: this is a library first, and the interface should read as quiet, efficient, and operate-mode by default — minimal decoration, few flourishes, a task done without ceremony. Chula pink is the room's single accent, never the room itself: it marks brand chrome (the header) and interactive commitment (buttons, links), while the space around it stays white and unshowy.\n\nBut a reading room isn't silent everywhere, all the time — the second floor during exam season is a different room than the same floor on a quiet Tuesday. The system should be able to express real activity honestly (a near-full zone, a busy time slot) without abandoning its calm baseline or reaching for colors outside the pink/rose family to do it. Density and occupancy are content, not decoration; when future work builds zone/table availability views, let saturation, fill, or count — not new hues — carry that energy.",
+    "keyCharacteristics": [
+      "Calm, utilitarian baseline; brand color is rationed, not ambient",
+      "Flat by default — shadow is reserved for surfaces that genuinely float (card, modal)",
+      "Two-tier corner language: small on controls, generous on containers",
+      "Room to express \"busy\" states honestly later, without breaking the palette"
+    ],
+    "rules": [
+      { "name": "The One Brand Color Rule", "body": "Chula Pink appears once, as header chrome, at full saturation, and nowhere else. Everything that needs to look \"pink\" for an interactive reason (a button, a link, a focus ring) uses Reading Rose instead — the two never substitute for each other.", "section": "colors" },
+      { "name": "The Floating-Surface-Only Rule", "body": "Shadow appears only on a card or modal that sits above the page plane. Buttons, inputs, and chrome stay flat; don't add hover-lift shadows to controls without a deliberate decision to expand the vocabulary.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep Chula Pink to brand chrome only (header) and Reading Rose to everything interactive (buttons, links, focus) — the One Brand Color Rule.",
+      "Do use the two-tier radius scale: rounded-md (6px) for controls, rounded-xl (12px) for containers.",
+      "Do keep shadow rare — only a genuinely floating surface (card, modal) gets one.",
+      "Do let future occupancy/density UI (zone and table availability) express \"busy\" honestly through saturation, fill, or count rather than new hues outside the pink/rose family.",
+      "Do use Geist Sans (via var(--font-sans)) as the UI typeface — not Arial, Helvetica, or another platform-default sans."
+    ],
+    "donts": [
+      "Don't treat the current pink-400 / rose-600 hex values as final brand color. They're straight Tailwind defaults and have been flagged as reading too saturated/\"hot pink\" for true Chula pink — revisit against a real brand reference in a future /impeccable colorize or /impeccable craft pass rather than treating them as locked.",
+      "Don't extend the login page's blue-tinted radial gradient (hsl(210,100%,97%) → white) sitting under the pink-100 background — it reads as a mismatched leftover (likely copied from a template), not a deliberate two-tone effect.",
+      "Don't treat the prefers-color-scheme: dark background swap to #eed9df as a designed dark theme — it's an open, undecided placeholder; a real dark mode needs deliberate design work later, not silent extension of this value.",
+      "Don't use a full-page pink background or the Inter font — a binding project-wide rule from the repo root CLAUDE.md."
+    ]
+  }
+}
