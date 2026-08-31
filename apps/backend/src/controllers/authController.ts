@@ -69,4 +69,69 @@ export class AuthController {
       });
     }
   }
+
+  /**
+   * GET /auth/google/callback
+   */
+  static googleCallback(req: Request, res: Response): void {
+    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/callback`);
+  }
+
+  /**
+   * POST /auth/logout
+   */
+  static logout(req: Request, res: Response): void {
+    req.logout((err) => {
+      if (err) {
+        res.status(500).json({ error: 'Logout failed' });
+        return;
+      }
+      res.clearCookie('connect.sid');
+      res.json({ message: 'Logged out successfully' });
+    });
+  }
+
+  /**
+   * GET /auth/me (Session-based)
+   */
+  static getSessionMe(req: Request, res: Response): void {
+    if (!req.isAuthenticated() || !req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    res.json({ user: req.user });
+  }
+
+  /**
+   * GET /api/protected/profile (Protected RBAC)
+   */
+  static getProfile(req: Request, res: Response): void {
+    const authReq = req as AuthenticatedRequest;
+    res.json({
+      message: 'Access granted to authenticated profile',
+      user: authReq.user,
+    });
+  }
+
+  /**
+   * GET /api/protected/student-only (Protected RBAC)
+   */
+  static getStudentArea(req: Request, res: Response): void {
+    const authReq = req as AuthenticatedRequest;
+    res.json({
+      message: 'Access granted: Student area',
+      studentId: authReq.user?.studentId,
+    });
+  }
+
+  /**
+   * GET /api/protected/admin-only (Protected RBAC)
+   */
+  static getAdminArea(req: Request, res: Response): void {
+    const authReq = req as AuthenticatedRequest;
+    res.json({
+      message: 'Access granted: Admin area',
+      adminId: authReq.user?.adminId,
+    });
+  }
 }
