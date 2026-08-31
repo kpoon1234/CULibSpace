@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { AuthService } from '../services/authService.js';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
 
@@ -7,7 +7,7 @@ export class AuthController {
    * POST /api/auth/login (or /api/auth/google)
    * Exchange authenticated email & profile for JWT session with mapped role (US1-1 / FR-1.1)
    */
-  static async login(req: AuthenticatedRequest, res: Response): Promise<void> {
+  static async login(req: Request, res: Response): Promise<void> {
     try {
       const { email, firstname, lastname, phone, studentId } = req.body;
 
@@ -45,9 +45,10 @@ export class AuthController {
    * GET /api/auth/me
    * Return current authenticated user session profile (US1-1)
    */
-  static async getMe(req: AuthenticatedRequest, res: Response): Promise<void> {
+  static async getMe(req: Request, res: Response): Promise<void> {
     try {
-      if (!req.user) {
+      const authReq = req as AuthenticatedRequest;
+      if (!authReq.user) {
         res.status(401).json({
           success: false,
           error: 'Unauthorized: Valid session required',
@@ -55,7 +56,7 @@ export class AuthController {
         return;
       }
 
-      const user = await AuthService.getCurrentProfile(req.user);
+      const user = await AuthService.getCurrentProfile(authReq.user);
       res.status(200).json({
         success: true,
         user,

@@ -10,11 +10,7 @@ export interface AuthenticatedRequest extends Request {
 /**
  * Middleware to authenticate requests using JWT Bearer Token.
  */
-export function authenticateToken(
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): void {
+export function authenticateToken(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -36,7 +32,7 @@ export function authenticateToken(
     return;
   }
 
-  req.user = payload;
+  (req as AuthenticatedRequest).user = payload;
   next();
 }
 
@@ -44,8 +40,9 @@ export function authenticateToken(
  * RBAC Authorization Guard middleware to enforce required roles.
  */
 export function requireRoles(...allowedRoles: AppRole[]) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-    if (!req.user) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
       res.status(401).json({
         success: false,
         error: 'Unauthorized: Authentication required',
@@ -53,7 +50,7 @@ export function requireRoles(...allowedRoles: AppRole[]) {
       return;
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    if (!allowedRoles.includes(authReq.user.role)) {
       res.status(403).json({
         success: false,
         error: `Forbidden: Access restricted to roles: [${allowedRoles.join(', ')}]`,
