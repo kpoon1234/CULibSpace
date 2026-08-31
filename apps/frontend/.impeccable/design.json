@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-31T00:00:00Z",
+  "generatedAt": "2026-09-01T00:00:00Z",
   "title": "Design System: CULibSpace",
   "extensions": {
     "colorMeta": {
@@ -53,6 +53,7 @@
         "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#f3f4f6", "#ffffff"]
       },
       "neutral-900": { "role": "neutral", "displayName": "Neutral 900", "canonical": "#111827", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
+      "neutral-800": { "role": "neutral", "displayName": "Neutral 800", "canonical": "#1f2937", "tonalRamp": ["#111827", "#1f2937", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb"] },
       "neutral-700": { "role": "neutral", "displayName": "Neutral 700", "canonical": "#374151", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
       "neutral-600": { "role": "neutral", "displayName": "Neutral 600", "canonical": "#4b5563", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
       "neutral-500": { "role": "neutral", "displayName": "Neutral 500", "canonical": "#6b7280", "tonalRamp": ["#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f3f4f6"] },
@@ -97,6 +98,22 @@
       "description": "Outline button for an alternate action (e.g. \"Sign in with Google\").",
       "html": "<button class=\"ds-btn-secondary\">Sign in with Google</button>",
       "css": ".ds-btn-secondary { background: #ffffff; color: #1f2937; padding: 8px 16px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; border: 1px solid #d1d5db; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-secondary:hover { background: #f9fafb; } .ds-btn-secondary:focus-visible { outline: 2px solid #fecdd3; outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button, Compact",
+      "kind": "button",
+      "refersTo": "button-secondary-compact",
+      "description": "The Secondary/Outline button at reduced scale, for a demoted action nested inside a Muted Secondary-Action Panel (e.g. \"Google\" beneath a primary email/password sign-in).",
+      "html": "<button class=\"ds-btn-secondary-compact\">Google</button>",
+      "css": ".ds-btn-secondary-compact { background: #ffffff; color: #1f2937; padding: 6px 12px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 12px; font-weight: 500; border: 1px solid #d1d5db; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-secondary-compact:hover { background: #f3f4f6; } .ds-btn-secondary-compact:focus-visible { outline: 2px solid #fecdd3; outline-offset: 2px; }"
+    },
+    {
+      "name": "Muted Secondary-Action Panel",
+      "kind": "custom",
+      "refersTo": "panel-muted",
+      "description": "Demotes one legitimate action beneath another without hiding it: a short label line plus one compact secondary button, on a Neutral 100 ground. First used on the login page's User tab to demote Google sign-in beneath email/password.",
+      "html": "<div class=\"ds-panel-muted\"><p class=\"ds-panel-muted-label\">or continue with</p><button class=\"ds-btn-secondary-compact\">Google</button></div>",
+      "css": ".ds-panel-muted { display: flex; flex-direction: column; align-items: center; gap: 8px; background: #f3f4f6; border-radius: 6px; padding: 12px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } .ds-panel-muted-label { font-size: 12px; color: #4b5563; margin: 0; }"
     },
     {
       "name": "Ghost Button",

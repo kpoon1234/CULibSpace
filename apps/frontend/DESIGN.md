@@ -11,6 +11,7 @@ colors:
   ink: "#171717"
   paper: "#ffffff"
   neutral-900: "#111827"
+  neutral-800: "#1f2937"
   neutral-700: "#374151"
   neutral-600: "#4b5563"
   neutral-500: "#6b7280"
@@ -93,6 +94,15 @@ components:
   nav-topmenu:
     backgroundColor: "{colors.chula-pink}"
     height: "64px"
+  panel-muted:
+    backgroundColor: "{colors.neutral-100}"
+    rounded: "{rounded.sm}"
+    padding: "12px"
+  button-secondary-compact:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.neutral-800}"
+    rounded: "{rounded.sm}"
+    padding: "6px 12px"
 ---
 
 # Design System: CULibSpace
@@ -129,6 +139,7 @@ The palette is small and Tailwind-default-sourced: one brand/interactive pink-ro
 - **Paper** (`#ffffff`): page and card background; the CSS var `--background` in light mode.
 - **Ink** (`#171717`): the CSS var `--foreground`; primary body text color.
 - **Neutral 900** (`#111827`): headings (`text-gray-900`).
+- **Neutral 800** (`#1f2937`): secondary/outline button text (`text-gray-800`), including its compact variant.
 - **Neutral 700** (`#374151`): form labels (`text-gray-700`).
 - **Neutral 600** (`#4b5563`): secondary/body copy (`text-gray-600`).
 - **Neutral 500** (`#6b7280`): inactive segmented-tab text.
@@ -182,7 +193,16 @@ Two-tier corner language: `rounded-md` (6px) on interactive controls (buttons, i
 - **Shape:** `rounded-md` (6px) on every button variant.
 - **Primary** (modal `Continue`, admin-login submit): Reading Rose background (`#e11d48`) → deep rose on hover (`#be123c`), white text, `px-3 py-2 text-sm font-medium`. This is the canonical, and now consistent, primary-button pairing across the app.
 - **Secondary / Outline** (Google sign-in): white background, `border-gray-300`, gray-800 text, `hover:bg-gray-50`.
+- **Secondary / Outline, compact** (`button-secondary-compact`): the same white/`border-gray-300`/gray-800 pairing at reduced scale — `px-3 py-1.5 text-xs` instead of `px-4 py-2 text-sm` — for a secondary action demoted inside a Muted Secondary-Action Panel (see below). Never use the compact size for a button standing alone at page/card level; it only reads correctly nested inside that panel's already-quieter context.
 - **Ghost / Text** (Forgot password link, modal Cancel): no fill; rose-600 text with underline-on-hover, or gray-600 text with a subtle gray-100 hover background.
+
+### Muted Secondary-Action Panel
+A self-contained block (`panel-muted`) for demoting one legitimate action below another without hiding it: `bg-gray-50`, `rounded-md`, `p-3`, contents centered in a `flex-col` with `gap-2`. Holds one short `text-xs text-gray-600` line naming what the action is an alternative to (e.g. "or continue with"), then one compact secondary/outline button (see above). Introduced on the login page's User tab to demote Google sign-in beneath email/password; reusable anywhere a second, legitimate-but-secondary path needs to sit visibly beside a primary one without competing for weight — e.g. a future visitor sign-up screen offering a Google shortcut beneath a primary email registration form.
+
+- **Corner Style:** `rounded-md` (6px) — matches control radius, not container radius; the panel is a grouping device, not a card.
+- **Background:** Neutral 100 (`#f3f4f6`) — one step off Paper, enough to read as a distinct region without introducing a border.
+- **Contents:** centered, `gap-2` (8px) between the label line and the button.
+- **Don't** nest a `card-surface` or add a shadow inside this panel — it stays flat, consistent with the Floating-Surface-Only Rule.
 
 ### Cards / Containers
 - **Corner Style:** `rounded-xl` (12px).

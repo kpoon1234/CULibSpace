@@ -12,6 +12,10 @@ export default function LogIn() {
   const [emailErrorMessage, setEmailErrorMessage] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [passwordErrorMessage, setPasswordErrorMessage] = useState('');
+  const [visitorEmailError, setVisitorEmailError] = useState(false);
+  const [visitorEmailErrorMessage, setVisitorEmailErrorMessage] = useState('');
+  const [visitorPasswordError, setVisitorPasswordError] = useState(false);
+  const [visitorPasswordErrorMessage, setVisitorPasswordErrorMessage] = useState('');
   const [open, setOpen] = useState(false);
 
   const handleClickOpen = () => setOpen(true);
@@ -57,6 +61,46 @@ export default function LogIn() {
     // ยิงคนละ endpoint ตาม role ที่เลือก — backend เป็นคนเช็คเองว่าอีเมลที่ login มาเป็นของมหาลัยหรือภายนอก
     const endpoint = role === 'admin' ? '/api/admin/login' : '/api/login';
     console.log(endpoint, payload);
+  };
+
+  const validateVisitorInputs = () => {
+    const email = document.getElementById('visitor-email') as HTMLInputElement;
+    const password = document.getElementById('visitor-password') as HTMLInputElement;
+
+    let isValid = true;
+
+    if (!email.value || !/\S+@\S+\.\S+/.test(email.value)) {
+      setVisitorEmailError(true);
+      setVisitorEmailErrorMessage('Please enter a valid email address.');
+      isValid = false;
+    } else {
+      setVisitorEmailError(false);
+      setVisitorEmailErrorMessage('');
+    }
+
+    if (!password.value || password.value.length < 6) {
+      setVisitorPasswordError(true);
+      setVisitorPasswordErrorMessage('Password must be at least 6 characters long.');
+      isValid = false;
+    } else {
+      setVisitorPasswordError(false);
+      setVisitorPasswordErrorMessage('');
+    }
+
+    return isValid;
+  };
+
+  const handleVisitorSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!validateVisitorInputs()) return;
+
+    const data = new FormData(event.currentTarget);
+    const payload = {
+      email: data.get('email'),
+      password: data.get('password'),
+    };
+
+    console.log('/api/login', payload);
   };
 
   return (
@@ -157,13 +201,73 @@ export default function LogIn() {
             </button>
           </form>
         ) : (
-          <a
-            href="/api/auth/google"
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50"
-          >
-            <GoogleIcon />
-            Sign in with Google
-          </a>
+          <div className="flex w-full flex-col gap-4">
+            <form onSubmit={handleVisitorSubmit} noValidate className="flex w-full flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="visitor-email" className="text-sm font-medium text-gray-700">
+                  Email
+                </label>
+                <input
+                  id="visitor-email"
+                  name="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  autoFocus
+                  required
+                  className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                    visitorEmailError
+                      ? 'border-red-500 focus:ring-red-200'
+                      : 'border-gray-300 focus:ring-rose-200'
+                  }`}
+                />
+                {visitorEmailError && (
+                  <p className="text-xs text-red-600">{visitorEmailErrorMessage}</p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label htmlFor="visitor-password" className="text-sm font-medium text-gray-700">
+                  Password
+                </label>
+                <input
+                  id="visitor-password"
+                  name="password"
+                  type="password"
+                  placeholder="••••••"
+                  autoComplete="current-password"
+                  required
+                  className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                    visitorPasswordError
+                      ? 'border-red-500 focus:ring-red-200'
+                      : 'border-gray-300 focus:ring-rose-200'
+                  }`}
+                />
+                {visitorPasswordError && (
+                  <p className="text-xs text-red-600">{visitorPasswordErrorMessage}</p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                onClick={validateVisitorInputs}
+                className="w-full rounded-md bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-700"
+              >
+                Sign in
+              </button>
+            </form>
+
+            <div className="flex flex-col items-center gap-2 rounded-md bg-gray-50 p-3">
+              <p className="text-xs text-gray-600">or continue with</p>
+              <a
+                href="/api/auth/google"
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 transition-colors hover:bg-gray-100"
+              >
+                <GoogleIcon />
+                Google
+              </a>
+            </div>
+          </div>
         )}
       </div>
 
