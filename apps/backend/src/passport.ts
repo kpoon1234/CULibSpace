@@ -1,6 +1,8 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy, Profile, VerifyCallback } from 'passport-google-oauth20';
-import { PrismaClient, UserType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { AuthService } from './services/authService.js';
+import { classifyEmail } from './utils/roleMapper.js';
 
 const prisma = new PrismaClient();
 
@@ -13,7 +15,7 @@ passport.use(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: 'http://localhost:8080/auth/google/callback',
+      callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:8080/auth/google/callback',
     },
     async (_accessToken: string, _refreshToken: string, profile: Profile, done: VerifyCallback) => {
       try {
@@ -26,42 +28,21 @@ passport.use(
         const familyName =
           profile.name?.familyName || profile.displayName?.split(' ').slice(1).join(' ') || '';
         const googleId = profile.id;
-
         const phone = googleId.slice(-10);
 
-        let user = await prisma.user.findUnique({
-          where: { email },
+        // Delegate to AuthService for role mapping, polymorphic table creation, and JWT generation
+        const authResult = await AuthService.authenticateUser({
+          email,
+          firstname: givenName,
+          lastname: familyName,
+          phone,
         });
 
-        if (!user) {
-          const maxUser = await prisma.user.findFirst({
-            orderBy: { uid: 'desc' },
-            select: { uid: true },
-          });
-
-          const nextUid = (maxUser?.uid ?? 0) + 1;
-
-          user = await prisma.user.create({
-            data: {
-              uid: nextUid,
-              email,
-              firstname: givenName,
-              lastname: familyName,
-              phone,
-              userType: UserType.UNIVERSITY,
-            },
-          });
-        } else {
-          user = await prisma.user.update({
-            where: { email },
-            data: {
-              firstname: givenName,
-              lastname: familyName,
-            },
-          });
-        }
-
-        return done(null, user);
+        // Pass user object along with the generated JWT token
+        return done(null, {
+          ...authResult.user,
+          token: authResult.token,
+        });
       } catch (error) {
         return done(error as Error, undefined);
       }
@@ -70,15 +51,36 @@ passport.use(
 );
 
 passport.serializeUser((user: any, done) => {
-  done(null, (user as any).uid);
+  done(null, user.uid);
 });
 
 passport.deserializeUser(async (uid: number, done) => {
   try {
     const user = await prisma.user.findUnique({
       where: { uid },
+      include: {
+        universityUser: true,
+      },
     });
-    done(null, user);
+
+    if (!user) {
+      return done(null, null);
+    }
+
+    const classification = classifyEmail(user.email);
+    const profile = {
+      uid: user.uid,
+      email: user.email,
+      firstname: user.firstname,
+      lastname: user.lastname,
+      phone: user.phone,
+      behaviourScore: Number(user.behaviourScore),
+      role: classification.role,
+      userType: user.userType,
+      studentId: user.universityUser?.studentId,
+    };
+
+    done(null, profile);
   } catch (error) {
     done(error as Error, undefined);
   }

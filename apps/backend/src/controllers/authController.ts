@@ -74,7 +74,15 @@ export class AuthController {
    * GET /auth/google/callback
    */
   static googleCallback(req: Request, res: Response): void {
-    res.redirect(`${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/callback`);
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const user = req.user as any;
+    const token = user?.token;
+
+    if (token) {
+      res.redirect(`${clientUrl}/auth/callback?token=${encodeURIComponent(token)}`);
+    } else {
+      res.redirect(`${clientUrl}/auth/callback`);
+    }
   }
 
   /**
