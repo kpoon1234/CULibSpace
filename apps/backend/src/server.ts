@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 8080;
-const BASE_URL = process.env.BASE_URL || 'http://localhost:8080';
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Global Middlewares
 app.use(
@@ -38,9 +38,9 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Mount Routers
-app.use('/auth', authRoutes);
+// app.use('/auth', authRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api', authRoutes);
+// app.use('/api', authRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {

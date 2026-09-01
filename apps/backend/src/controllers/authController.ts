@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../services/authService.js';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
+import bcrypt from 'bcryptjs';
+import { PrismaClient } from '@prisma/client';
+import { signJwt } from '../utils/jwt.js';
+
+const prisma = new PrismaClient();
 
 export class AuthController {
   /**
@@ -141,5 +146,57 @@ export class AuthController {
       message: 'Access granted: Admin area',
       adminId: authReq.user?.adminId,
     });
+  }
+
+  /**
+   * POST /api/auth/admin-login
+   */
+  static async adminLogin(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        res.status(400).json({ success: false, error: 'Email and password are required' });
+        return;
+      }
+
+      const admin = await prisma.admin.findUnique({
+        where: { email: email.toLowerCase().trim() },
+      });
+
+      if (!admin) {
+        res.status(401).json({ success: false, error: 'Invalid credentials' });
+        return;
+      }
+
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (!isMatch) {
+        res.status(401).json({ success: false, error: 'Invalid credentials' });
+        return;
+      }
+
+      const token = signJwt({
+        adminId: admin.adminId,
+        email: admin.email,
+        firstname: admin.firstname,
+        lastname: admin.lastname,
+        role: 'ADMIN',
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Admin login successful',
+        token,
+        user: {
+          adminId: admin.adminId,
+          email: admin.email,
+          firstname: admin.firstname,
+          lastname: admin.lastname,
+          role: 'ADMIN',
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    }
   }
 }

@@ -33,7 +33,8 @@ router.get('/me', (req, res, next) => {
 // 2. Direct / Mock JWT Authentication
 // ==========================================
 router.post('/login', AuthController.login);
-router.post('/google', AuthController.login); // Alias for Direct Token Exchange
+router.post('/google', AuthController.login);
+router.post('/admin-login', AuthController.adminLogin);
 
 // ==========================================
 // 3. Example Protected Endpoints (RBAC)
