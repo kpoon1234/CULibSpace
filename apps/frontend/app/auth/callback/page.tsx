@@ -9,7 +9,7 @@ export default function AuthCallback() {
   useEffect(() => {
     async function checkAuth() {
       try {
-        const res = await fetch('http://localhost:8080/auth/me', {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
           credentials: 'include',
         });
 

@@ -55,7 +55,8 @@ export default function LogIn() {
     };
 
     // ยิงคนละ endpoint ตาม role ที่เลือก — backend เป็นคนเช็คเองว่าอีเมลที่ login มาเป็นของมหาลัยหรือภายนอก
-    const endpoint = role === 'admin' ? '/api/admin/login' : '/api/login';
+    // const endpoint = role === 'admin' ? '/api/admin/login' : '/api/login
+    const endpoint = role === 'admin' ? '/api/auth/admin-login' : '/api/auth/login';
     console.log(endpoint, payload);
   };
 
@@ -158,7 +159,7 @@ export default function LogIn() {
           </form>
         ) : (
           <a
-            href="http://localhost:8080/auth/google"
+            href={`${process.env.NEXT_PUBLIC_API_URL}/api/auth/google`}
             className="flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50"
           >
             <GoogleIcon />
