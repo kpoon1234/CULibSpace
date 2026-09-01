@@ -3,6 +3,9 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Chula Pink, softened from the original Tailwind pink-400 default (#f472b6) — see DESIGN.md. */
+  --chula-pink: #db93b0;
+  --chula-pink-hover: #e0a3bc;
 }
 
 @theme inline {
@@ -10,6 +13,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-chula-pink: var(--chula-pink);
+  --color-chula-pink-hover: var(--chula-pink-hover);
 }
 
 @media (prefers-color-scheme: dark) {

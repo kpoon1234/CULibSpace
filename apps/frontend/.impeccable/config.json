@@ -1,3 +1,27 @@
 {
-  "buildPath": "comp"
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "components/Topmenu/topMenu.tsx"
+        ],
+        "createdAt": "2026-09-01T05:45:37.931Z",
+        "reason": "text-neutral-900 on bg-pink-400/bg-pink-300 for the Log In link computes to 6.77:1 (WCAG AA); previous white text measured 2.65:1 and failed AA (/impeccable audit P1 fix). Re-added with frontend-relative path — the earlier ignore was recorded repo-root-relative (apps/frontend/components/...) which the Stop hook doesn't match against."
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "components/Topmenu/topMenuItem.tsx"
+        ],
+        "createdAt": "2026-09-01T05:45:45.596Z",
+        "reason": "text-neutral-900 (#171717) on bg-pink-400/bg-pink-300 computes to 6.77:1 (WCAG AA), replacing white text that measured 2.65:1 and failed AA (/impeccable audit P1 fix). Re-added with frontend-relative path for the same reason as topMenu.tsx."
+      }
+    ]
+  }
 }

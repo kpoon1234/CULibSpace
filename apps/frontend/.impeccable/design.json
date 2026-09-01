@@ -1,20 +1,20 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-01T00:00:00Z",
+  "generatedAt": "2026-09-01T12:00:00Z",
   "title": "Design System: CULibSpace",
   "extensions": {
     "colorMeta": {
       "chula-pink": {
         "role": "primary",
         "displayName": "Chula Pink",
-        "canonical": "#f472b6",
-        "tonalRamp": ["#831843", "#9d174d", "#be185d", "#db2777", "#f472b6", "#f9a8d4", "#fbcfe8", "#fce7f3"]
+        "canonical": "#db93b0",
+        "tonalRamp": ["#37252c", "#63424f", "#8e6072", "#ba7d96", "#db93b0", "#e0a3bc", "#efcedb", "#f6e4eb"]
       },
       "chula-pink-hover": {
         "role": "primary",
         "displayName": "Chula Pink Hover",
-        "canonical": "#f9a8d4",
-        "tonalRamp": ["#831843", "#9d174d", "#be185d", "#db2777", "#f472b6", "#f9a8d4", "#fbcfe8", "#fce7f3"]
+        "canonical": "#e0a3bc",
+        "tonalRamp": ["#37252c", "#63424f", "#8e6072", "#ba7d96", "#db93b0", "#e0a3bc", "#efcedb", "#f6e4eb"]
       },
       "reading-rose": {
         "role": "secondary",
@@ -65,21 +65,23 @@
       "error-border": { "role": "error", "displayName": "Error Border", "canonical": "#ef4444", "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#fecaca"] }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Home hero title over the banner image. Not yet used elsewhere." },
-      "title": { "displayName": "Title", "purpose": "Page/card-level heading, e.g. the login card's \"Login\" / \"Admin Login\"." },
-      "headline": { "displayName": "Headline", "purpose": "Dialog and section headings, e.g. the Forgot Password modal title." },
-      "body": { "displayName": "Body", "purpose": "Default UI text: labels, nav items, button labels, modal copy." },
+      "display": { "displayName": "Display", "purpose": "The home hero headline in SplitHero (\"Book a seat, in real time.\"), scaling text-4xl (36px) on mobile to text-5xl (48px) at sm+. The original hero banner this role was documented against has been replaced, but the role itself is still in active use." },
+      "title": { "displayName": "Title", "purpose": "Page/card-level heading, e.g. the login card's \"Login\" / \"Admin Login\" / \"Get Started\" (signup-intent arrivals)." },
+      "headline": { "displayName": "Headline", "purpose": "Dialog and section headings (Forgot Password modal title), the home page's capability-grid headings (\"Every zone, live\" / \"One booking, held\"), and the \"CULibSpace\" header wordmark." },
+      "body": { "displayName": "Body", "purpose": "Default UI text: labels, nav items (Log In/Sign Up), button labels, modal copy." },
       "label": { "displayName": "Label", "purpose": "Smallest role; field error/helper text." }
     },
     "shadows": [
       { "name": "card-float", "value": "0 5px 15px 0 hsla(220,30%,5%,0.05), 0 15px 35px -5px hsla(220,25%,10%,0.05)", "purpose": "Soft, diffused lift for the login card off the page." },
-      { "name": "modal", "value": "0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)", "purpose": "Tailwind shadow-xl; elevates the Forgot Password dialog off its scrim." }
+      { "name": "modal", "value": "0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)", "purpose": "Tailwind shadow-xl; elevates the Forgot Password dialog off its scrim." },
+      { "name": "carousel-control", "value": "0 1px 3px rgba(0,0,0,0.1)", "purpose": "Light lift for the hero carousel's prev/next arrow buttons, which float over a photo of unpredictable tone." }
     ],
     "motion": [
-      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default color/background transitions on nav items, buttons, and tabs (Tailwind's transition-colors default)." }
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default color/background transitions across nav items, buttons, carousel controls, and tabs (Tailwind's transition-colors default)." }
     ],
     "breakpoints": [
-      { "name": "sm", "value": "640px" }
+      { "name": "sm", "value": "640px" },
+      { "name": "lg", "value": "1024px" }
     ]
   },
   "components": [
@@ -87,9 +89,17 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Reading Rose filled button for the main commit action (e.g. modal \"Continue\").",
+      "description": "Reading Rose filled button for the main commit action in a form/modal context (e.g. modal \"Continue\", admin-login submit).",
       "html": "<button class=\"ds-btn-primary\">Continue</button>",
       "css": ".ds-btn-primary { background: #e11d48; color: #ffffff; padding: 8px 12px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; border: none; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-primary:hover { background: #be123c; } .ds-btn-primary:focus-visible { outline: 2px solid #fecdd3; outline-offset: 2px; }"
+    },
+    {
+      "name": "Primary Button, Nav",
+      "kind": "button",
+      "refersTo": "button-primary-nav",
+      "description": "The Primary Button family at a taller touch-target scale for the header (Sign Up): 44px tall (py-3, up from the form-context py-2) to meet the 44px minimum touch target, since it sits in the sticky header for a mobile-majority audience. Links to /login?intent=signup, which reorients the login page's heading and copy for signup arrivals.",
+      "html": "<a class=\"ds-btn-primary-nav\" href=\"#\">Sign Up</a>",
+      "css": ".ds-btn-primary-nav { display: inline-flex; align-items: center; justify-content: center; background: #e11d48; color: #ffffff; padding: 12px; border-radius: 6px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; text-decoration: none; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-btn-primary-nav:hover { background: #be123c; } .ds-btn-primary-nav:focus-visible { outline: 2px solid #171717; outline-offset: 2px; }"
     },
     {
       "name": "Secondary Button",
@@ -151,17 +161,33 @@
       "name": "Top Navigation",
       "kind": "nav",
       "refersTo": "nav-topmenu",
-      "description": "Sticky site header: logo left, horizontal nav tabs right, on Chula Pink.",
-      "html": "<header class=\"ds-topmenu\"><div class=\"ds-topmenu-logo\"></div><a class=\"ds-topmenu-item ds-topmenu-item--active\" href=\"#\">Home</a><a class=\"ds-topmenu-item\" href=\"#\">Login</a></header>",
-      "css": ".ds-topmenu { position: sticky; top: 0; display: flex; align-items: stretch; height: 64px; background: #f472b6; padding: 0 16px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } .ds-topmenu-logo { width: 48px; margin: 8px 16px 8px 0; } .ds-topmenu-item { display: flex; align-items: center; justify-content: center; width: 150px; font-size: 14px; font-weight: 500; color: #ffffff; text-decoration: none; transition: background-color 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-topmenu-item:hover { background: #f9a8d4; } .ds-topmenu-item--active { background: #fff1f2; color: #be123c; }"
+      "description": "Sticky site header on Chula Pink: the logo + \"CULibSpace\" wordmark (one link to home, replacing the earlier standalone \"Home\" tab) on the left, Log In (ghost) and Sign Up (filled) right-aligned, all inside a single <nav aria-label=\"Primary\"> landmark. No fixed-width tabs — content hugs its own width with responsive edge padding so it doesn't overflow on narrow viewports.",
+      "html": "<header class=\"ds-topmenu\"><nav class=\"ds-topmenu-nav\" aria-label=\"Primary\"><a class=\"ds-topmenu-brand\" href=\"#\"><span class=\"ds-topmenu-logo\"></span><span class=\"ds-topmenu-wordmark\">CULibSpace</span></a><div class=\"ds-topmenu-actions\"><a class=\"ds-topmenu-login\" href=\"#\">Log In</a><a class=\"ds-btn-primary-nav\" href=\"#\">Sign Up</a></div></nav></header>",
+      "css": ".ds-topmenu { position: sticky; top: 0; display: flex; align-items: stretch; height: 64px; background: #db93b0; padding: 0 12px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } .ds-topmenu-nav { display: flex; width: 100%; align-items: center; } .ds-topmenu-brand { display: flex; height: 100%; align-items: center; gap: 8px; padding-right: 8px; text-decoration: none; } .ds-topmenu-logo { width: 48px; height: 48px; flex: none; background: #ffffff; border-radius: 4px; } .ds-topmenu-wordmark { font-size: 18px; font-weight: 600; color: #171717; } .ds-topmenu-actions { display: flex; flex: 1; align-items: center; justify-content: flex-end; gap: 8px; } .ds-topmenu-login { border-radius: 6px; padding: 12px 8px; font-size: 14px; font-weight: 500; color: #171717; text-decoration: none; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-topmenu-login:hover { background: #e0a3bc; } .ds-topmenu-login:focus-visible, .ds-topmenu-brand:focus-visible { outline: 2px solid #171717; outline-offset: 2px; }"
     },
     {
-      "name": "Hero Banner",
+      "name": "Split Hero",
       "kind": "custom",
-      "refersTo": "hero-banner",
-      "description": "Full-bleed image with a dark scrim and centered white content — the home page hero.",
-      "html": "<section class=\"ds-hero\"><div class=\"ds-hero-scrim\"></div><h1 class=\"ds-hero-title\">CULibSpace</h1></section>",
-      "css": ".ds-hero { position: relative; width: 100%; height: 500px; overflow: hidden; background: #9ca3af center/cover; } .ds-hero-scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.4); } .ds-hero-title { position: relative; display: flex; height: 100%; align-items: center; justify-content: center; color: #ffffff; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; font-size: 48px; font-weight: 700; text-align: center; text-shadow: 0 4px 12px rgba(0,0,0,0.3); }"
+      "refersTo": "split-hero",
+      "description": "The home page's first viewport: a white left column (headline, subhead, a quiet Reading Rose link back to the header CTAs) beside HeroCarousel on the right. Replaced the earlier full-bleed banner-with-scrim pattern. Stacks to a single column below the lg breakpoint.",
+      "html": "<section class=\"ds-split-hero\"><div class=\"ds-split-hero-copy\"><h1 class=\"ds-split-hero-title\">Book a seat, in real time.</h1><p class=\"ds-split-hero-subhead\">Real-time availability, advance reservation, and accountable check-in — replacing the walk-up line.</p><a class=\"ds-split-hero-link\" href=\"#\">Sign in above to see today's availability.</a></div><div class=\"ds-split-hero-media\"></div></section>",
+      "css": ".ds-split-hero { display: grid; grid-template-columns: 1fr; } @media (min-width: 1024px) { .ds-split-hero { grid-template-columns: 1.15fr 1fr; min-height: 560px; } } .ds-split-hero-copy { display: flex; flex-direction: column; justify-content: center; gap: 16px; padding: 64px 24px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } .ds-split-hero-title { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; color: #111827; margin: 0; } @media (min-width: 640px) { .ds-split-hero-title { font-size: 48px; } } .ds-split-hero-subhead { max-width: 38ch; font-size: 16px; color: #4b5563; margin: 0; } .ds-split-hero-link { width: fit-content; font-size: 14px; color: #e11d48; text-decoration: none; } .ds-split-hero-link:hover, .ds-split-hero-link:focus-visible { text-decoration: underline; } .ds-split-hero-media { position: relative; height: 256px; background: #9ca3af center/cover; } @media (min-width: 640px) { .ds-split-hero-media { height: 320px; } }"
+    },
+    {
+      "name": "Hero Carousel",
+      "kind": "custom",
+      "refersTo": "hero-carousel",
+      "description": "True-color photo carousel filling Split Hero's right column — no duotone, no overlay chip. rounded-md prev/next arrow controls (bg-white/90, neutral icon, floats on a light shadow since it sits over unpredictable photo tone) and small fully-rounded dot indicators (Reading Rose when active, clickable to jump directly). The dots are the one place a fully-rounded shape appears in the system — a status-indicator convention, not a new button shape. slides is a single array (currently 1 real photo + 3 zone-labeled placeholder SVGs) — the one point of change for swapping in real photography later.",
+      "html": "<div class=\"ds-carousel\"><div class=\"ds-carousel-photo\"></div><button class=\"ds-carousel-arrow ds-carousel-arrow--prev\" aria-label=\"Previous photo\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"20\" height=\"20\"><path d=\"M14.5 5.5 8 12l6.5 6.5\"/></svg></button><button class=\"ds-carousel-arrow ds-carousel-arrow--next\" aria-label=\"Next photo\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"20\" height=\"20\"><path d=\"M9.5 5.5 16 12l-6.5 6.5\"/></svg></button><div class=\"ds-carousel-dots\"><button class=\"ds-carousel-dot ds-carousel-dot--active\" aria-label=\"Go to photo 1 of 4\"></button><button class=\"ds-carousel-dot\" aria-label=\"Go to photo 2 of 4\"></button><button class=\"ds-carousel-dot\" aria-label=\"Go to photo 3 of 4\"></button><button class=\"ds-carousel-dot\" aria-label=\"Go to photo 4 of 4\"></button></div></div>",
+      "css": ".ds-carousel { position: relative; height: 256px; overflow: hidden; background: #9ca3af center/cover; } @media (min-width: 640px) { .ds-carousel { height: 320px; } } .ds-carousel-photo { position: absolute; inset: 0; } .ds-carousel-arrow { position: absolute; top: 50%; transform: translateY(-50%); display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 6px; background: rgba(255,255,255,0.9); color: #374151; border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-carousel-arrow:hover { background: #ffffff; } .ds-carousel-arrow:focus-visible { outline: 2px solid #f43f5e; outline-offset: 2px; } .ds-carousel-arrow--prev { left: 12px; } .ds-carousel-arrow--next { right: 12px; } .ds-carousel-dots { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 6px; } .ds-carousel-dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.7); border: none; padding: 0; transition: background-color 0.2s cubic-bezier(0.4,0,0.2,1); } .ds-carousel-dot:hover { background: #ffffff; } .ds-carousel-dot:focus-visible { outline: 2px solid #f43f5e; outline-offset: 1px; } .ds-carousel-dot--active { background: #e11d48; }"
+    },
+    {
+      "name": "Capability Highlight Band",
+      "kind": "custom",
+      "refersTo": "capability-band",
+      "description": "The home page's below-fold 2-up capability grid on a full-bleed Reading Rose Tint (#fff1f2) band — the only full-width tinted section in the app, and a documented exception to the Paper/Neutral-100 surface vocabulary (see DESIGN.md). Flat icon + heading + one line per item, no card containers, no photography.",
+      "html": "<section class=\"ds-capability-band\"><div class=\"ds-capability-item\"><svg class=\"ds-capability-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"24\" height=\"24\"><path d=\"M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z\"/><circle cx=\"12\" cy=\"9.3\" r=\"2.4\"/></svg><h2 class=\"ds-capability-title\">Every zone, live</h2><p class=\"ds-capability-text\">Silent, Group, and Common — filtered by seats, plugs, and screens, updated as you look.</p></div><div class=\"ds-capability-item\"><svg class=\"ds-capability-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"24\" height=\"24\"><rect x=\"3.5\" y=\"5\" width=\"17\" height=\"15\" rx=\"2\"/><path d=\"M8 3v4M16 3v4M3.5 10h17\"/><path d=\"M8.5 14.5l1.8 1.8 3.2-3.6\"/></svg><h2 class=\"ds-capability-title\">One booking, held</h2><p class=\"ds-capability-text\">Reserve ahead with a locked hold; cancel any time with no penalty.</p></div></section>",
+      "css": ".ds-capability-band { display: grid; grid-template-columns: 1fr; gap: 40px; background: #fff1f2; padding: 56px 24px; font-family: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; } @media (min-width: 640px) { .ds-capability-band { grid-template-columns: 1fr 1fr; padding: 80px 40px; } } .ds-capability-item { display: flex; flex-direction: column; gap: 8px; } .ds-capability-icon { color: #e11d48; } .ds-capability-title { font-size: 18px; font-weight: 600; color: #111827; margin: 0; } .ds-capability-text { font-size: 14px; color: #4b5563; margin: 0; }"
     }
   ],
   "narrative": {
@@ -174,7 +200,7 @@
       "Room to express \"busy\" states honestly later, without breaking the palette"
     ],
     "rules": [
-      { "name": "The One Brand Color Rule", "body": "Chula Pink appears once, as header chrome, at full saturation, and nowhere else. Everything that needs to look \"pink\" for an interactive reason (a button, a link, a focus ring) uses Reading Rose instead — the two never substitute for each other.", "section": "colors" },
+      { "name": "The One Brand Color Rule", "body": "Chula Pink appears once, as header chrome, at full strength (never tinted or diluted), and nowhere else. Everything that needs to look \"pink\" for an interactive reason (a button, a link, a focus ring) uses Reading Rose instead — the two never substitute for each other.", "section": "colors" },
       { "name": "The Floating-Surface-Only Rule", "body": "Shadow appears only on a card or modal that sits above the page plane. Buttons, inputs, and chrome stay flat; don't add hover-lift shadows to controls without a deliberate decision to expand the vocabulary.", "section": "elevation" }
     ],
     "dos": [
@@ -185,7 +211,7 @@
       "Do use Geist Sans (via var(--font-sans)) as the UI typeface — not Arial, Helvetica, or another platform-default sans."
     ],
     "donts": [
-      "Don't treat the current pink-400 / rose-600 hex values as final brand color. They're straight Tailwind defaults and have been flagged as reading too saturated/\"hot pink\" for true Chula pink — revisit against a real brand reference in a future /impeccable colorize or /impeccable craft pass rather than treating them as locked.",
+      "Don't treat #db93b0 as a verified-authoritative Chula Pink reference — it's a considered, deliberately desaturated design judgment (2026-09-01), not a value checked against an official university brand guideline. Revisit if a real reference source surfaces. Reading Rose (rose-600/rose-700) was reviewed at the same time and kept as-is — that decision is closed, not open.",
       "Don't extend the login page's blue-tinted radial gradient (hsl(210,100%,97%) → white) sitting under the pink-100 background — it reads as a mismatched leftover (likely copied from a template), not a deliberate two-tone effect.",
       "Don't treat the prefers-color-scheme: dark background swap to #eed9df as a designed dark theme — it's an open, undecided placeholder; a real dark mode needs deliberate design work later, not silent extension of this value.",
       "Don't use a full-page pink background or the Inter font — a binding project-wide rule from the repo root CLAUDE.md."

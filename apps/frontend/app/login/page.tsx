@@ -1,12 +1,23 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
 
 type Role = 'user' | 'admin';
 
 export default function LogIn() {
+  return (
+    <Suspense fallback={<div className="min-h-[calc(100dvh-4rem)] bg-pink-100" />}>
+      <LoginPageContent />
+    </Suspense>
+  );
+}
+
+function LoginPageContent() {
+  const searchParams = useSearchParams();
+  const isSignupIntent = searchParams.get('intent') === 'signup';
   const [role, setRole] = useState<Role>('user');
   const [emailError, setEmailError] = useState(false);
   const [emailErrorMessage, setEmailErrorMessage] = useState('');
@@ -116,8 +127,13 @@ export default function LogIn() {
 
       <div className="my-auto flex w-full max-w-[450px] flex-col gap-4 rounded-xl border border-gray-200 bg-white p-8 shadow-[0_5px_15px_0_hsla(220,30%,5%,0.05),0_15px_35px_-5px_hsla(220,25%,10%,0.05)]">
         <h1 className="w-full text-[clamp(2rem,10vw,2.15rem)] font-semibold text-gray-900">
-          {role === 'admin' ? 'Admin Login' : 'Login'}
+          {role === 'admin' ? 'Admin Login' : isSignupIntent ? 'Get Started' : 'Login'}
         </h1>
+        {role === 'user' && isSignupIntent && (
+          <p className="-mt-2 text-sm text-gray-600">
+            New here? Continue below to create your account.
+          </p>
+        )}
 
         {/* Role tabs */}
         <div className="flex rounded-md bg-gray-100 p-1">

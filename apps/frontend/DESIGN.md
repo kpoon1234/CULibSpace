@@ -2,8 +2,8 @@
 name: CULibSpace
 description: A calm, campus-issued booking system for Chulalongkorn University's library seats
 colors:
-  chula-pink: "#f472b6"
-  chula-pink-hover: "#f9a8d4"
+  chula-pink: "#db93b0"
+  chula-pink-hover: "#e0a3bc"
   reading-rose: "#e11d48"
   reading-rose-deep: "#be123c"
   reading-rose-focus: "#fecdd3"
@@ -123,14 +123,14 @@ But a reading room isn't silent everywhere, all the time — the second floor du
 
 ## Colors
 
-The palette is small and Tailwind-default-sourced: one brand/interactive pink-rose family, a standard gray neutral scale, and a single error red. Currently drawn straight from Tailwind's default utility palette (`bg-pink-400`, `bg-rose-600`, etc.) rather than a custom scale.
+The interactive/error scale is Tailwind-default-sourced (`bg-rose-600`, etc.). Chula Pink is the one custom-defined color in the system — a named CSS variable (`--chula-pink` / `--chula-pink-hover` in `globals.css`, surfaced as the `bg-chula-pink` / `hover:bg-chula-pink-hover` / `ring-offset-chula-pink` Tailwind utilities), not a Tailwind default.
 
 ### Primary
-- **Chula Pink** (`#f472b6`): the header/brand chrome color — `TopMenu`'s background. Used once, at full strength, as the site's single largest color statement.
-- **Chula Pink Hover** (`#f9a8d4`): hover state for pink chrome (nav item hover fill). Not used as a resting color.
+- **Chula Pink** (`#db93b0`): the header/brand chrome color — `TopMenu`'s background. Used once, at full strength, as the site's single largest color statement. Softened on 2026-09-01 from the original Tailwind `pink-400` default (`#f472b6`), which had been flagged since early on as reading too saturated/"hot pink" for the university's actual dusty-pink identity — this was the fix, not a further workaround.
+- **Chula Pink Hover** (`#e0a3bc`): hover state for pink chrome (nav item hover fill), a lightened companion to the base tone. Not used as a resting color.
 
 ### Secondary
-- **Reading Rose** (`#e11d48`): the interactive/CTA color — primary submit buttons, links, focus accents. This is the "you can act here" signal, distinct from the brand-only Chula Pink.
+- **Reading Rose** (`#e11d48`): the interactive/CTA color — primary submit buttons, links, focus accents. This is the "you can act here" signal, distinct from the brand-only Chula Pink. Deliberately kept at its original saturation when Chula Pink was softened (2026-09-01): Reading Rose is a functional/semantic color, not a brand-identity one, and muting it would trade away CTA findability for brand-purity it doesn't need — the opposite of what a "you can act here" signal is for. If anything, a quieter chrome makes it read more clearly.
 - **Reading Rose Deep** (`#be123c`): hover/active state for Reading Rose elements.
 - **Reading Rose Focus** (`#fecdd3`): focus-ring tint on form inputs (`focus:ring-rose-200`).
 - **Reading Rose Tint** (`#fff1f2`): active-state background for nav items (currently wired via an `isActive` prop that no page passes yet).
@@ -149,7 +149,7 @@ The palette is small and Tailwind-default-sourced: one brand/interactive pink-ro
 - **Neutral 100** (`#f3f4f6`): segmented-control track background.
 
 ### Named Rules
-**The One Brand Color Rule.** Chula Pink appears once, as header chrome, at full saturation, and nowhere else. Everything that needs to look "pink" for an interactive reason (a button, a link, a focus ring) uses Reading Rose instead — the two never substitute for each other.
+**The One Brand Color Rule.** Chula Pink appears once, as header chrome, at full strength (never tinted or diluted), and nowhere else. Everything that needs to look "pink" for an interactive reason (a button, a link, a focus ring) uses Reading Rose instead — the two never substitute for each other.
 
 ## Typography
 
@@ -216,11 +216,15 @@ A self-contained block (`panel-muted`) for demoting one legitimate action below 
 - **Error:** border switches to `red-500`, focus ring to `red-200`, with a `text-xs text-red-600` message below the field.
 
 ### Navigation
-- **Style:** white text on Chula Pink chrome by default; `hover:bg-pink-300` fill; an `isActive` state (`bg-rose-50` / `text-rose-700`) is implemented in `TopMenuItem` but not yet driven by the actual route — no page currently passes `isActive`.
-- **Layout:** fixed 150px-wide tabs, full header height, horizontal only — no mobile/collapsed treatment exists yet.
+- **Style:** the header is a single `<nav aria-label="Primary">` landmark inside the sticky `<header>`. The left cluster — 48px logo + a `Headline`-role "CULibSpace" wordmark (`text-lg font-semibold text-neutral-900`) — is one `Link` to `/`, replacing the earlier standalone "Home" tab (`TopMenuItem` is retired). Log In (ghost, `text-neutral-900`) and Sign Up (filled, `bg-rose-600`) sit right-aligned; both `rounded-md`, no pill.
+- **Contrast:** nav text on Chula Pink chrome uses `text-neutral-900`, not white — white measured 2.65:1 against the original `#f472b6` and failed WCAG AA; `text-neutral-900` measured 6.77:1 there and measures ~7.5:1 against the current softened `#db93b0` (contrast only improves as the chrome lightens).
+- **Layout:** no fixed-width tabs — content hugs its own width with responsive padding (`px-3 sm:px-4` on the header) so it doesn't overflow on narrow viewports.
 
-### Hero Banner (signature component)
-Full-bleed background image (`object-cover`, `fill`) with a 40% black scrim (`bg-black/40`) and centered, stacked white text/content (`gap-4`) — the one place typography sits directly on imagery rather than on Paper. `overlay` and `priority` are both configurable per use.
+### Split Hero + Photo Carousel (signature component)
+The home page's first viewport (`SplitHero` + `HeroCarousel`) replaced the earlier full-bleed banner-with-scrim pattern. Left column: Paper, headline + subhead + a quiet Reading Rose link back to the header CTAs. Right column: a true-color photo carousel — no duotone, no overlay chip — with `rounded-md` left/right arrow controls (`bg-white/90`, neutral icon, Reading Rose focus ring) and small `rounded-full` dot indicators (Reading Rose when active). The dots are the one place a fully-rounded shape appears; that's a status-indicator convention distinct from the button-radius vocabulary, not a new button shape. Stacks to a single column below `lg`.
+
+### Capability Highlight Band (documented exception)
+The home page's below-fold capability grid sits on a full-bleed `bg-rose-50` (Reading Rose Tint) band rather than Paper or the Muted Secondary-Action Panel's Neutral 100 — the only full-width tinted section in the app. Introduced during an `/impeccable colorize` pass to separate the hero from this section with real, restrained color rather than whitespace alone. A later `/impeccable critique` flagged it as outside the documented surface vocabulary and closer to generic SaaS chrome than a deliberate choice; reviewed and kept as-is on 2026-09-01 rather than reverted. Recorded here so it reads as an accepted exception, not undocumented drift, next time this page is audited or critiqued.
 
 ## Do's and Don'ts
 
@@ -232,7 +236,7 @@ Full-bleed background image (`object-cover`, `fill`) with a 40% black scrim (`bg
 - **Do** use Geist Sans (via `var(--font-sans)`) as the UI typeface — not Arial, Helvetica, or another platform-default sans.
 
 ### Don't:
-- **Don't** treat the current pink-400 / rose-600 hex values as final brand color. They're straight Tailwind defaults and have been flagged as reading too saturated/"hot pink" for true Chula pink — revisit against a real brand reference in a future `/impeccable colorize` or `/impeccable craft` pass rather than treating them as locked.
+- **Don't** treat `#db93b0` as a verified-authoritative Chula Pink reference — it's a considered, deliberately desaturated design judgment (2026-09-01), not a value checked against an official university brand guideline. Revisit if a real reference source surfaces. Reading Rose (`rose-600`/`rose-700`) was reviewed at the same time and kept as-is — that decision is closed, not open.
 - **Don't** extend the login page's blue-tinted radial gradient (`hsl(210,100%,97%)` → white) sitting under the pink-100 background — it reads as a mismatched leftover (likely copied from a template), not a deliberate two-tone effect.
 - **Don't** treat the `prefers-color-scheme: dark` background swap to `#eed9df` as a designed dark theme — it's an open, undecided placeholder; a real dark mode needs deliberate design work later, not silent extension of this value.
 - **Don't** use a full-page pink background or the Inter font — a binding project-wide rule from the repo root `CLAUDE.md`.
