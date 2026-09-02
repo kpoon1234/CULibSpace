@@ -1,11 +1,82 @@
 @import 'tailwindcss';
 
+/*
+ * Reading Lamp palette (2026-09-03) — see DESIGN.md.
+ *
+ * Every ramp below is generated in OKLCH so lightness steps evenly and chroma
+ * tapers toward white. Three deliberate properties:
+ *   1. Neutrals are WARM (hue ~60). The previous ramp was Tailwind's default
+ *      cool gray (hue ~260), which fought the warm brand accent on every screen.
+ *   2. The action color is claret (hue 8) and the error color is scarlet
+ *      (hue 30). They used to sit 9 degrees apart, so "book this table" and
+ *      "something went wrong" were effectively the same red.
+ *   3. Brass (hue ~75) is the second accent, and it exists so occupancy and
+ *      density have a channel that is not the action color.
+ *
+ * `gray-*`, `rose-*`, and `red-*` are REMAPPED here — these utilities no longer
+ * emit Tailwind's stock values. That is intentional: it keeps the palette in one
+ * file instead of scattered across every className. Read the values, not the names.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  /* Chula Pink, softened from the original Tailwind pink-400 default (#f472b6) — see DESIGN.md. */
+  /* Surfaces */
+  --canvas: #fdf9f4; /* page ground — warm cream, the desk */
+  --paper: #ffffff; /* raised sheets — cards, tiles, the login card */
+  --ink: #1d140d; /* warm near-black body text */
+
+  /* Chula Pink — brand chrome only, unchanged by this pass */
   --chula-pink: #db93b0;
   --chula-pink-hover: #e0a3bc;
+
+  /* Stone — warm neutral ramp (hue 58-68) */
+  --stone-50: #fbfaf9;
+  --stone-100: #f6f5f3;
+  --stone-200: #eae7e5;
+  --stone-300: #d7d3d1;
+  --stone-400: #a5a09d;
+  --stone-500: #76706c;
+  --stone-600: #5a544f;
+  --stone-700: #453e39;
+  --stone-800: #2d2823;
+  --stone-900: #1c1713;
+
+  /* Claret — the action color (hue 8). 600 is the CTA, 700 its hover. */
+  --claret-50: #fff1f3;
+  --claret-100: #fedfe2;
+  --claret-200: #fbbfc6;
+  --claret-300: #ef8d9a;
+  --claret-400: #de5f75;
+  --claret-500: #c1365a;
+  --claret-600: #a12049;
+  --claret-700: #840e38;
+  --claret-800: #670228;
+  --claret-900: #4e001c;
+
+  /* Brass — density, occupancy, highlight (hue ~75). Never an action color. */
+  --brass-50: #fcf4e6;
+  --brass-100: #f8e9d2;
+  --brass-200: #efd7b3;
+  --brass-300: #e2be89;
+  --brass-400: #d2a563;
+  --brass-500: #c18d3d;
+  --brass-600: #a06f29;
+  --brass-700: #7e541b;
+  --brass-800: #5c3a0d;
+  --brass-900: #422707;
+
+  /* Scarlet — error only (hue 30), pushed away from claret so the two read apart. */
+  --scarlet-50: #fff1ee;
+  --scarlet-100: #ffdfd7;
+  --scarlet-200: #ffc9bd;
+  --scarlet-300: #f59c8c;
+  --scarlet-400: #ee6853;
+  --scarlet-500: #ed4d36;
+  --scarlet-600: #d52e1e;
+  --scarlet-700: #ac1b14;
+  --scarlet-800: #880d09;
+  --scarlet-900: #690506;
+
+  --background: var(--canvas);
+  --foreground: var(--ink);
 }
 
 @theme inline {
@@ -13,14 +84,70 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-canvas: var(--canvas);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
   --color-chula-pink: var(--chula-pink);
   --color-chula-pink-hover: var(--chula-pink-hover);
+
+  /* gray-* remapped to the warm stone ramp */
+  --color-gray-50: var(--stone-50);
+  --color-gray-100: var(--stone-100);
+  --color-gray-200: var(--stone-200);
+  --color-gray-300: var(--stone-300);
+  --color-gray-400: var(--stone-400);
+  --color-gray-500: var(--stone-500);
+  --color-gray-600: var(--stone-600);
+  --color-gray-700: var(--stone-700);
+  --color-gray-800: var(--stone-800);
+  --color-gray-900: var(--stone-900);
+
+  /* rose-* remapped to claret */
+  --color-rose-50: var(--claret-50);
+  --color-rose-100: var(--claret-100);
+  --color-rose-200: var(--claret-200);
+  --color-rose-300: var(--claret-300);
+  --color-rose-400: var(--claret-400);
+  --color-rose-500: var(--claret-500);
+  --color-rose-600: var(--claret-600);
+  --color-rose-700: var(--claret-700);
+  --color-rose-800: var(--claret-800);
+  --color-rose-900: var(--claret-900);
+
+  /* red-* remapped to scarlet */
+  --color-red-50: var(--scarlet-50);
+  --color-red-100: var(--scarlet-100);
+  --color-red-200: var(--scarlet-200);
+  --color-red-300: var(--scarlet-300);
+  --color-red-400: var(--scarlet-400);
+  --color-red-500: var(--scarlet-500);
+  --color-red-600: var(--scarlet-600);
+  --color-red-700: var(--scarlet-700);
+  --color-red-800: var(--scarlet-800);
+  --color-red-900: var(--scarlet-900);
+
+  --color-brass-50: var(--brass-50);
+  --color-brass-100: var(--brass-100);
+  --color-brass-200: var(--brass-200);
+  --color-brass-300: var(--brass-300);
+  --color-brass-400: var(--brass-400);
+  --color-brass-500: var(--brass-500);
+  --color-brass-600: var(--brass-600);
+  --color-brass-700: var(--brass-700);
+  --color-brass-800: var(--brass-800);
+  --color-brass-900: var(--brass-900);
 }
 
+/*
+ * No dark theme is designed yet. The previous `prefers-color-scheme: dark` block
+ * set a light pink background (#eed9df) against near-white text (#ededed) —
+ * about 1.05:1, i.e. invisible. Rather than ship an unreadable theme, dark-scheme
+ * visitors get the light palette until a real dark mode is designed. See DESIGN.md.
+ */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #eed9df;
-    --foreground: #ededed;
+    color-scheme: light;
   }
 }
 
@@ -28,4 +155,24 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+/*
+ * Browser surfaces. These ship with defaults that belong to no design system;
+ * theming them from the palette is the cheapest signal the page was built.
+ */
+::selection {
+  background: var(--claret-200);
+  color: var(--claret-900);
+}
+
+:root {
+  caret-color: var(--claret-600);
+  accent-color: var(--claret-600);
+  scrollbar-color: var(--stone-300) var(--canvas);
+}
+
+/* Numerals in data positions should not jitter as values change. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

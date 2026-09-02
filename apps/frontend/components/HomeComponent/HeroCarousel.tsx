@@ -31,7 +31,7 @@ export default function HeroCarousel() {
         alt={slides[index].alt}
         fill
         priority={index === 0}
-        sizes="(min-width: 1024px) 45vw, 100vw"
+        sizes="(min-width: 1024px) 42vw, 100vw"
         className="object-cover"
         style={{ objectPosition: '30% 40%' }}
       />

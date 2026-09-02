@@ -9,7 +9,7 @@ type Role = 'user' | 'admin';
 
 export default function LogIn() {
   return (
-    <Suspense fallback={<div className="min-h-[calc(100dvh-4rem)] bg-pink-100" />}>
+    <Suspense fallback={<div className="min-h-[calc(100dvh-4rem)] bg-canvas" />}>
       <LoginPageContent />
     </Suspense>
   );
@@ -115,17 +115,8 @@ function LoginPageContent() {
   };
 
   return (
-    <div className="relative flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-between bg-pink-100 p-4 sm:p-8">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{
-          backgroundImage:
-            'radial-gradient(ellipse at 50% 50%, hsl(210, 100%, 97%), hsl(0, 0%, 100%))',
-        }}
-      />
-
-      <div className="my-auto flex w-full max-w-[450px] flex-col gap-4 rounded-xl border border-gray-200 bg-white p-8 shadow-[0_5px_15px_0_hsla(220,30%,5%,0.05),0_15px_35px_-5px_hsla(220,25%,10%,0.05)]">
+    <div className="relative flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-between bg-canvas p-4 sm:p-8">
+      <div className="my-auto flex w-full max-w-[450px] flex-col gap-4 rounded-xl border border-gray-200 bg-paper p-8 shadow-[0_5px_15px_0_hsla(220,30%,5%,0.05),0_15px_35px_-5px_hsla(220,25%,10%,0.05)]">
         <h1 className="w-full text-[clamp(2rem,10vw,2.15rem)] font-semibold text-gray-900">
           {role === 'admin' ? 'Admin Login' : isSignupIntent ? 'Get Started' : 'Login'}
         </h1>
@@ -171,7 +162,7 @@ function LoginPageContent() {
                 autoComplete="email"
                 autoFocus
                 required
-                className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                className={`text-ink w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-500 ${
                   emailError
                     ? 'border-red-500 focus:ring-red-200'
                     : 'border-gray-300 focus:ring-rose-200'
@@ -191,7 +182,7 @@ function LoginPageContent() {
                 placeholder="••••••"
                 autoComplete="current-password"
                 required
-                className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                className={`text-ink w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-500 ${
                   passwordError
                     ? 'border-red-500 focus:ring-red-200'
                     : 'border-gray-300 focus:ring-rose-200'
@@ -231,7 +222,7 @@ function LoginPageContent() {
                   autoComplete="email"
                   autoFocus
                   required
-                  className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                  className={`text-ink w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-500 ${
                     visitorEmailError
                       ? 'border-red-500 focus:ring-red-200'
                       : 'border-gray-300 focus:ring-rose-200'
@@ -253,7 +244,7 @@ function LoginPageContent() {
                   placeholder="••••••"
                   autoComplete="current-password"
                   required
-                  className={`text-black w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-400 ${
+                  className={`text-ink w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 placeholder:text-gray-500 ${
                     visitorPasswordError
                       ? 'border-red-500 focus:ring-red-200'
                       : 'border-gray-300 focus:ring-rose-200'
