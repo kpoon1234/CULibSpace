@@ -29,6 +29,11 @@ router.get('/me', (req, res, next) => {
   return AuthController.getSessionMe(req, res);
 });
 
+// Behavior score & history log (US1-5 / FR-1.5)
+router.get('/score', authenticateToken, AuthController.getScore);
+router.get('/me/score', authenticateToken, AuthController.getScore);
+router.get('/user/score', authenticateToken, AuthController.getScore);
+
 // ==========================================
 // 2. Direct / Mock JWT Authentication
 // ==========================================

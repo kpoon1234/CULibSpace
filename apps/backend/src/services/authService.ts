@@ -141,4 +141,55 @@ export class AuthService {
       studentId: user.universityUser?.studentId,
     };
   }
+
+  /**
+   * Fetch user behavior score and change history log (US1-5 / FR-1.5)
+   */
+  static async getUserScore(uid: number) {
+    if (!uid) {
+      throw { status: 401, message: 'Invalid user ID' };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { uid },
+      select: {
+        uid: true,
+        firstname: true,
+        lastname: true,
+        behaviourScore: true,
+      },
+    });
+
+    if (!user) {
+      throw { status: 404, message: 'User not found' };
+    }
+
+    const history = await prisma.manageScore.findMany({
+      where: { uid },
+      orderBy: { timestamp: 'desc' },
+      include: {
+        admin: {
+          select: {
+            adminId: true,
+            firstname: true,
+            lastname: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    const formattedHistory = history.map((entry) => ({
+      timestamp: entry.timestamp,
+      scoreChange: entry.scoreChange,
+      adminId: entry.adminId,
+      adminName: `${entry.admin.firstname} ${entry.admin.lastname}`.trim(),
+    }));
+
+    return {
+      uid: user.uid,
+      behaviourScore: Number(user.behaviourScore),
+      history: formattedHistory,
+    };
+  }
 }
