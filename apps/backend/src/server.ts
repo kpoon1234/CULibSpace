@@ -38,9 +38,8 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Mount Routers
-// app.use('/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/api/auth', authRoutes);
-// app.use('/api', authRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {

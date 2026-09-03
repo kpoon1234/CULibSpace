@@ -109,10 +109,10 @@ export class AuthController {
    */
   static getSessionMe(req: Request, res: Response): void {
     if (!req.isAuthenticated() || !req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ success: false, error: 'Unauthorized: Valid session required' });
       return;
     }
-    res.json({ user: req.user });
+    res.status(200).json({ success: true, user: req.user });
   }
 
   /**

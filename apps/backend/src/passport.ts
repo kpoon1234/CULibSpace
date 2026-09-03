@@ -7,50 +7,57 @@ import { classifyEmail } from './utils/roleMapper.js';
 const prisma = new PrismaClient();
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-  throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in environment variables');
-}
+  console.warn(
+    '⚠️ GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not set in environment variables. Google OAuth will be disabled until credentials are provided.'
+  );
+} else {
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL:
+          process.env.GOOGLE_CALLBACK_URL ||
+          `http://localhost:${process.env.PORT || 8080}/api/auth/google/callback`,
+      },
+      async (
+        _accessToken: string,
+        _refreshToken: string,
+        profile: Profile,
+        done: VerifyCallback
+      ) => {
+        try {
+          const email = profile.emails?.[0]?.value;
+          if (!email) {
+            return done(new Error('No email returned from Google'), undefined);
+          }
 
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL:
-        process.env.GOOGLE_CALLBACK_URL ||
-        `http://localhost:${process.env.PORT || 8080}/api/auth/google/callback`,
-    },
-    async (_accessToken: string, _refreshToken: string, profile: Profile, done: VerifyCallback) => {
-      try {
-        const email = profile.emails?.[0]?.value;
-        if (!email) {
-          return done(new Error('No email returned from Google'), undefined);
+          const givenName = profile.name?.givenName || profile.displayName?.split(' ')[0] || '';
+          const familyName =
+            profile.name?.familyName || profile.displayName?.split(' ').slice(1).join(' ') || '';
+          const googleId = profile.id;
+          const phone = googleId.slice(-10);
+
+          // Delegate to AuthService for role mapping, polymorphic table creation, and JWT generation
+          const authResult = await AuthService.authenticateUser({
+            email,
+            firstname: givenName,
+            lastname: familyName,
+            phone,
+          });
+
+          // Pass user object along with the generated JWT token
+          return done(null, {
+            ...authResult.user,
+            token: authResult.token,
+          });
+        } catch (error) {
+          return done(error as Error, undefined);
         }
-
-        const givenName = profile.name?.givenName || profile.displayName?.split(' ')[0] || '';
-        const familyName =
-          profile.name?.familyName || profile.displayName?.split(' ').slice(1).join(' ') || '';
-        const googleId = profile.id;
-        const phone = googleId.slice(-10);
-
-        // Delegate to AuthService for role mapping, polymorphic table creation, and JWT generation
-        const authResult = await AuthService.authenticateUser({
-          email,
-          firstname: givenName,
-          lastname: familyName,
-          phone,
-        });
-
-        // Pass user object along with the generated JWT token
-        return done(null, {
-          ...authResult.user,
-          token: authResult.token,
-        });
-      } catch (error) {
-        return done(error as Error, undefined);
       }
-    }
-  )
-);
+    )
+  );
+}
 
 passport.serializeUser((user: any, done) => {
   done(null, user.uid);
