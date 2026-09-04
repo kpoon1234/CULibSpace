@@ -35,15 +35,12 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
           const givenName = profile.name?.givenName || profile.displayName?.split(' ')[0] || '';
           const familyName =
             profile.name?.familyName || profile.displayName?.split(' ').slice(1).join(' ') || '';
-          const googleId = profile.id;
-          const phone = googleId.slice(-10);
 
           // Delegate to AuthService for role mapping, polymorphic table creation, and JWT generation
           const authResult = await AuthService.authenticateUser({
             email,
             firstname: givenName,
             lastname: familyName,
-            phone,
           });
 
           // Pass user object along with the generated JWT token
@@ -83,6 +80,7 @@ passport.deserializeUser(async (uid: number, done) => {
       firstname: user.firstname,
       lastname: user.lastname,
       phone: user.phone,
+      isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
       role: classification.role,
       userType: user.userType,

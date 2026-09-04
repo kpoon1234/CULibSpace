@@ -41,6 +41,7 @@ const payload: AuthTokenPayload = {
   role: 'STUDENT',
   userType: 'UNIVERSITY',
   studentId: '6731315721',
+  isProfileComplete: true,
   requiresOnboarding: false,
 };
 
@@ -53,6 +54,7 @@ console.assert(decoded?.uid === 42, 'UID mismatch');
 console.assert(decoded?.email === 'alice@student.chula.ac.th', 'Email mismatch');
 console.assert(decoded?.role === 'STUDENT', 'Role mismatch');
 console.assert(decoded?.studentId === '6731315721', 'StudentID mismatch');
+console.assert(decoded?.isProfileComplete === true, 'isProfileComplete mismatch');
 console.log('✅ JWT Sign and Verify verified successfully:', decoded);
 
 // Test 6: Tampered / Invalid JWT

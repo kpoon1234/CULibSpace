@@ -12,14 +12,6 @@ export interface AuthenticateUserInput {
   studentId?: string;
 }
 
-/**
- * Generate a safe unique provisional phone number if not provided during first login
- */
-function generateProvisionalPhone(): string {
-  const randomSuffix = Math.floor(100000000 + Math.random() * 900000000).toString();
-  return `0${randomSuffix.substring(0, 9)}`;
-}
-
 export class AuthService {
   /**
    * Role Mapping & Session/JWT Management for Student/Staff (US1-1 / FR-1.1)
@@ -38,8 +30,9 @@ export class AuthService {
     let studentId: string | undefined;
 
     if (!user) {
-      // First-time user creation
-      const phone = input.phone?.trim() || generateProvisionalPhone();
+      // First-time user creation: phone is optional until onboarding completion
+      const phone = input.phone?.trim() || null;
+      const isProfileComplete = Boolean(phone);
 
       if (classification.isUniversityMember) {
         studentId = input.studentId || classification.studentId;
@@ -49,6 +42,7 @@ export class AuthService {
             firstname: input.firstname,
             lastname: input.lastname,
             phone,
+            isProfileComplete,
             userType: classification.userType,
             universityUser: studentId
               ? {
@@ -70,6 +64,7 @@ export class AuthService {
             firstname: input.firstname,
             lastname: input.lastname,
             phone,
+            isProfileComplete,
             userType: UserType.THAI,
           },
           include: {
@@ -92,6 +87,7 @@ export class AuthService {
       role: classification.role,
       userType: user.userType,
       studentId: studentId || user.universityUser?.studentId,
+      isProfileComplete: user.isProfileComplete,
     };
 
     const token = signJwt(payload);
@@ -104,6 +100,7 @@ export class AuthService {
         firstname: user.firstname,
         lastname: user.lastname,
         phone: user.phone,
+        isProfileComplete: user.isProfileComplete,
         behaviourScore: Number(user.behaviourScore),
         role: classification.role,
         userType: user.userType,
@@ -135,6 +132,7 @@ export class AuthService {
       firstname: user.firstname,
       lastname: user.lastname,
       phone: user.phone,
+      isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
       role: payload.role,
       userType: user.userType,
