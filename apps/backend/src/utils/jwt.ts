@@ -11,6 +11,7 @@ export interface AuthTokenPayload {
   role: AppRole;
   userType?: UserType;
   studentId?: string;
+  isProfileComplete?: boolean;
   requiresOnboarding?: boolean;
 }
 

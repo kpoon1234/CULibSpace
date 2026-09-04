@@ -17,7 +17,7 @@ async function runIntegrationTests() {
       lastname: 'Wonderland',
     });
     console.assert(studentResult.user.role === 'STUDENT', 'Role must be STUDENT');
-    console.assert(studentResult.user.studentId === '6731315721', 'StudentId mismatch');
+    console.assert(studentResult.user.studentId === '6700000001', 'StudentId mismatch');
     console.log('✅ Existing Student login verified:', studentResult.user);
 
     // 2. Chula Staff Login

@@ -202,6 +202,7 @@ async function main() {
     data: {
       uid: 1,
       phone: '0811111111',
+      isProfileComplete: true,
       behaviourScore: 90.0,
       email: 'alice@student.chula.ac.th',
       firstname: 'Alice',
@@ -220,6 +221,7 @@ async function main() {
     data: {
       uid: 2,
       phone: '0822222222',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'Bobby@student.chula.ac.th',
       firstname: 'Bobby',
@@ -238,6 +240,7 @@ async function main() {
     data: {
       uid: 3,
       phone: '0833333333',
+      isProfileComplete: true,
       behaviourScore: 40.0,
       email: 'lowscore@student.chula.ac.th',
       firstname: 'Lowscore',
@@ -256,6 +259,7 @@ async function main() {
     data: {
       uid: 4,
       phone: '0844444444',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'thai.noticket@gmail.com',
       firstname: 'pomkonThai',
@@ -278,6 +282,7 @@ async function main() {
     data: {
       uid: 5,
       phone: '0855555555',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'foreign.hasticket@gmail.com',
       firstname: 'pomkonForeign',
@@ -300,6 +305,7 @@ async function main() {
     data: {
       uid: 6,
       phone: '0866666666',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'cancelking@student.chula.ac.th',
       firstname: 'Cancel',

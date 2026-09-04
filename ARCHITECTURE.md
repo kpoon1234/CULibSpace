@@ -63,7 +63,7 @@ CU LibSpace เป็นระบบบริหารจัดการกา�
 
 ## 3. 🗄️ วิเคราะห์โครงสร้างฐานข้อมูล (Database Schema & Model Analysis)
 
-อ้างอิงจาก `prisma/schema.prisma` ล่าสุด โครงสร้างฐานข้อมูลถูกวางไว้อย่างเป็นระบบ ดังนี้:
+อ้างอิงจาก `apps/backend/prisma/schema.prisma` ล่าสุด โครงสร้างฐานข้อมูลถูกวางไว้อย่างเป็นระบบ ดังนี้:
 
 ### 3.1 Polymorphic Identity System (Class Table Inheritance)
 - **`User`**: ตารางหลักเก็บข้อมูลผู้ใช้ทั่วไป
@@ -198,33 +198,45 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
 
 ---
 
-## 6. 📂 Standard Project Folder Structure
+## 6. 📂 Standard Project Folder Structure (Monorepo Workspaces)
 
-### Backend Directory Structure (Express + TypeScript)
-```
-backend/
-├── src/
-│   ├── controllers/      # Request handlers & HTTP responses
-│   ├── middlewares/      # Auth JWT, Google Token Validation, Profile Completion Check
-│   ├── services/         # Business logic (Google Auth Mapper, Booking, Scoring, Hold Lock)
-│   ├── workers/          # Cron jobs (No-show worker, Expired hold lock release)
-│   ├── routes/           # Express routes mapping
-│   ├── utils/            # Helper functions, DB Prisma client instance
-│   └── app.ts            # Express app configuration & entry point
-├── prisma/
-│   └── schema.prisma     # Prisma DB Schema definition
-└── package.json
-```
+โปรเจกต์ใช้โครงสร้างแบบ **Monorepo (npm workspaces)** โดยแบ่งโค้ดออกเป็น `apps/backend` และ `apps/frontend` ภายใต้ไดเรกทอรี `apps/` ดังนี้:
 
-### Frontend Directory Structure (Next.js + TypeScript)
 ```
-frontend/
-├── src/
-│   ├── app/ (หรือ pages/) # Page Routes (Dashboard, Setup-Profile, Booking, Profile, Admin)
-│   ├── components/       # UI components (GoogleLoginBtn, InteractiveMap, OnboardingModal)
-│   ├── hooks/            # Custom Hooks using SWR (e.g., useTableAvailability, useUserSession)
-│   ├── services/         # API Client (Axios/Fetch wrapper for Backend endpoints)
-│   ├── types/            # TypeScript Interface definitions matching Prisma models
-│   └── utils/            # Helper functions & date-time formatters
-└── package.json
+CULibSpace/
+├── apps/
+│   ├── backend/                      # Express.js + TypeScript REST API Server
+│   │   ├── prisma/
+│   │   │   ├── migrations/           # Database migration SQL files
+│   │   │   ├── schema.prisma         # Prisma DB Schema definition
+│   │   │   └── seed.ts               # Database seeder with developer test dataset
+│   │   ├── src/
+│   │   │   ├── controllers/          # Request handlers & HTTP responses (e.g. authController.ts)
+│   │   │   ├── middlewares/          # Auth JWT, RBAC Guard, Token validation
+│   │   │   ├── routes/               # Express routes mapping (e.g. authRoutes.ts)
+│   │   │   ├── services/             # Business logic (e.g. authService.ts)
+│   │   │   ├── utils/                # Helper utilities (jwt.ts, roleMapper.ts)
+│   │   │   ├── passport.ts           # Google OAuth2 Strategy & Passport configuration
+│   │   │   ├── server.ts             # Express server entry point & middleware mounting
+│   │   │   ├── test_unit.ts          # Unit test suite
+│   │   │   └── test_integration.ts   # Integration test suite
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   │
+│   └── frontend/                     # Next.js (App Router) + React + TypeScript Client
+│       ├── app/                      # Next.js App Router directory
+│       │   ├── auth/callback/        # OAuth callback handler (page.tsx)
+│       │   ├── login/                # User & Admin Login UI (page.tsx)
+│       │   ├── layout.tsx            # Root layout
+│       │   ├── page.tsx              # Main Dashboard / Landing Page
+│       │   └── globals.css           # Tailwind & global styles
+│       ├── components/               # Reusable UI components
+│       │   ├── HomeComponent/        # Banner, Dashboard widgets
+│       │   ├── Login/                # Google Icons, Forgot Password modals
+│       │   └── Topmenu/              # Navigation bar & menu items
+│       ├── package.json
+│       └── next.config.ts
+├── docker-compose.yml                # PostgreSQL Database container
+├── package.json                      # Root workspace scripts & dev tools
+└── ARCHITECTURE.md                   # System Architecture Specification
 ```
