@@ -180,8 +180,8 @@ export class AuthService {
     const formattedHistory = history.map((entry) => ({
       timestamp: entry.timestamp,
       scoreChange: entry.scoreChange,
-      adminId: entry.adminId,
-      adminName: `${entry.admin.firstname} ${entry.admin.lastname}`.trim(),
+      adminId: entry.adminId ?? null,
+      adminName: entry.admin ? `${entry.admin.firstname} ${entry.admin.lastname}`.trim() : 'System',
     }));
 
     return {
