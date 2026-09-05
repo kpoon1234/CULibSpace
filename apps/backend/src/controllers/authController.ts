@@ -180,10 +180,10 @@ export class AuthController {
    */
   static getSessionMe(req: Request, res: Response): void {
     if (!req.isAuthenticated() || !req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ success: false, error: 'Unauthorized: Valid session required' });
       return;
     }
-    res.json({ user: req.user });
+    res.status(200).json({ success: true, user: req.user });
   }
 
   /**
@@ -268,6 +268,35 @@ export class AuthController {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  }
+
+  /**
+   * GET /api/auth/score
+   * Fetch current user's behavior score and penalty/adjustment history (US1-5 / FR-1.5)
+   */
+  static async getScore(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      if (!authReq.user || !authReq.user.uid) {
+        res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Valid user session required',
+        });
+        return;
+      }
+
+      const scoreData = await AuthService.getUserScore(authReq.user.uid);
+      res.status(200).json({
+        success: true,
+        ...scoreData,
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({
+        success: false,
+        error: err.message || 'Internal server error',
+      });
     }
   }
 }
