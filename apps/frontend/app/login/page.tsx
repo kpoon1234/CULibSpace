@@ -3,10 +3,13 @@
 import { useState, FormEvent } from 'react';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
+import { saveAuth } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
 
 type Role = 'user' | 'admin';
 
 export default function LogIn() {
+  const router = useRouter();
   const [role, setRole] = useState<Role>('user');
   const [emailError, setEmailError] = useState(false);
   const [emailErrorMessage, setEmailErrorMessage] = useState('');
@@ -44,7 +47,7 @@ export default function LogIn() {
     return isValid;
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!validateInputs()) return;
 
@@ -54,10 +57,26 @@ export default function LogIn() {
       password: data.get('password'),
     };
 
-    // ยิงคนละ endpoint ตาม role ที่เลือก — backend เป็นคนเช็คเองว่าอีเมลที่ login มาเป็นของมหาลัยหรือภายนอก
-    // const endpoint = role === 'admin' ? '/api/admin/login' : '/api/login
-    const endpoint = role === 'admin' ? '/api/auth/admin-login' : '/api/auth/login';
-    console.log(endpoint, payload);
+    if (role !== 'admin') return;
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/admin-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setPasswordError(true);
+        setPasswordErrorMessage(result.error || 'Incorrect username or password.');
+        return;
+      }
+      saveAuth(result.token, result.user);
+      router.replace('/');
+    } catch {
+      setPasswordError(true);
+      setPasswordErrorMessage('Unable to connect to the server.');
+    }
   };
 
   return (
