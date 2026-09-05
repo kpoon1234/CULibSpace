@@ -303,4 +303,62 @@ export class AuthService {
       },
     };
   }
+
+  /**
+   * Update current user's editable profile fields.
+   */
+  static async updateProfile(
+    uid: number,
+    data: { firstname?: string; lastname?: string; phone?: string }
+  ) {
+    const user = await prisma.user.findUnique({
+      where: { uid },
+      include: { universityUser: true },
+    });
+
+    if (!user) {
+      throw { status: 404, message: 'User not found' };
+    }
+
+    const updateData: { firstname?: string; lastname?: string; phone?: string } = {};
+
+    if (typeof data.firstname === 'string' && data.firstname.trim()) {
+      updateData.firstname = data.firstname.trim();
+    }
+
+    if (typeof data.lastname === 'string' && data.lastname.trim()) {
+      updateData.lastname = data.lastname.trim();
+    }
+
+    if (typeof data.phone === 'string') {
+      const digits = data.phone.replace(/\D/g, '');
+      if (digits.length !== 10) {
+        throw { status: 400, message: 'Phone number must contain exactly 10 digits' };
+      }
+      updateData.phone = digits;
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { uid },
+      data: updateData,
+      include: { universityUser: true },
+    });
+
+    const classification = classifyEmail(updatedUser.email);
+
+    return {
+      user: {
+        uid: updatedUser.uid,
+        email: updatedUser.email,
+        firstname: updatedUser.firstname,
+        lastname: updatedUser.lastname,
+        phone: updatedUser.phone,
+        isProfileComplete: updatedUser.isProfileComplete,
+        behaviourScore: Number(updatedUser.behaviourScore),
+        role: classification.role,
+        userType: updatedUser.userType,
+        studentId: updatedUser.universityUser?.studentId,
+      },
+    };
+  }
 }

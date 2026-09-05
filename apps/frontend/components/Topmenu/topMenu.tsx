@@ -54,6 +54,12 @@ export default function TopMenu() {
         <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4">
           {user ? (
             <>
+              <Link
+                href="/profile"
+                className="rounded-md bg-white/10 px-3 py-3 text-sm font-medium text-ink transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-4"
+              >
+                Profile
+              </Link>
               <div className="hidden min-w-0 flex-col justify-center text-right sm:flex">
                 <p className="truncate text-sm font-semibold text-ink">{user.firstname}</p>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-ink/70">
