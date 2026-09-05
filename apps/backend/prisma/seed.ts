@@ -1,4 +1,11 @@
-import { PrismaClient, UserType, TableStatus, BookingStatus, TicketStatus, ZoneType } from '@prisma/client';
+import {
+  PrismaClient,
+  UserType,
+  TableStatus,
+  BookingStatus,
+  TicketStatus,
+  ZoneType,
+} from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -25,7 +32,7 @@ async function main() {
   console.log('🧹 Cleaned existing records.');
 
   // Precomputed bcrypt hash for admin test password: "password123"
-  const defaultAdminPasswordHash = '$2a$10$vI8aWBnW3fID.ZQ4/zo1G.q1lRps.9cGLcZEiGDMVr5yUP1KUOYTa';
+  const defaultAdminPasswordHash = '$2b$10$vREaweYvN6CqyL0B5NZt1uKGbL9OEOaaI.37gV73UKKS7DND4sU5q';
 
   // 2. Seed Operating Schedules (Priority Hierarchy)
   const now = new Date();
@@ -68,17 +75,19 @@ async function main() {
       },
     ],
   });
-  console.log('✅ Seeded 3 Operating Schedules with Priority Hierarchy (Default, Exam 24h, Holiday)');
+  console.log(
+    '✅ Seeded 3 Operating Schedules with Priority Hierarchy (Default, Exam 24h, Holiday)'
+  );
 
   // 3. Seed Default System Configuration
   await prisma.systemConfig.create({
     data: {
       configId: 1,
       maxBookingDurationMinutes: 120, // 2 ชั่วโมง
-      lateThresholdMinutes: 15,       // ยอมให้สาย 15 นาที
-      earlyCheckInMinutes: 15,        // เช็กอินก่อนได้ 15 นาที
-      minScoreToBook: 50.0,           // คะแนนขั้นต่ำ
-      maxAdvanceBookingDays: 7,       // จองล่วงหน้าได้ 7 วัน
+      lateThresholdMinutes: 15, // ยอมให้สาย 15 นาที
+      earlyCheckInMinutes: 15, // เช็กอินก่อนได้ 15 นาที
+      minScoreToBook: 50.0, // คะแนนขั้นต่ำ
+      maxAdvanceBookingDays: 7, // จองล่วงหน้าได้ 7 วัน
     },
   });
   console.log('✅ Seeded System Configuration');
@@ -103,7 +112,9 @@ async function main() {
       lastname: 'Jaidee',
     },
   });
-  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: password123)`);
+  console.log(
+    `✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: password123)`
+  );
 
   // 5. Seed Zones
   const zoneSilent = await prisma.zone.create({
@@ -130,12 +141,54 @@ async function main() {
 
   // 6. Seed Tables (Clean relational attributes + plugCap & hasTvScreen)
   const tablesData = [
-    { tableId: 101, zoneId: zoneSilent.zoneId, status: TableStatus.OCCUPIED, numberOfSeat: 1, plugCap: 2, hasTvScreen: false },
-    { tableId: 102, zoneId: zoneSilent.zoneId, status: TableStatus.AVAILABLE, numberOfSeat: 1, plugCap: 2, hasTvScreen: false },
-    { tableId: 201, zoneId: zoneGroup.zoneId, status: TableStatus.AVAILABLE, numberOfSeat: 4, plugCap: 4, hasTvScreen: true },
-    { tableId: 202, zoneId: zoneGroup.zoneId, status: TableStatus.AVAILABLE, numberOfSeat: 4, plugCap: 4, hasTvScreen: true },
-    { tableId: 301, zoneId: zoneCommon.zoneId, status: TableStatus.AVAILABLE, numberOfSeat: 6, plugCap: 6, hasTvScreen: false },
-    { tableId: 501, zoneId: zoneSilent.zoneId, status: TableStatus.CLOSED, numberOfSeat: 1, plugCap: 0, hasTvScreen: false },
+    {
+      tableId: 101,
+      zoneId: zoneSilent.zoneId,
+      status: TableStatus.OCCUPIED,
+      numberOfSeat: 1,
+      plugCap: 2,
+      hasTvScreen: false,
+    },
+    {
+      tableId: 102,
+      zoneId: zoneSilent.zoneId,
+      status: TableStatus.AVAILABLE,
+      numberOfSeat: 1,
+      plugCap: 2,
+      hasTvScreen: false,
+    },
+    {
+      tableId: 201,
+      zoneId: zoneGroup.zoneId,
+      status: TableStatus.AVAILABLE,
+      numberOfSeat: 4,
+      plugCap: 4,
+      hasTvScreen: true,
+    },
+    {
+      tableId: 202,
+      zoneId: zoneGroup.zoneId,
+      status: TableStatus.AVAILABLE,
+      numberOfSeat: 4,
+      plugCap: 4,
+      hasTvScreen: true,
+    },
+    {
+      tableId: 301,
+      zoneId: zoneCommon.zoneId,
+      status: TableStatus.AVAILABLE,
+      numberOfSeat: 6,
+      plugCap: 6,
+      hasTvScreen: false,
+    },
+    {
+      tableId: 501,
+      zoneId: zoneSilent.zoneId,
+      status: TableStatus.CLOSED,
+      numberOfSeat: 1,
+      plugCap: 0,
+      hasTvScreen: false,
+    },
   ];
 
   for (const t of tablesData) {
@@ -149,6 +202,7 @@ async function main() {
     data: {
       uid: 1,
       phone: '0811111111',
+      isProfileComplete: true,
       behaviourScore: 90.0,
       email: 'alice@student.chula.ac.th',
       firstname: 'Alice',
@@ -156,7 +210,7 @@ async function main() {
       userType: UserType.UNIVERSITY,
       universityUser: {
         create: {
-          studentId: '6731315721',
+          studentId: '6700000001',
         },
       },
     },
@@ -167,6 +221,7 @@ async function main() {
     data: {
       uid: 2,
       phone: '0822222222',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'Bobby@student.chula.ac.th',
       firstname: 'Bobby',
@@ -174,7 +229,7 @@ async function main() {
       userType: UserType.UNIVERSITY,
       universityUser: {
         create: {
-          studentId: '6731332321',
+          studentId: '6700000002',
         },
       },
     },
@@ -185,6 +240,7 @@ async function main() {
     data: {
       uid: 3,
       phone: '0833333333',
+      isProfileComplete: true,
       behaviourScore: 40.0,
       email: 'lowscore@student.chula.ac.th',
       firstname: 'Lowscore',
@@ -203,6 +259,7 @@ async function main() {
     data: {
       uid: 4,
       phone: '0844444444',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'thai.noticket@gmail.com',
       firstname: 'pomkonThai',
@@ -210,7 +267,7 @@ async function main() {
       userType: UserType.THAI,
       outsideUser: {
         create: {
-          thai: {
+          thaiUser: {
             create: {
               citizenId: '1100000000004',
             },
@@ -225,6 +282,7 @@ async function main() {
     data: {
       uid: 5,
       phone: '0855555555',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'foreign.hasticket@gmail.com',
       firstname: 'pomkonForeign',
@@ -247,6 +305,7 @@ async function main() {
     data: {
       uid: 6,
       phone: '0866666666',
+      isProfileComplete: true,
       behaviourScore: 100.0,
       email: 'cancelking@student.chula.ac.th',
       firstname: 'Cancel',
@@ -260,7 +319,9 @@ async function main() {
     },
   });
 
-  console.log('✅ Seeded 6 Users (All authenticating via Google Sign-In: University, Thai, Foreign)');
+  console.log(
+    '✅ Seeded 6 Users (All authenticating via Google Sign-In: University, Thai, Foreign)'
+  );
 
   // 8. Seed Visitor Ticket for UID 5 (Paid, Active 30 days from today)
   const ticket1 = await prisma.ticket.create({
@@ -278,18 +339,114 @@ async function main() {
   // 9. Seed Bookings (Historical test cases + Live Upcoming Bookings)
   const bookingsData = [
     // Historical completed & failed bookings (from original DB test suite)
-    { bookingId: 10, uid: 1, tableId: 101, startDateTime: new Date('2026-04-25T09:00:00Z'), endDateTime: new Date('2026-04-25T11:00:00Z'), arriveTime: new Date('2026-04-25T09:05:00Z'), status: BookingStatus.COMPLETED },
-    { bookingId: 11, uid: 1, tableId: 102, startDateTime: new Date('2026-04-26T13:00:00Z'), endDateTime: new Date('2026-04-26T15:00:00Z'), arriveTime: new Date('2026-04-26T12:55:00Z'), status: BookingStatus.COMPLETED },
-    { bookingId: 20, uid: 2, tableId: 101, startDateTime: new Date('2026-04-27T10:00:00Z'), endDateTime: new Date('2026-04-27T12:00:00Z'), arriveTime: new Date('2026-04-27T10:08:00Z'), status: BookingStatus.COMPLETED },
-    { bookingId: 61, uid: 6, tableId: 101, startDateTime: new Date('2026-04-21T09:00:00Z'), endDateTime: new Date('2026-04-21T11:00:00Z'), arriveTime: null, status: BookingStatus.NO_SHOW },
-    { bookingId: 62, uid: 6, tableId: 102, startDateTime: new Date('2026-04-23T09:00:00Z'), endDateTime: new Date('2026-04-23T11:00:00Z'), arriveTime: null, status: BookingStatus.NO_SHOW },
-    { bookingId: 63, uid: 6, tableId: 201, startDateTime: new Date('2026-04-25T14:00:00Z'), endDateTime: new Date('2026-04-25T16:00:00Z'), arriveTime: null, status: BookingStatus.CANCELLED },
-    { bookingId: 888, uid: 2, tableId: 202, startDateTime: new Date('2026-04-28T13:00:00Z'), endDateTime: new Date('2026-04-28T15:00:00Z'), arriveTime: null, status: BookingStatus.PENDING },
-    { bookingId: 777, uid: 1, tableId: 301, startDateTime: new Date('2026-04-29T09:00:00Z'), endDateTime: new Date('2026-04-29T11:00:00Z'), arriveTime: null, status: BookingStatus.PENDING },
-    { bookingId: 1, uid: 1, tableId: 301, startDateTime: new Date('2026-04-29T14:00:00Z'), endDateTime: new Date('2026-04-29T16:00:00Z'), arriveTime: null, status: BookingStatus.PENDING },
-    { bookingId: 555, uid: 1, tableId: 101, startDateTime: new Date('2026-04-28T16:50:21Z'), endDateTime: new Date('2026-04-28T18:55:21Z'), arriveTime: new Date('2026-04-28T16:56:19Z'), status: BookingStatus.ACTIVE },
-    { bookingId: 999, uid: 1, tableId: 201, startDateTime: new Date('2026-04-28T16:25:21Z'), endDateTime: new Date('2026-04-28T17:55:21Z'), arriveTime: new Date('2026-04-28T16:56:24Z'), status: BookingStatus.NO_SHOW },
-    { bookingId: 3, uid: 5, tableId: 202, startDateTime: new Date('2026-04-28T10:00:00Z'), endDateTime: new Date('2026-04-28T11:00:00Z'), arriveTime: null, status: BookingStatus.PENDING },
+    {
+      bookingId: 10,
+      uid: 1,
+      tableId: 101,
+      startDateTime: new Date('2026-04-25T09:00:00Z'),
+      endDateTime: new Date('2026-04-25T11:00:00Z'),
+      arriveTime: new Date('2026-04-25T09:05:00Z'),
+      status: BookingStatus.COMPLETED,
+    },
+    {
+      bookingId: 11,
+      uid: 1,
+      tableId: 102,
+      startDateTime: new Date('2026-04-26T13:00:00Z'),
+      endDateTime: new Date('2026-04-26T15:00:00Z'),
+      arriveTime: new Date('2026-04-26T12:55:00Z'),
+      status: BookingStatus.COMPLETED,
+    },
+    {
+      bookingId: 20,
+      uid: 2,
+      tableId: 101,
+      startDateTime: new Date('2026-04-27T10:00:00Z'),
+      endDateTime: new Date('2026-04-27T12:00:00Z'),
+      arriveTime: new Date('2026-04-27T10:08:00Z'),
+      status: BookingStatus.COMPLETED,
+    },
+    {
+      bookingId: 61,
+      uid: 6,
+      tableId: 101,
+      startDateTime: new Date('2026-04-21T09:00:00Z'),
+      endDateTime: new Date('2026-04-21T11:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.NO_SHOW,
+    },
+    {
+      bookingId: 62,
+      uid: 6,
+      tableId: 102,
+      startDateTime: new Date('2026-04-23T09:00:00Z'),
+      endDateTime: new Date('2026-04-23T11:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.NO_SHOW,
+    },
+    {
+      bookingId: 63,
+      uid: 6,
+      tableId: 201,
+      startDateTime: new Date('2026-04-25T14:00:00Z'),
+      endDateTime: new Date('2026-04-25T16:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.CANCELLED,
+    },
+    {
+      bookingId: 888,
+      uid: 2,
+      tableId: 202,
+      startDateTime: new Date('2026-04-28T13:00:00Z'),
+      endDateTime: new Date('2026-04-28T15:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.PENDING,
+    },
+    {
+      bookingId: 777,
+      uid: 1,
+      tableId: 301,
+      startDateTime: new Date('2026-04-29T09:00:00Z'),
+      endDateTime: new Date('2026-04-29T11:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.PENDING,
+    },
+    {
+      bookingId: 1,
+      uid: 1,
+      tableId: 301,
+      startDateTime: new Date('2026-04-29T14:00:00Z'),
+      endDateTime: new Date('2026-04-29T16:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.PENDING,
+    },
+    {
+      bookingId: 555,
+      uid: 1,
+      tableId: 101,
+      startDateTime: new Date('2026-04-28T16:50:21Z'),
+      endDateTime: new Date('2026-04-28T18:55:21Z'),
+      arriveTime: new Date('2026-04-28T16:56:19Z'),
+      status: BookingStatus.ACTIVE,
+    },
+    {
+      bookingId: 999,
+      uid: 1,
+      tableId: 201,
+      startDateTime: new Date('2026-04-28T16:25:21Z'),
+      endDateTime: new Date('2026-04-28T17:55:21Z'),
+      arriveTime: new Date('2026-04-28T16:56:24Z'),
+      status: BookingStatus.NO_SHOW,
+    },
+    {
+      bookingId: 3,
+      uid: 5,
+      tableId: 202,
+      startDateTime: new Date('2026-04-28T10:00:00Z'),
+      endDateTime: new Date('2026-04-28T11:00:00Z'),
+      arriveTime: null,
+      status: BookingStatus.PENDING,
+    },
 
     // Live Upcoming Bookings for Frontend UI Dashboard & Check-in Testing
     {
@@ -353,9 +510,27 @@ async function main() {
       },
     ],
   });
-  console.log('✅ Seeded Manage Score Audit Logs');
+  // 12. Synchronize PostgreSQL autoincrement sequences to max IDs
+  const syncQueries = [
+    `SELECT setval('user_uid_seq', COALESCE((SELECT MAX(uid) FROM "user"), 1))`,
+    `SELECT setval('admin_adminid_seq', COALESCE((SELECT MAX(adminid) FROM "admin"), 1))`,
+    `SELECT setval('zone_zoneid_seq', COALESCE((SELECT MAX(zoneid) FROM "zone"), 1))`,
+    `SELECT setval('table_tableid_seq', COALESCE((SELECT MAX(tableid) FROM "table"), 1))`,
+    `SELECT setval('booking_bookingid_seq', COALESCE((SELECT MAX(bookingid) FROM "booking"), 1))`,
+    `SELECT setval('ticket_ticketid_seq', COALESCE((SELECT MAX(ticketid) FROM "ticket"), 1))`,
+    `SELECT setval('issue_report_issueid_seq', COALESCE((SELECT MAX(issueid) FROM "issue_report"), 1))`,
+    `SELECT setval('operating_schedule_schedule_id_seq', COALESCE((SELECT MAX(schedule_id) FROM "operating_schedule"), 1))`,
+    `SELECT setval('system_config_configid_seq', COALESCE((SELECT MAX(configid) FROM "system_config"), 1))`,
+  ];
 
-  console.log('🎉 Database seeding completed successfully! Admin Login: admin1@chula.ac.th / "password123"');
+  for (const query of syncQueries) {
+    await prisma.$queryRawUnsafe(query);
+  }
+  console.log('✅ Synchronized all PostgreSQL autoincrement sequences.');
+
+  console.log(
+    '🎉 Database seeding completed successfully! Admin Login: admin1@chula.ac.th / "password123"'
+  );
 }
 
 main()

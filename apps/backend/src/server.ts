@@ -1,35 +1,54 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import session from 'express-session';
+import passport from './passport.js';
 import { PrismaClient } from '@prisma/client';
-
-dotenv.config();
+import authRoutes from './routes/authRoutes.js';
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 8080;
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
+// Global Middlewares
 app.use(
   cors({
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    credentials: true,
   })
 );
 app.use(express.json());
-
-// API Endpoint ตัวอย่างสำหรับส่งข้อมูลไป Frontend
-app.get('/api/users', async (req, res) => {
-  try {
-    const users = await prisma.user.findMany();
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch users from database' });
-  }
+app.use(express.urlencoded({ extended: true }));
+app.use((req, _res, next) => {
+  console.log(`[req] ${req.method} ${req.originalUrl}`);
+  next();
 });
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'fallback-session-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+  })
+);
+app.use(passport.initialize());
+app.use(passport.session());
 
+// Mount Routers
+// app.use('/auth', authRoutes);
+app.use('/api/auth', authRoutes);
+// app.use('/api', authRoutes);
+
+// Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {
   res.json({ message: 'Hello! Communication between Next.js and Express is working!' });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT}`);
+  console.log(`🚀 Backend running on ${BASE_URL}`);
 });
