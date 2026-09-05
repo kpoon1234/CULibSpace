@@ -14,6 +14,8 @@ export interface AuthenticateUserInput {
 
 export interface CompleteProfileInput {
   uid: number;
+  firstname: string;
+  lastname: string;
   phone: string;
   identityType?: 'THAI' | 'FOREIGN';
   citizenId?: string;
@@ -232,6 +234,8 @@ export class AuthService {
     }
 
     const commonData = {
+      firstname: input.firstname.trim(),
+      lastname: input.lastname.trim(),
       phone: input.phone,
       isProfileComplete: true,
     };
