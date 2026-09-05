@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200">
+  <rect width="1600" height="1200" fill="#e5e7eb"/>
+  <g transform="translate(800,520)" stroke="#9ca3af" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="-90" y="-70" width="180" height="140" rx="10"/>
+    <circle cx="-40" cy="-25" r="18"/>
+    <path d="M-90 45 L-20 -10 L30 30 L90 -25 L90 45 Z" fill="#9ca3af" stroke="none"/>
+  </g>
+  <text x="800" y="700" text-anchor="middle" font-family="system-ui, sans-serif" font-size="42" fill="#6b7280">Common Zone &#8212; photo coming soon</text>
+</svg>

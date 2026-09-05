@@ -48,13 +48,13 @@ CREATE TABLE "outside_user" (
 );
 
 -- CreateTable
-CREATE TABLE "thai" (
+CREATE TABLE "thai_user" (
     "uid" INTEGER NOT NULL,
     "citizenid" VARCHAR(13) NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "thai_pkey" PRIMARY KEY ("uid")
+    CONSTRAINT "thai_user_pkey" PRIMARY KEY ("uid")
 );
 
 -- CreateTable
@@ -219,7 +219,7 @@ CREATE INDEX "idx_user_type" ON "user"("user_type");
 CREATE UNIQUE INDEX "university_user_studentid_key" ON "university_user"("studentid");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "thai_citizenid_key" ON "thai"("citizenid");
+CREATE UNIQUE INDEX "thai_citizenid_key" ON "thai_user"("citizenid");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "foreign_user_passportid_key" ON "foreign_user"("passportid");
@@ -267,7 +267,7 @@ ALTER TABLE "university_user" ADD CONSTRAINT "university_user_uid_fkey" FOREIGN 
 ALTER TABLE "outside_user" ADD CONSTRAINT "outside_user_uid_fkey" FOREIGN KEY ("uid") REFERENCES "user"("uid") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "thai" ADD CONSTRAINT "thai_uid_fkey" FOREIGN KEY ("uid") REFERENCES "outside_user"("uid") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "thai_user" ADD CONSTRAINT "thai_uid_fkey" FOREIGN KEY ("uid") REFERENCES "outside_user"("uid") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "foreign_user" ADD CONSTRAINT "foreign_user_uid_fkey" FOREIGN KEY ("uid") REFERENCES "outside_user"("uid") ON DELETE CASCADE ON UPDATE CASCADE;

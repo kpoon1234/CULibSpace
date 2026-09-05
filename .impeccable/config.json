@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "apps/frontend/components/Topmenu/topMenuItem.tsx"
+        ],
+        "createdAt": "2026-09-01T05:43:54.142Z",
+        "reason": "text-neutral-900 (#171717) on bg-pink-400/bg-pink-300 computes to 6.77:1 contrast (WCAG AA), replacing white text that measured 2.65:1 and failed AA. This is the fix from /impeccable audit's P1 contrast finding, not washed-out gray."
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "apps/frontend/components/Topmenu/topMenu.tsx"
+        ],
+        "createdAt": "2026-09-01T05:44:10.205Z",
+        "reason": "text-neutral-900 on bg-pink-400/bg-pink-300 for the Log In link computes to 6.77:1 (WCAG AA); the previous white text measured 2.65:1 and failed AA. Same audit-driven fix as topMenuItem.tsx."
+      }
+    ]
+  }
+}
