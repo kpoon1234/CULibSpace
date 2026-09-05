@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import passport from 'passport';
 import { Strategy as GoogleStrategy, Profile, VerifyCallback } from 'passport-google-oauth20';
 import { PrismaClient } from '@prisma/client';
@@ -6,16 +7,21 @@ import { classifyEmail } from './utils/roleMapper.js';
 
 const prisma = new PrismaClient();
 
-if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+if (!googleClientId || !googleClientSecret) {
   console.warn(
-    '⚠️ GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not set in environment variables. Google OAuth will be disabled until credentials are provided.'
+    '⚠️ Warning: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not set. Google OAuth will not work.'
   );
-} else {
+}
+
+if (googleClientId && googleClientSecret) {
   passport.use(
     new GoogleStrategy(
       {
-        clientID: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        clientID: googleClientId,
+        clientSecret: googleClientSecret,
         callbackURL:
           process.env.GOOGLE_CALLBACK_URL ||
           `http://localhost:${process.env.PORT || 8080}/api/auth/google/callback`,

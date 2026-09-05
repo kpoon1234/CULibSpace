@@ -12,6 +12,14 @@ export interface AuthenticateUserInput {
   studentId?: string;
 }
 
+export interface CompleteProfileInput {
+  uid: number;
+  phone: string;
+  identityType?: 'THAI' | 'FOREIGN';
+  citizenId?: string;
+  passportId?: string;
+}
+
 export class AuthService {
   /**
    * Role Mapping & Session/JWT Management for Student/Staff (US1-1 / FR-1.1)
@@ -113,6 +121,22 @@ export class AuthService {
    * Fetch current session profile (US1-1)
    */
   static async getCurrentProfile(payload: AuthTokenPayload) {
+    if (payload.adminId) {
+      const admin = await prisma.admin.findUnique({
+        where: { adminId: payload.adminId },
+      });
+
+      if (!admin) throw { status: 404, message: 'Admin not found' };
+
+      return {
+        adminId: admin.adminId,
+        email: admin.email,
+        firstname: admin.firstname,
+        lastname: admin.lastname,
+        role: 'ADMIN' as const,
+      };
+    }
+
     if (!payload.uid) {
       throw { status: 401, message: 'Invalid session payload' };
     }
@@ -188,6 +212,95 @@ export class AuthService {
       uid: user.uid,
       behaviourScore: Number(user.behaviourScore),
       history: formattedHistory,
+    };
+  }
+
+  /**
+   * Completes the profile created by the first Google login.
+   * University users only provide a phone number. Outside users must provide
+   * one identity document and are stored in the appropriate subtype table.
+   */
+  static async completeProfile(input: CompleteProfileInput) {
+    const user = await prisma.user.findUnique({
+      where: { uid: input.uid },
+      include: { outsideUser: true },
+    });
+
+    if (!user) throw { status: 404, message: 'User not found' };
+    if (user.isProfileComplete) {
+      throw { status: 409, message: 'Profile has already been completed' };
+    }
+
+    const commonData = {
+      phone: input.phone,
+      isProfileComplete: true,
+    };
+
+    let updatedUser;
+    if (user.userType === UserType.UNIVERSITY) {
+      updatedUser = await prisma.user.update({
+        where: { uid: user.uid },
+        data: commonData,
+        include: { universityUser: true },
+      });
+    } else if (input.identityType === 'THAI' && input.citizenId) {
+      updatedUser = await prisma.user.update({
+        where: { uid: user.uid },
+        data: {
+          ...commonData,
+          userType: UserType.THAI,
+          outsideUser: {
+            create: {
+              thaiUser: { create: { citizenId: input.citizenId } },
+            },
+          },
+        },
+        include: { universityUser: true },
+      });
+    } else if (input.identityType === 'FOREIGN' && input.passportId) {
+      updatedUser = await prisma.user.update({
+        where: { uid: user.uid },
+        data: {
+          ...commonData,
+          userType: UserType.FOREIGN,
+          outsideUser: {
+            create: {
+              foreignUser: { create: { passportId: input.passportId } },
+            },
+          },
+        },
+        include: { universityUser: true },
+      });
+    } else {
+      throw { status: 400, message: 'Outside users must provide one valid identity document' };
+    }
+
+    const classification = classifyEmail(updatedUser.email);
+    const payload: AuthTokenPayload = {
+      uid: updatedUser.uid,
+      email: updatedUser.email,
+      firstname: updatedUser.firstname,
+      lastname: updatedUser.lastname,
+      role: classification.role,
+      userType: updatedUser.userType,
+      studentId: updatedUser.universityUser?.studentId,
+      isProfileComplete: updatedUser.isProfileComplete,
+    };
+
+    return {
+      token: signJwt(payload),
+      user: {
+        uid: updatedUser.uid,
+        email: updatedUser.email,
+        firstname: updatedUser.firstname,
+        lastname: updatedUser.lastname,
+        phone: updatedUser.phone,
+        isProfileComplete: updatedUser.isProfileComplete,
+        behaviourScore: Number(updatedUser.behaviourScore),
+        role: classification.role,
+        userType: updatedUser.userType,
+        studentId: updatedUser.universityUser?.studentId,
+      },
     };
   }
 }
