@@ -35,6 +35,7 @@ router.get('/me', (req, res, next) => {
 router.post('/login', AuthController.login);
 router.post('/google', AuthController.login);
 router.post('/admin-login', AuthController.adminLogin);
+router.post('/complete-profile', authenticateToken, AuthController.completeProfile);
 
 // ==========================================
 // 3. Example Protected Endpoints (RBAC)

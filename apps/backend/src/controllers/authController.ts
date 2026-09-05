@@ -76,6 +76,80 @@ export class AuthController {
   }
 
   /**
+   * POST /api/auth/complete-profile
+   * Saves the first-login information and refreshes the JWT claims.
+   */
+  static async completeProfile(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      if (!authReq.user?.uid) {
+        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
+        return;
+      }
+
+      const { phone, identityType, citizenId, passportId } = req.body;
+      if (typeof phone !== 'string' || !/^\d{10}$/.test(phone)) {
+        res
+          .status(400)
+          .json({ success: false, error: 'Phone number must contain exactly 10 digits' });
+        return;
+      }
+
+      if (authReq.user.userType !== 'UNIVERSITY') {
+        if (!['THAI', 'FOREIGN'].includes(identityType)) {
+          res
+            .status(400)
+            .json({ success: false, error: 'Choose Thai citizen ID or foreign passport' });
+          return;
+        }
+        if (
+          identityType === 'THAI' &&
+          (typeof citizenId !== 'string' || !/^\d{13}$/.test(citizenId))
+        ) {
+          res
+            .status(400)
+            .json({ success: false, error: 'Citizen ID must contain exactly 13 digits' });
+          return;
+        }
+        if (
+          identityType === 'FOREIGN' &&
+          (typeof passportId !== 'string' || !/^[A-Za-z0-9]{9}$/.test(passportId))
+        ) {
+          res
+            .status(400)
+            .json({
+              success: false,
+              error: 'Passport ID must contain exactly 9 letters or digits',
+            });
+          return;
+        }
+      }
+
+      const result = await AuthService.completeProfile({
+        uid: authReq.user.uid,
+        phone,
+        identityType,
+        citizenId,
+        passportId,
+      });
+
+      res.status(200).json({ success: true, message: 'Profile completed successfully', ...result });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        res
+          .status(409)
+          .json({
+            success: false,
+            error: 'This phone number or identity document is already in use',
+          });
+        return;
+      }
+      const status = err.status || 500;
+      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  }
+
+  /**
    * GET /auth/google/callback
    */
   static googleCallback(req: Request, res: Response): void {
