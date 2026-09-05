@@ -69,15 +69,7 @@ export default function TopMenu() {
               </button>
             </>
           ) : (
-            <>
-              <TopMenuItem label="Log In" href="/login" isActive={pathname === '/login'} />
-              <Link
-                href="/login?intent=signup"
-                className="rounded-md bg-rose-700 px-3 py-3 text-sm font-medium text-white transition-colors hover:bg-rose-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-4"
-              >
-                Sign Up
-              </Link>
-            </>
+            <TopMenuItem label="Log In" href="/login" isActive={pathname === '/login'} />
           )}
         </div>
       </nav>

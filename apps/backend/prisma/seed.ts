@@ -31,8 +31,8 @@ async function main() {
 
   console.log('🧹 Cleaned existing records.');
 
-  // Precomputed bcrypt hash for admin test password: "password123"
-  const defaultAdminPasswordHash = '$2b$10$vREaweYvN6CqyL0B5NZt1uKGbL9OEOaaI.37gV73UKKS7DND4sU5q';
+  // Precomputed bcrypt hash for admin test password: "admin"
+  const defaultAdminPasswordHash = '$2b$10$fGUoQssMoXlIF1L6N3li6OgAhHAFaBgKhZhOaM3hsSvBLnW5zhZ2a';
 
   // 2. Seed Operating Schedules (Priority Hierarchy)
   const now = new Date();
@@ -92,11 +92,11 @@ async function main() {
   });
   console.log('✅ Seeded System Configuration');
 
-  // 4. Seed Admin Accounts (Password: password123)
+  // 4. Seed Admin Accounts (Password: admin)
   const admin1 = await prisma.admin.create({
     data: {
       adminId: 1,
-      email: 'admin1@chula.ac.th',
+      email: 'admin@chula.ac.th',
       password: defaultAdminPasswordHash,
       firstname: 'Library',
       lastname: 'Master',
@@ -112,9 +112,7 @@ async function main() {
       lastname: 'Jaidee',
     },
   });
-  console.log(
-    `✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: password123)`
-  );
+  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: admin)`);
 
   // 5. Seed Zones
   const zoneSilent = await prisma.zone.create({
@@ -529,7 +527,7 @@ async function main() {
   console.log('✅ Synchronized all PostgreSQL autoincrement sequences.');
 
   console.log(
-    '🎉 Database seeding completed successfully! Admin Login: admin1@chula.ac.th / "password123"'
+    '🎉 Database seeding completed successfully! Admin Login: admin@chula.ac.th / "admin"'
   );
 }
 

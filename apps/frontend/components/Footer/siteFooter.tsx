@@ -7,7 +7,6 @@ import { FacebookIcon, InstagramIcon, LineIcon } from './socialIcons';
 const navLinks = [
   { label: 'Home', href: '/' },
   { label: 'Log In', href: '/login' },
-  { label: 'Sign Up', href: '/login?intent=signup' },
 ];
 
 // PLACEHOLDER contact details. Deliberately generic — do not substitute real Chulalongkorn
