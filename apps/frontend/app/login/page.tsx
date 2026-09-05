@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, FormEvent, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
 import { API_URL, saveAuth } from '@/lib/auth';
@@ -18,8 +17,6 @@ export default function LogIn() {
 }
 
 function LoginPageContent() {
-  const searchParams = useSearchParams();
-  const isSignupIntent = searchParams.get('intent') === 'signup';
   const router = useRouter();
   const [role, setRole] = useState<Role>('user');
   const [emailError, setEmailError] = useState(false);
@@ -94,13 +91,8 @@ function LoginPageContent() {
     <div className="relative flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-between bg-canvas p-4 sm:p-8">
       <div className="my-auto flex w-full max-w-[450px] flex-col gap-4 rounded-xl border border-gray-200 bg-paper p-8 shadow-[0_5px_15px_0_hsla(220,30%,5%,0.05),0_15px_35px_-5px_hsla(220,25%,10%,0.05)]">
         <h1 className="w-full text-[clamp(2rem,10vw,2.15rem)] font-semibold text-gray-900">
-          {role === 'admin' ? 'Admin Login' : isSignupIntent ? 'Get Started' : 'Login'}
+          {role === 'admin' ? 'Admin Login' : 'Login'}
         </h1>
-        {role === 'user' && isSignupIntent && (
-          <p className="-mt-2 text-sm text-gray-600">
-            New here? Continue below to create your account.
-          </p>
-        )}
 
         {/* Role tabs */}
         <div className="flex rounded-md bg-gray-100 p-1">
