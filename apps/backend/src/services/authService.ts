@@ -145,6 +145,12 @@ export class AuthService {
       where: { uid: payload.uid },
       include: {
         universityUser: true,
+        outsideUser: {
+          include: {
+            thaiUser: true,
+            foreignUser: true,
+          },
+        },
       },
     });
 
@@ -161,6 +167,8 @@ export class AuthService {
       role: payload.role,
       userType: user.userType,
       studentId: user.universityUser?.studentId,
+      citizenId: user.outsideUser?.thaiUser?.citizenId,
+      passportId: user.outsideUser?.foreignUser?.passportId,
     };
   }
 

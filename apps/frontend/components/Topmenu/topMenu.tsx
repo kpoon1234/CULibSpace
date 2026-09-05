@@ -58,6 +58,7 @@ export default function TopMenu() {
         <nav className="ml-auto flex h-full items-center gap-2" aria-label="Main navigation">
           {user ? (
             <>
+              <TopMenuItem label="Profile" href="/profile" isActive={pathname === '/profile'} />
               <div className="hidden h-10 w-28 min-w-0 flex-col justify-center rounded-lg bg-white/15 px-3 text-right sm:flex">
                 <p className="truncate text-sm font-semibold text-white">{user.firstname}</p>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-pink-100">
