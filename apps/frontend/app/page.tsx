@@ -1,52 +1,41 @@
 import SplitHero from '@/components/HomeComponent/SplitHero';
+import SectionHeading from '@/components/HomeComponent/SectionHeading';
 import ZoneAvailabilityGraphic from '@/components/HomeComponent/ZoneAvailabilityGraphic';
-import {
-  CalendarIcon,
-  CheckInIcon,
-  ClockIcon,
-  PinIcon,
-  TicketIcon,
-  UndoIcon,
-} from '@/components/HomeComponent/icons';
+import SignInUnlockCard from '@/components/HomeComponent/SignInUnlockCard';
+import { CalendarIcon, CheckInIcon, ClockIcon, FilterIcon } from '@/components/HomeComponent/icons';
 
-// "Live zone visibility" is elevated into the bento's large tile because it's the one capability a
-// walk-up system structurally can't offer — showing it beats describing it. The rest stay compact
-// on purpose: turning every item into a feature block would rebuild the repetitive tile pattern at
-// a larger size.
 const capabilities = [
   {
     title: 'Real-time booking status',
     description:
       'See which tables are already reserved and which are still open, before you commit to a time slot.',
     Icon: ClockIcon,
+    featured: true,
+  },
+  {
+    title: 'Filter by exact study preferences',
+    description:
+      'Search by seats, power outlets, screens, or quiet level to find the table that actually fits.',
+    Icon: FilterIcon,
+    featured: false,
   },
   {
     title: 'Reserve ahead, held for you',
     description:
       'Pick a table and time slot in advance; the hold keeps anyone else from booking it while you finish.',
     Icon: CalendarIcon,
+    featured: false,
   },
   {
-    title: 'Check in on arrival',
+    title: 'Accountable check-in & fair use',
     description:
-      'Check-in confirms you made it. Tables left unclaimed are released back to availability automatically.',
+      'Check in on arrival or cancel free of charge — a visible behaviour score keeps no-shows accountable.',
     Icon: CheckInIcon,
-  },
-  {
-    title: 'Cancel without penalty',
-    description:
-      'Plans change — cancel any time at no cost. A visible behaviour score keeps no-shows accountable.',
-    Icon: UndoIcon,
-  },
-  {
-    title: 'Open to outside visitors',
-    description:
-      'CU students and staff book free with a university account; visitors book through a paid ticket.',
-    Icon: TicketIcon,
+    featured: false,
   },
 ];
 
-const tile = 'flex flex-col rounded-xl border border-gray-200 bg-paper p-6';
+const card = 'flex flex-col gap-4 rounded-xl border bg-paper p-6 shadow-sm';
 
 export default function Home() {
   return (
@@ -55,32 +44,56 @@ export default function Home() {
 
       <section
         aria-labelledby="capabilities-heading"
-        className="grid grid-cols-1 gap-4 px-6 py-14 sm:grid-cols-2 sm:px-10 sm:py-20 lg:grid-cols-3 lg:px-16 xl:px-24"
+        className="px-6 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-24"
       >
-        <h2 id="capabilities-heading" className="sr-only">
-          What CULibSpace does
-        </h2>
+        <SectionHeading
+          headingId="capabilities-heading"
+          eyebrow="What CULibSpace does"
+          title="Everything a walk-up line can't do"
+          subtitle="Real-time visibility, advance holds, and accountable check-in — built around how you actually study."
+        />
 
-        <div className={`${tile} gap-5 sm:col-span-2 lg:row-span-2`}>
-          <ZoneAvailabilityGraphic />
+        <div className="grid grid-cols-1 gap-4 min-[860px]:grid-cols-2">
+          {capabilities.map(({ title, description, Icon, featured }) => (
+            <div
+              key={title}
+              className={`${card} ${featured ? 'border-2 border-chula-pink' : 'border-hairline'}`}
+            >
+              <span
+                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                  featured ? 'bg-chula-pink/10' : 'border border-hairline bg-white'
+                }`}
+              >
+                <Icon className={`h-5 w-5 ${featured ? 'text-chula-pink' : 'text-cta-primary'}`} />
+              </span>
+              <div className="flex flex-col gap-1.5">
+                <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+                <p className="text-base text-gray-600">{description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
-          <div className="mt-auto flex flex-col gap-2">
-            <PinIcon className="h-6 w-6 text-rose-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Live zone visibility</h3>
-            <p className="max-w-[52ch] text-sm text-gray-600">
-              Silent, Group, and Common — see which zones have room right now, filtered by seats,
-              plugs, and screens.
-            </p>
+      <section
+        aria-labelledby="zones-heading"
+        className="bg-canvas-subtle px-6 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-24"
+      >
+        <SectionHeading
+          headingId="zones-heading"
+          eyebrow="Live zone availability"
+          title="See what's open before you walk in"
+          subtitle="Silent, Group, and Common — sign in for live counts, or preview a sample view below."
+        />
+
+        <div className="grid grid-cols-1 gap-4 min-[860px]:grid-cols-2">
+          <div className={`${card} border-hairline`}>
+            <ZoneAvailabilityGraphic />
+          </div>
+          <div className={`${card} border-hairline`}>
+            <SignInUnlockCard />
           </div>
         </div>
-
-        {capabilities.map(({ title, description, Icon }) => (
-          <div key={title} className={`${tile} gap-2`}>
-            <Icon className="h-6 w-6 text-rose-600" />
-            <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-            <p className="text-sm text-gray-600">{description}</p>
-          </div>
-        ))}
       </section>
     </div>
   );

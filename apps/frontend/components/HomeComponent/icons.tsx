@@ -2,24 +2,6 @@ interface IconProps {
   className?: string;
 }
 
-export function PinIcon({ className }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z" />
-      <circle cx="12" cy="9.3" r="2.4" />
-    </svg>
-  );
-}
-
 export function CalendarIcon({ className }: IconProps) {
   return (
     <svg
@@ -110,7 +92,7 @@ export function CheckInIcon({ className }: IconProps) {
   );
 }
 
-export function UndoIcon({ className }: IconProps) {
+export function FilterIcon({ className }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -122,13 +104,12 @@ export function UndoIcon({ className }: IconProps) {
       className={className}
       aria-hidden="true"
     >
-      <path d="M4.5 9.5h9.8a5.2 5.2 0 0 1 0 10.4H9" />
-      <path d="M8.2 5.2 3.9 9.5l4.3 4.3" />
+      <path d="M4 6h16M7 12h10M10.5 18h3" />
     </svg>
   );
 }
 
-export function TicketIcon({ className }: IconProps) {
+export function SeatIcon({ className }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -140,8 +121,63 @@ export function TicketIcon({ className }: IconProps) {
       className={className}
       aria-hidden="true"
     >
-      <path d="M3.5 8.2a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v1.4a2.4 2.4 0 0 0 0 4.8v1.4a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-1.4a2.4 2.4 0 0 0 0-4.8z" />
-      <path d="M14.2 6.2v11.6" />
+      <path d="M6.5 4.5v8a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-8" />
+      <path d="M6.5 19.5v-3a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v3" />
+      <path d="M5 19.5h14" />
+    </svg>
+  );
+}
+
+export function PlugIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M9 3.5v4M15 3.5v4" />
+      <path d="M7 7.5h10v3.5a5 5 0 0 1-10 0z" />
+      <path d="M12 15.5V20" />
+    </svg>
+  );
+}
+
+export function ScreenIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="3.5" y="5" width="17" height="11.5" rx="1.5" />
+      <path d="M9 20h6M12 16.5V20" />
+    </svg>
+  );
+}
+
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M5 12.5l4.5 4.5L19 7" />
     </svg>
   );
 }

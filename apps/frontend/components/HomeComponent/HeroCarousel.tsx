@@ -25,7 +25,7 @@ export default function HeroCarousel() {
   };
 
   return (
-    <div className="relative h-64 w-full overflow-hidden sm:h-80 lg:h-full">
+    <div className="relative h-72 w-full overflow-hidden bg-hairline sm:h-96 md:h-[440px] min-[860px]:h-full">
       <Image
         src={slides[index].src}
         alt={slides[index].alt}
@@ -33,7 +33,7 @@ export default function HeroCarousel() {
         priority={index === 0}
         sizes="(min-width: 1024px) 42vw, 100vw"
         className="object-cover"
-        style={{ objectPosition: '30% 40%' }}
+        style={{ objectPosition: '50% 68%' }}
       />
 
       <button
@@ -62,8 +62,8 @@ export default function HeroCarousel() {
             onClick={() => setIndex(i)}
             aria-label={`Go to photo ${i + 1} of ${slides.length}`}
             aria-current={i === index}
-            className={`h-2 w-2 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-1 ${
-              i === index ? 'bg-rose-600' : 'bg-white/70 hover:bg-white'
+            className={`h-2.5 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-chula-pink focus-visible:ring-offset-1 ${
+              i === index ? 'w-7 bg-chula-pink' : 'w-2.5 bg-white/70 hover:bg-white'
             }`}
           />
         ))}
