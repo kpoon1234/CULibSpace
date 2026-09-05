@@ -110,6 +110,7 @@ export class AuthService {
         firstname: user.firstname,
         lastname: user.lastname,
         phone: user.phone,
+        imageUrl: user.imageUrl,
         isProfileComplete: user.isProfileComplete,
         behaviourScore: Number(user.behaviourScore),
         role: classification.role,
@@ -158,6 +159,7 @@ export class AuthService {
       firstname: user.firstname,
       lastname: user.lastname,
       phone: user.phone,
+      imageUrl: user.imageUrl,
       isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
       role: payload.role,
@@ -299,6 +301,7 @@ export class AuthService {
         firstname: updatedUser.firstname,
         lastname: updatedUser.lastname,
         phone: updatedUser.phone,
+        imageUrl: updatedUser.imageUrl,
         isProfileComplete: updatedUser.isProfileComplete,
         behaviourScore: Number(updatedUser.behaviourScore),
         role: classification.role,
@@ -313,7 +316,7 @@ export class AuthService {
    */
   static async updateProfile(
     uid: number,
-    data: { firstname?: string; lastname?: string; phone?: string }
+    data: { firstname?: string; lastname?: string; phone?: string; imageUrl?: string }
   ) {
     const user = await prisma.user.findUnique({
       where: { uid },
@@ -324,7 +327,8 @@ export class AuthService {
       throw { status: 404, message: 'User not found' };
     }
 
-    const updateData: { firstname?: string; lastname?: string; phone?: string } = {};
+    const updateData: { firstname?: string; lastname?: string; phone?: string; imageUrl?: string } =
+      {};
 
     if (typeof data.firstname === 'string' && data.firstname.trim()) {
       updateData.firstname = data.firstname.trim();
@@ -342,6 +346,13 @@ export class AuthService {
       updateData.phone = digits;
     }
 
+    if (typeof data.imageUrl === 'string') {
+      const trimmed = data.imageUrl.trim();
+      if (trimmed) {
+        updateData.imageUrl = trimmed;
+      }
+    }
+
     const updatedUser = await prisma.user.update({
       where: { uid },
       data: updateData,
@@ -357,6 +368,50 @@ export class AuthService {
         firstname: updatedUser.firstname,
         lastname: updatedUser.lastname,
         phone: updatedUser.phone,
+        imageUrl: updatedUser.imageUrl,
+        isProfileComplete: updatedUser.isProfileComplete,
+        behaviourScore: Number(updatedUser.behaviourScore),
+        role: classification.role,
+        userType: updatedUser.userType,
+        studentId: updatedUser.universityUser?.studentId,
+      },
+    };
+  }
+
+  /**
+   * Update current user's profile image URL.
+   */
+  static async updateProfileImage(uid: number, imageUrl: string) {
+    const user = await prisma.user.findUnique({
+      where: { uid },
+      include: { universityUser: true },
+    });
+
+    if (!user) {
+      throw { status: 404, message: 'User not found' };
+    }
+
+    const trimmed = imageUrl.trim();
+    if (!trimmed) {
+      throw { status: 400, message: 'Image URL is required' };
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { uid },
+      data: { imageUrl: trimmed },
+      include: { universityUser: true },
+    });
+
+    const classification = classifyEmail(updatedUser.email);
+
+    return {
+      user: {
+        uid: updatedUser.uid,
+        email: updatedUser.email,
+        firstname: updatedUser.firstname,
+        lastname: updatedUser.lastname,
+        phone: updatedUser.phone,
+        imageUrl: updatedUser.imageUrl,
         isProfileComplete: updatedUser.isProfileComplete,
         behaviourScore: Number(updatedUser.behaviourScore),
         role: classification.role,

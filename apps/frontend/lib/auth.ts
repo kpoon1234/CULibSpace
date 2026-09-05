@@ -16,6 +16,7 @@ export type AuthUser = {
   userType?: 'UNIVERSITY' | 'THAI' | 'FOREIGN';
   isProfileComplete?: boolean;
   behaviourScore?: number;
+  imageUrl?: string;
 };
 
 export function saveAuth(token: string, user: AuthUser): void {
