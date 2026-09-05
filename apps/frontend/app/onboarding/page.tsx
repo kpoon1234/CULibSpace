@@ -26,7 +26,7 @@ export default function OnboardingPage() {
     }
 
     async function loadUser() {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
+      const res = await fetch(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -85,7 +85,7 @@ export default function OnboardingPage() {
               : { passportId: identityValue }),
           };
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/complete-profile`, {
+      const res = await fetch(`${API_URL}/api/auth/complete-profile`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
