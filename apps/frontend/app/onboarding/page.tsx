@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
+import { API_URL, getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
 
 type IdentityType = 'THAI' | 'FOREIGN';
 
@@ -23,7 +23,7 @@ export default function OnboardingPage() {
     }
 
     async function loadUser() {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
+      const res = await fetch(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -77,7 +77,7 @@ export default function OnboardingPage() {
                 ? { citizenId: identityValue }
                 : { passportId: identityValue }),
             };
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/complete-profile`, {
+      const res = await fetch(`${API_URL}/api/auth/complete-profile`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -32,7 +32,7 @@ async function main() {
   console.log('🧹 Cleaned existing records.');
 
   // Precomputed bcrypt hash for admin test password: "password123"
-  const defaultAdminPasswordHash = '$2a$10$vI8aWBnW3fID.ZQ4/zo1G.q1lRps.9cGLcZEiGDMVr5yUP1KUOYTa';
+  const defaultAdminPasswordHash = '$2b$10$vREaweYvN6CqyL0B5NZt1uKGbL9OEOaaI.37gV73UKKS7DND4sU5q';
 
   // 2. Seed Operating Schedules (Priority Hierarchy)
   const now = new Date();

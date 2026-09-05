@@ -55,6 +55,7 @@ if (googleClientId && googleClientSecret) {
             token: authResult.token,
           });
         } catch (error) {
+          console.error('[google-strategy] verify callback failed:', error);
           return done(error as Error, undefined);
         }
       }

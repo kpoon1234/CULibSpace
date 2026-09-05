@@ -10,13 +10,21 @@ const router = Router();
 // ==========================================
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-router.get(
-  '/google/callback',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.CLIENT_URL || 'http://localhost:3000'}/login`,
-  }),
-  AuthController.googleCallback
-);
+router.get('/google/callback', (req, res, next) => {
+  passport.authenticate('google', (err: any, user: any, info: any) => {
+    console.log('[google/callback] err=', err, 'user=', user, 'info=', info);
+    if (err || !user) {
+      return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:3000'}/login`);
+    }
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        console.log('[google/callback] req.logIn error=', loginErr);
+        return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:3000'}/login`);
+      }
+      return AuthController.googleCallback(req, res);
+    });
+  })(req, res, next);
+});
 
 router.post('/logout', AuthController.logout);
 router.get('/session/me', AuthController.getSessionMe);

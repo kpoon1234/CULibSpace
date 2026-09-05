@@ -20,6 +20,10 @@ app.use(
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use((req, _res, next) => {
+  console.log(`[req] ${req.method} ${req.originalUrl}`);
+  next();
+});
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'fallback-session-secret',

@@ -152,6 +152,7 @@ export class AuthController {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const user = req.user as any;
     const token = user?.token;
+    console.log('[googleCallback] req.user =', user);
 
     if (token) {
       res.redirect(`${clientUrl}/auth/callback?token=${encodeURIComponent(token)}`);
