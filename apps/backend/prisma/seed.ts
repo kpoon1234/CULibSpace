@@ -92,11 +92,11 @@ async function main() {
   });
   console.log('✅ Seeded System Configuration');
 
-  // 4. Seed Admin Accounts (Password: password123)
+  // 4. Seed Admin Accounts (Password: admin)
   const admin1 = await prisma.admin.create({
     data: {
       adminId: 1,
-      email: 'admin1@chula.ac.th',
+      email: 'admin@chula.ac.th',
       password: defaultAdminPasswordHash,
       firstname: 'Library',
       lastname: 'Master',
@@ -112,9 +112,7 @@ async function main() {
       lastname: 'Jaidee',
     },
   });
-  console.log(
-    `✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: password123)`
-  );
+  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: admin)`);
 
   // 5. Seed Zones
   const zoneSilent = await prisma.zone.create({
@@ -529,7 +527,7 @@ async function main() {
   console.log('✅ Synchronized all PostgreSQL autoincrement sequences.');
 
   console.log(
-    '🎉 Database seeding completed successfully! Admin Login: admin1@chula.ac.th / "password123"'
+    '🎉 Database seeding completed successfully! Admin Login: admin@chula.ac.th / "admin"'
   );
 }
 
