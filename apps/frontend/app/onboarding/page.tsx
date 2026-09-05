@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
+import { API_URL } from '@/lib/auth';
 
 type IdentityType = 'THAI' | 'FOREIGN';
 
