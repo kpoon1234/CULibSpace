@@ -159,50 +159,6 @@ export class AuthController {
     }
   }
 
-  static async updateProfile(req: Request, res: Response): Promise<void> {
-    try {
-      const authReq = req as AuthenticatedRequest;
-      if (!authReq.user?.uid) {
-        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
-        return;
-      }
-
-      const { firstname, lastname, phone } = req.body;
-
-      const result = await AuthService.updateProfile(authReq.user.uid, {
-        firstname,
-        lastname,
-        phone,
-      });
-
-      res.status(200).json({ success: true, message: 'Profile updated successfully', ...result });
-    } catch (err: any) {
-      const status = err.status || 500;
-      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
-    }
-  }
-
-  static async updateProfileImage(req: Request, res: Response): Promise<void> {
-    try {
-      const authReq = req as AuthenticatedRequest;
-      if (!authReq.user?.uid) {
-        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
-        return;
-      }
-
-      const { imageUrl } = req.body;
-
-      const result = await AuthService.updateProfileImage(authReq.user.uid, imageUrl);
-
-      res
-        .status(200)
-        .json({ success: true, message: 'Profile image updated successfully', ...result });
-    } catch (err: any) {
-      const status = err.status || 500;
-      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
-    }
-  }
-
   /**
    * GET /auth/google/callback
    */

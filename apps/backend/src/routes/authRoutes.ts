@@ -49,8 +49,6 @@ router.post('/login', AuthController.login);
 router.post('/google', AuthController.login);
 router.post('/admin-login', AuthController.adminLogin);
 router.post('/complete-profile', authenticateToken, AuthController.completeProfile);
-router.patch('/profile', authenticateToken, AuthController.updateProfile);
-router.patch('/profile/image', authenticateToken, AuthController.updateProfileImage);
 
 // ==========================================
 // 3. Example Protected Endpoints (RBAC)
