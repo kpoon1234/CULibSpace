@@ -86,9 +86,10 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
     setIsSaving(true);
     try {
-      // Photo upload isn't wired up yet — there's no column/storage for it
-      // on the backend. It's included here as UI-only until that lands.
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/profile`, {
+      // Photo upload is still UI-only: the API can set an imageUrl string,
+      // but there's no file-storage endpoint yet to turn the local file the
+      // user picked into a hosted URL, so it can't be sent along here.
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/profile`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -97,17 +98,8 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
         body: JSON.stringify({ firstname, lastname, phone }),
       });
 
-      if (res.status === 404) {
-        setNotice(
-          'Editing is not available yet — this will be enabled once the update-profile API ships.'
-        );
-        // Nothing was actually persisted, so leave savedValues alone — the
-        // button stays visible in case the API comes online and they retry.
-        return;
-      }
-
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.success) {
         setError(data.error || 'Unable to update your profile.');
         return;
       }
