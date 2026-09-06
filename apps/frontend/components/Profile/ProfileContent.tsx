@@ -17,6 +17,9 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
   const [firstname, setFirstname] = useState('');
   const [lastname, setLastname] = useState('');
   const [phone, setPhone] = useState('');
+  // Tracks the last-saved values so the submit button only shows up once
+  // something actually differs from them.
+  const [savedValues, setSavedValues] = useState({ firstname: '', lastname: '', phone: '' });
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -44,10 +47,20 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       setFirstname(data.user.firstname);
       setLastname(data.user.lastname);
       setPhone(data.user.phone || '');
+      setSavedValues({
+        firstname: data.user.firstname,
+        lastname: data.user.lastname,
+        phone: data.user.phone || '',
+      });
     }
 
     loadUser().catch(() => router.replace('/login'));
   }, [router]);
+
+  const hasChanges =
+    firstname !== savedValues.firstname ||
+    lastname !== savedValues.lastname ||
+    phone !== savedValues.phone;
 
   function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -58,7 +71,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const token = getAuthToken();
-    if (!token || !user) return;
+    if (!token || !user || !hasChanges) return;
 
     setError('');
     setNotice('');
@@ -88,6 +101,8 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
         setNotice(
           'Editing is not available yet — this will be enabled once the update-profile API ships.'
         );
+        // Nothing was actually persisted, so leave savedValues alone — the
+        // button stays visible in case the API comes online and they retry.
         return;
       }
 
@@ -98,6 +113,11 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       }
 
       setUser(data.user);
+      setSavedValues({
+        firstname: data.user.firstname,
+        lastname: data.user.lastname,
+        phone: data.user.phone || '',
+      });
       setNotice('Profile updated.');
     } catch {
       setError('Unable to connect to the server. Please try again.');
@@ -190,12 +210,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               />
             </label>
             <div className="block text-sm font-medium text-gray-700">
-              <span className="flex items-center gap-1">
-                User Type
-                <span aria-hidden="true" title="Read-only">
-                  🔒
-                </span>
-              </span>
+              User Type
               <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">
                 {byKey.userType.value || '—'}
               </p>
@@ -215,12 +230,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
           </div>
 
           <div className="block text-sm font-medium text-gray-700">
-            <span className="flex items-center gap-1">
-              Email
-              <span aria-hidden="true" title="Read-only">
-                🔒
-              </span>
-            </span>
+            Email
             <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">
               {byKey.email.value}
             </p>
@@ -230,12 +240,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {extraFields.map((field) => (
                 <div key={field.key} className="block text-sm font-medium text-gray-700">
-                  <span className="flex items-center gap-1">
-                    {field.label}
-                    <span aria-hidden="true" title="Read-only">
-                      🔒
-                    </span>
-                  </span>
+                  {field.label}
                   <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">
                     {field.value}
                   </p>
@@ -265,12 +270,14 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       <div className="px-8 pb-8">
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         {notice && <p className="mb-3 text-sm text-amber-600">{notice}</p>}
-        <button
-          disabled={isSaving}
-          className="w-full rounded-md bg-rose-500 px-4 py-2 font-semibold text-white disabled:opacity-60"
-        >
-          {isSaving ? 'Saving…' : 'Confirm Update'}
-        </button>
+        {hasChanges && (
+          <button
+            disabled={isSaving}
+            className="w-full rounded-md bg-rose-500 px-4 py-2 font-semibold text-white disabled:opacity-60"
+          >
+            {isSaving ? 'Saving…' : 'Confirm Update'}
+          </button>
+        )}
       </div>
     </form>
   );
