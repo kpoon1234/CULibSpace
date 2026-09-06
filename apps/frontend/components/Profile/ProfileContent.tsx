@@ -158,11 +158,11 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
             onClick={() => fileInputRef.current?.click()}
             className="flex h-40 w-40 items-center justify-center overflow-hidden rounded-lg border border-dashed border-gray-300 bg-gray-100 text-sm text-gray-500 hover:bg-gray-200"
           >
-            {photoPreview ? (
+            {photoPreview || user.imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={photoPreview}
-                alt="Profile preview"
+                src={photoPreview || user.imageUrl || undefined}
+                alt="Profile"
                 className="h-full w-full object-cover"
               />
             ) : (
