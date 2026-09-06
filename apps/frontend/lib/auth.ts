@@ -1,3 +1,7 @@
+// Falls back to the local backend so a missing .env.local degrades to a working dev URL
+// instead of silently producing "undefined/api/auth/...".
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
 export const AUTH_TOKEN_KEY = 'culibspace_token';
 export const AUTH_USER_KEY = 'culibspace_user';
 const AUTH_CHANGE_EVENT = 'culibspace-auth-change';

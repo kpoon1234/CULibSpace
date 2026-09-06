@@ -18,8 +18,8 @@ export default function TopMenuItem(props: TopMenuItemProps) {
     <Link
       href={href}
       onClick={onClick}
-      className={`inline-flex h-10 w-28 items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
-        isActive ? 'bg-white/20 text-white' : 'text-white hover:bg-white/15'
+      className={`rounded-md px-2 py-3 text-sm font-medium text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-3 ${
+        isActive ? 'bg-chula-pink-hover' : 'hover:bg-chula-pink-hover'
       }`}
     >
       {label}

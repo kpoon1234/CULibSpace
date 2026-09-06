@@ -77,7 +77,7 @@ export class AuthController {
 
   /**
    * POST /api/auth/complete-profile
-   * Saves the first-login information and refreshes the JWT claims.
+   * Saves the user-entered profile details and refreshes the JWT claims.
    */
   static async completeProfile(req: Request, res: Response): Promise<void> {
     try {
@@ -87,7 +87,19 @@ export class AuthController {
         return;
       }
 
-      const { phone, identityType, citizenId, passportId } = req.body;
+      const { firstname, lastname, phone, identityType, citizenId, passportId } = req.body;
+
+      // Validate required names from user input
+      if (!firstname || typeof firstname !== 'string' || !firstname.trim()) {
+        res.status(400).json({ success: false, error: 'First name is required' });
+        return;
+      }
+
+      if (!lastname || typeof lastname !== 'string' || !lastname.trim()) {
+        res.status(400).json({ success: false, error: 'Last name is required' });
+        return;
+      }
+
       if (typeof phone !== 'string' || !/^\d{10}$/.test(phone)) {
         res
           .status(400)
@@ -115,18 +127,18 @@ export class AuthController {
           identityType === 'FOREIGN' &&
           (typeof passportId !== 'string' || !/^[A-Za-z0-9]{9}$/.test(passportId))
         ) {
-          res
-            .status(400)
-            .json({
-              success: false,
-              error: 'Passport ID must contain exactly 9 letters or digits',
-            });
+          res.status(400).json({
+            success: false,
+            error: 'Passport ID must contain exactly 9 letters or digits',
+          });
           return;
         }
       }
 
       const result = await AuthService.completeProfile({
         uid: authReq.user.uid,
+        firstname: firstname.trim(),
+        lastname: lastname.trim(),
         phone,
         identityType,
         citizenId,
@@ -136,12 +148,10 @@ export class AuthController {
       res.status(200).json({ success: true, message: 'Profile completed successfully', ...result });
     } catch (err: any) {
       if (err.code === 'P2002') {
-        res
-          .status(409)
-          .json({
-            success: false,
-            error: 'This phone number or identity document is already in use',
-          });
+        res.status(409).json({
+          success: false,
+          error: 'This phone number or identity document is already in use',
+        });
         return;
       }
       const status = err.status || 500;
@@ -156,6 +166,7 @@ export class AuthController {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const user = req.user as any;
     const token = user?.token;
+    console.log('[googleCallback] req.user =', user);
 
     if (token) {
       res.redirect(`${clientUrl}/auth/callback?token=${encodeURIComponent(token)}`);
@@ -183,10 +194,10 @@ export class AuthController {
    */
   static getSessionMe(req: Request, res: Response): void {
     if (!req.isAuthenticated() || !req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ success: false, error: 'Unauthorized: Valid session required' });
       return;
     }
-    res.json({ user: req.user });
+    res.status(200).json({ success: true, user: req.user });
   }
 
   /**
@@ -271,6 +282,35 @@ export class AuthController {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  }
+
+  /**
+   * GET /api/auth/score
+   * Fetch current user's behavior score and penalty/adjustment history (US1-5 / FR-1.5)
+   */
+  static async getScore(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      if (!authReq.user || !authReq.user.uid) {
+        res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Valid user session required',
+        });
+        return;
+      }
+
+      const scoreData = await AuthService.getUserScore(authReq.user.uid);
+      res.status(200).json({
+        success: true,
+        ...scoreData,
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({
+        success: false,
+        error: err.message || 'Internal server error',
+      });
     }
   }
 }

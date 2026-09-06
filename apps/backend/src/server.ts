@@ -20,6 +20,10 @@ app.use(
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use((req, _res, next) => {
+  console.log(`[req] ${req.method} ${req.originalUrl}`);
+  next();
+});
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'fallback-session-secret',
@@ -36,9 +40,7 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Mount Routers
-// app.use('/auth', authRoutes);
 app.use('/api/auth', authRoutes);
-// app.use('/api', authRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {

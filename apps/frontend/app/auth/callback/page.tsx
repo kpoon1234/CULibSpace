@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { saveAuth, type AuthUser } from '@/lib/auth';
+import { API_URL, saveAuth, type AuthUser } from '@/lib/auth';
 
 function AuthCallbackContent() {
   const router = useRouter();
@@ -12,7 +12,7 @@ function AuthCallbackContent() {
     async function checkAuth() {
       try {
         const token = searchParams.get('token');
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
+        const res = await fetch(`${API_URL}/api/auth/me`, {
           credentials: 'include',
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
