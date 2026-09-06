@@ -6,6 +6,7 @@ import passport from './passport.js';
 import { PrismaClient } from '@prisma/client';
 import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
+import seatRoutes from './routes/seatRoutes.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -52,3 +53,5 @@ app.get('/api/hello', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on ${BASE_URL}`);
 });
+
+app.use('/api/seats', seatRoutes);
