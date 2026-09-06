@@ -61,18 +61,16 @@ export default function TopMenu() {
                 onClick={openProfile}
                 aria-haspopup="dialog"
                 aria-expanded={isProfileOpen}
-                className={`rounded-md px-2 py-3 text-sm font-medium text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-3 ${
+                aria-label={`Open profile for ${user.firstname}`}
+                className={`flex min-w-0 flex-col justify-center rounded-md px-2 py-1.5 text-right transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-3 ${
                   isProfileOpen ? 'bg-chula-pink-hover' : 'hover:bg-chula-pink-hover'
                 }`}
               >
-                Profile
-              </button>
-              <div className="hidden min-w-0 flex-col justify-center text-right sm:flex">
-                <p className="truncate text-sm font-semibold text-ink">{user.firstname}</p>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-ink/70">
+                <span className="truncate text-sm font-semibold text-ink">{user.firstname}</span>
+                <span className="hidden text-[11px] font-medium uppercase tracking-wide text-ink/70 sm:block">
                   {user.role}
-                </p>
-              </div>
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={logout}
