@@ -6,10 +6,12 @@ import { useMemo, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
 import { clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
+import { useProfileModal } from '@/lib/profileModalContext';
 
 export default function TopMenu() {
   const router = useRouter();
   const pathname = usePathname();
+  const { isOpen: isProfileOpen, openProfile } = useProfileModal();
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
     if (!storedUser) return null;
@@ -58,7 +60,17 @@ export default function TopMenu() {
         <nav className="ml-auto flex h-full items-center gap-2" aria-label="Main navigation">
           {user ? (
             <>
-              <TopMenuItem label="Profile" href="/profile" isActive={pathname === '/profile'} />
+              <button
+                type="button"
+                onClick={openProfile}
+                aria-haspopup="dialog"
+                aria-expanded={isProfileOpen}
+                className={`inline-flex h-10 w-28 items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
+                  isProfileOpen ? 'bg-white/20 text-white' : 'text-white hover:bg-white/15'
+                }`}
+              >
+                Profile
+              </button>
               <div className="hidden h-10 w-28 min-w-0 flex-col justify-center rounded-lg bg-white/15 px-3 text-right sm:flex">
                 <p className="truncate text-sm font-semibold text-white">{user.firstname}</p>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-pink-100">

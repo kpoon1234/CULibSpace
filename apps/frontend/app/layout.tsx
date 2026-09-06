@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import TopMenu from '@/components/Topmenu/topMenu';
+import ProfileModal from '@/components/Profile/ProfileModal';
+import { ProfileModalProvider } from '@/lib/profileModalContext';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -22,8 +24,11 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <TopMenu />
-        {children}
+        <ProfileModalProvider>
+          <TopMenu />
+          {children}
+          <ProfileModal />
+        </ProfileModalProvider>
       </body>
     </html>
   );
