@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuthToken, type AuthUser } from '@/lib/auth';
+import { getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
 import { getExtraIdFields, getProfileFields } from '@/lib/fieldLock';
 
 type ProfileContentProps = {
@@ -104,6 +104,8 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
         return;
       }
 
+      // Update stored auth user to reflect profile changes
+      saveAuth(token, data.user);
       setUser(data.user);
       setSavedValues({
         firstname: data.user.firstname,
