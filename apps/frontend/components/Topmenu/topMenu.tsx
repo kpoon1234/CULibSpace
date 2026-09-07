@@ -6,10 +6,12 @@ import { useMemo, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
 import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
+import { useProfileModal } from '@/lib/profileModalContext';
 
 export default function TopMenu() {
   const router = useRouter();
   const pathname = usePathname();
+  const { isOpen: isProfileOpen, openProfile } = useProfileModal();
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
     if (!storedUser) return null;
@@ -54,18 +56,21 @@ export default function TopMenu() {
         <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4">
           {user ? (
             <>
-              <Link
-                href="/profile"
-                className="rounded-md bg-white/10 px-3 py-3 text-sm font-medium text-ink transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-4"
+              <button
+                type="button"
+                onClick={openProfile}
+                aria-haspopup="dialog"
+                aria-expanded={isProfileOpen}
+                aria-label={`Open profile for ${user.firstname}`}
+                className={`flex min-w-0 flex-col justify-center rounded-md px-2 py-1.5 text-right transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-3 ${
+                  isProfileOpen ? 'bg-chula-pink-hover' : 'hover:bg-chula-pink-hover'
+                }`}
               >
-                Profile
-              </Link>
-              <div className="hidden min-w-0 flex-col justify-center text-right sm:flex">
-                <p className="truncate text-sm font-semibold text-ink">{user.firstname}</p>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-ink/70">
+                <span className="truncate text-sm font-semibold text-ink">{user.firstname}</span>
+                <span className="hidden text-[11px] font-medium uppercase tracking-wide text-ink/70 sm:block">
                   {user.role}
-                </p>
-              </div>
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={logout}
