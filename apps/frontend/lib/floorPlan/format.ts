@@ -19,8 +19,7 @@ export function amenitySummary(
 
 /** One-line availability sentence for a zone header / summary. */
 export function availabilityLine(counts: Record<TableStatus, number>, total: number): string {
-  const open = counts.Available;
-  return `${open} of ${total} ${open === 1 ? 'table' : 'tables'} open`;
+  return `${counts.Available} of ${total} ${total === 1 ? 'table' : 'tables'} open`;
 }
 
 export function statusVerb(status: TableStatus, isLocked: boolean): string {

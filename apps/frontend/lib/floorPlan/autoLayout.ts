@@ -7,7 +7,7 @@ import type {
   ZoneLayout,
 } from './types';
 
-// GET /api/layout returns tables with their status + attributes, but the schema
+// GET /api/seats/layout returns tables with their status + attributes, but the schema
 // has no spatial coordinates yet. This module turns whatever it does send into a
 // renderable geometry layout:
 //   - if a table already carries x/y/shape/size, those are kept verbatim
@@ -48,7 +48,7 @@ function boundsFromTables(tables: TableLayout[]): Rect {
 }
 
 /**
- * Build a fully-resolved geometry layout from the /api/layout payload, filling
+ * Build a fully-resolved geometry layout from the /api/seats/layout payload, filling
  * in any missing coordinates with a grid arrangement.
  */
 export function synthesizeLayout(

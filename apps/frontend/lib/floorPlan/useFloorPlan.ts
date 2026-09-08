@@ -7,7 +7,7 @@ import { filterAmenityQuery, filterTimeRange } from './filterOptions';
 import type { FloorPlan, FloorPlanFilter, LayoutQuery } from './types';
 import { EMPTY_FILTER } from './types';
 
-// One SWR resource: GET /api/layout, polled on STATUS_POLL_MS for fresh status.
+// One SWR resource: GET /api/seats/layout, polled on STATUS_POLL_MS for fresh status.
 // Geometry + status are split out of that one response by fetchLayout(), then
 // merged for render by buildFloorPlan().
 

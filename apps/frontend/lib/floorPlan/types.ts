@@ -1,13 +1,13 @@
 // Types for the 2D floor-plan UI (FR-2: browse zone/table availability before arrival).
 //
-// One backend endpoint drives this UI: **GET /api/layout** (the team's
+// One backend endpoint drives this UI: **GET /api/seats/layout** (the team's
 // LayoutController / LayoutService). It returns every zone with its tables, each
 // table carrying its live `status` (Available / Reserved / Occupied / Closed)
 // recomputed for the requested time window, plus its attributes (seats, plugs,
 // TV). Query params (all optional):
 //
 //   zoneType, plugCap (min), hasTvScreen, minSeats   → attribute filters
-//   date + timeSlot  OR  startDateTime + endDateTime  → the status time window
+//   startDateTime + endDateTime                       → the status time window
 //   (no params → all zones/tables, status for now → +1h)
 //
 // Geometry (per-table x/y/shape/size, per-zone bounds) is OPTIONAL in the
@@ -95,7 +95,7 @@ export interface FloorLayoutResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Wire shapes — GET /api/layout
+// Wire shapes — GET /api/seats/layout
 // ---------------------------------------------------------------------------
 
 /** One table's live status + attributes, as buildFloorPlan() consumes it. */
@@ -116,7 +116,7 @@ export interface SeatStatusZone {
   tables: SeatStatusTable[];
 }
 
-/** One table exactly as GET /api/layout sends it: status + attributes always,
+/** One table exactly as GET /api/seats/layout sends it: status + attributes always,
  *  geometry (code/shape/x/y/size) optional. */
 export interface RawLayoutTable {
   tableId: number;
@@ -143,16 +143,17 @@ export interface RawLayoutZone {
   tables: RawLayoutTable[];
 }
 
-/** Envelope returned by GET /api/layout (a bare array is also tolerated). */
+/** Envelope returned by GET /api/seats/layout (a bare array is also tolerated). */
 export interface LayoutEnvelope {
   success: boolean;
   data?: RawLayoutZone[];
   error?: string;
 }
 
-/** Query params accepted by GET /api/layout. */
+/** Query params for GET /api/seats/layout (LayoutController). */
 export interface LayoutQuery {
-  /** Frontend-only floor concept; sent as a hint, ignored if the backend has no floors. */
+  /** UI-only floor concept — not sent (the backend has no floors); used to pick
+   *  the sample floor on fallback. */
   floorId?: number;
   zoneType?: ZoneType;
   /** Minimum plug count (Prisma: plugCap gte). */
@@ -160,9 +161,7 @@ export interface LayoutQuery {
   hasTvScreen?: boolean;
   /** Minimum seat count (Prisma: numberOfSeat gte). */
   minSeats?: number;
-  /** ISO date (YYYY-MM-DD) + HH:mm slot, or an explicit range — sets the status window. */
-  date?: string;
-  timeSlot?: string;
+  /** Local datetime strings — the window the status is computed for. */
   startDateTime?: string;
   endDateTime?: string;
 }

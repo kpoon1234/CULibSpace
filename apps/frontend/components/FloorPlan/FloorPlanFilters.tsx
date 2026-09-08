@@ -25,7 +25,7 @@ function plugKey(range: FloorPlanFilter['plugRange']): string {
   return `${range[0]}-${range[1]}`;
 }
 
-// Table Filter dialog — maps the Figma panel to the GET /api/layout params:
+// Table Filter dialog — maps the Figma panel to the GET /api/seats/layout params:
 // large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
 // minSeats, and the free "Start Date Time" / "End Date Time" fields ->
 // startDateTime / endDateTime, the window the status is evaluated against.
@@ -33,6 +33,12 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
   const [draft, setDraft] = useState<FloorPlanFilter>(value);
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // `datetime-local` min = now (local wall clock), so a past window (the backend
+  // rejects it with 400) can't be picked. Computed once when the dialog mounts.
+  const [nowLocal] = useState(() =>
+    new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+  );
 
   const bothTimesSet = Boolean(draft.startDateTime) && Boolean(draft.endDateTime);
   const oneTimeSet = Boolean(draft.startDateTime) !== Boolean(draft.endDateTime);
@@ -143,6 +149,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 type="datetime-local"
                 className={fieldCls}
                 value={draft.startDateTime ?? ''}
+                min={nowLocal}
                 onChange={(e) => setDraft((d) => ({ ...d, startDateTime: e.target.value || null }))}
               />
             </label>
@@ -153,7 +160,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 type="datetime-local"
                 className={fieldCls}
                 value={draft.endDateTime ?? ''}
-                min={draft.startDateTime ?? undefined}
+                min={draft.startDateTime ?? nowLocal}
                 onChange={(e) => setDraft((d) => ({ ...d, endDateTime: e.target.value || null }))}
               />
             </label>
