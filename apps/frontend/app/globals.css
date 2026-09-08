@@ -176,3 +176,26 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * 2D floor-plan tables (components/FloorPlan). The hover/focus ring is a
+ * separate SVG shape whose opacity CSS toggles, so it never competes with the
+ * claret selection ring drawn on the table body. On focus-visible it recolours
+ * to claret — the action colour — matching the rest of the app's focus states.
+ */
+.fp-table--interactive {
+  outline: none;
+}
+.fp-table__ring {
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.fp-table--interactive:hover .fp-table__ring {
+  opacity: 1;
+}
+.fp-table--interactive:focus-visible .fp-table__ring {
+  opacity: 1;
+  stroke: var(--claret-500);
+  stroke-width: 3px;
+}
