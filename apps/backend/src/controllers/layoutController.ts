@@ -5,50 +5,45 @@ import { ZoneType } from '@prisma/client';
 export class LayoutController {
   static async getLayout(req: Request, res: Response): Promise<void> {
     try {
-      const {
-        zoneType,
-        plugCap,
-        hasTvScreen,
-        minSeats,
-        date,
-        timeSlot,
-        startDateTime,
-        endDateTime,
-      } = req.query;
+      const { zoneType, plugCap, hasTvScreen, minSeats, startDateTime, endDateTime } = req.query;
+
       const now = new Date();
 
       // 1. จัดการช่วงเวลา (Target Time Calculation)
+      // กรณีที่ 1/2: ไม่มีเวลาหรือมีแค่บางส่วน → ใช้ fallback (now, now + 1 ชม.)
+      // กรณีที่ 3/4: มี startDateTime + endDateTime → ใช้ค่าที่ส่งมา
       let targetStart: Date;
       let targetEnd: Date;
 
       if (startDateTime && endDateTime) {
+        // กรณีที่ 3/4: ส่งเวลามาครบ
         targetStart = new Date(startDateTime as string);
         targetEnd = new Date(endDateTime as string);
-      } else if (date) {
-        // หากส่ง date มา ให้คำนวณกับ timeSlot (หรือใช้เวลาต้นชั่วโมงปัจจุบันเป็นค่าเริ่มต้น)
-        const currentHour = now.getHours().toString().padStart(2, '0');
-        const slot = (timeSlot as string) || `${currentHour}:00`;
-        targetStart = new Date(`${date}T${slot}:00`);
-        targetEnd = new Date(targetStart.getTime() + 1 * 60 * 60 * 1000); // กำหนด default เป็น 1 ชม.
+
+        // Validation เวลาที่ส่งมา
+        if (isNaN(targetStart.getTime()) || isNaN(targetEnd.getTime())) {
+          res
+            .status(400)
+            .json({ success: false, error: 'Invalid startDateTime or endDateTime format' });
+          return;
+        }
+        if (targetEnd <= targetStart) {
+          res
+            .status(400)
+            .json({ success: false, error: 'endDateTime must be after startDateTime' });
+          return;
+        }
+        if (targetStart.getTime() < now.getTime() - 5 * 60 * 1000) {
+          res.status(400).json({ success: false, error: 'Cannot request status for past dates' });
+          return;
+        }
       } else {
-        // กรณีไม่ส่งเวลามาเลย (US2-1/US2-2 โหลดครั้งแรก) ใช้เวลาปัจจุบัน
-        targetStart = new Date();
-        targetEnd = new Date(targetStart.getTime() + 1 * 60 * 60 * 1000);
+        // กรณีที่ 1/2: fallback → เวลาปัจจุบัน + 1 ชม.
+        targetStart = now;
+        targetEnd = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
-      // 2. Validation เช็กข้อผิดพลาดของเวลา
-      if (targetEnd <= targetStart) {
-        res.status(400).json({ success: false, error: 'endDateTime must be after startDateTime' });
-        return;
-      }
-
-      // อนุโลมเวลาในอดีตได้เล็กน้อย (เผื่อ Server lag) แต่ปฏิเสธวันที่ในอดีตชัดเจน
-      if (targetStart.getTime() < now.getTime() - 5 * 60 * 1000) {
-        res.status(400).json({ success: false, error: 'Cannot request status for past dates' });
-        return;
-      }
-
-      // 3. จัดเตรียม Filters
+      // 2. จัดเตรียม Filters (ทั้งหมด optional)
       const parsedPlugCap = plugCap ? parseInt(String(plugCap), 10) : undefined;
       const parsedMinSeats = minSeats ? parseInt(String(minSeats), 10) : undefined;
 
