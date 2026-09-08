@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { EMPTY_FILTER, PLUG_BUCKETS, type FloorPlanFilter } from '@/lib/floorPlan';
+import {
+  EMPTY_FILTER,
+  MIN_SEATS_OPTIONS,
+  PLUG_BUCKETS,
+  type FloorPlanFilter,
+} from '@/lib/floorPlan';
 import { CloseIcon } from './icons';
 
 interface FloorPlanFiltersProps {
@@ -20,10 +25,10 @@ function plugKey(range: FloorPlanFilter['plugRange']): string {
   return `${range[0]}-${range[1]}`;
 }
 
-// Table Filter dialog — maps the Figma panel to the SeatLayoutQuery inputs:
-// large screen -> hasTvScreen, plug amount -> plugCap bucket, and the free
-// "Start Date Time" / "End Date Time" fields -> startDateTime / endDateTime,
-// the booking window the status feed is evaluated against.
+// Table Filter dialog — maps the Figma panel to the GET /api/layout params:
+// large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
+// minSeats, and the free "Start Date Time" / "End Date Time" fields ->
+// startDateTime / endDateTime, the window the status is evaluated against.
 export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanFiltersProps) {
   const [draft, setDraft] = useState<FloorPlanFilter>(value);
   const titleId = useId();
@@ -87,26 +92,49 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             Require a TV / large screen
           </label>
 
-          <label className="block text-sm font-medium text-gray-700">
-            Power outlets
-            <select
-              className={fieldCls}
-              value={plugKey(draft.plugRange)}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === 'any') return setDraft((d) => ({ ...d, plugRange: null }));
-                const bucket = PLUG_BUCKETS.find((b) => `${b.range[0]}-${b.range[1]}` === v);
-                setDraft((d) => ({ ...d, plugRange: bucket ? bucket.range : null }));
-              }}
-            >
-              <option value="any">Any</option>
-              {PLUG_BUCKETS.map((b) => (
-                <option key={b.label} value={`${b.range[0]}-${b.range[1]}`}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Power outlets
+              <select
+                className={fieldCls}
+                value={plugKey(draft.plugRange)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'any') return setDraft((d) => ({ ...d, plugRange: null }));
+                  const bucket = PLUG_BUCKETS.find((b) => `${b.range[0]}-${b.range[1]}` === v);
+                  setDraft((d) => ({ ...d, plugRange: bucket ? bucket.range : null }));
+                }}
+              >
+                <option value="any">Any</option>
+                {PLUG_BUCKETS.map((b) => (
+                  <option key={b.label} value={`${b.range[0]}-${b.range[1]}`}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-sm font-medium text-gray-700">
+              Minimum seats
+              <select
+                className={fieldCls}
+                value={draft.minSeats ?? 'any'}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    minSeats: e.target.value === 'any' ? null : Number(e.target.value),
+                  }))
+                }
+              >
+                <option value="any">Any</option>
+                {MIN_SEATS_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}+ seats
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block text-sm font-medium text-gray-700">

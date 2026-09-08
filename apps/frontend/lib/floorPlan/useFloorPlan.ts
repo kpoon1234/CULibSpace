@@ -2,15 +2,14 @@
 
 import { useMemo } from 'react';
 import useSWR from 'swr';
-import { buildFloorPlan, fetchFloorLayout, fetchSeatStatus } from './client';
-import { filterTimeRange } from './filterOptions';
-import type { FloorPlan, FloorPlanFilter, SeatLayoutQuery } from './types';
+import { buildFloorPlan, fetchLayout } from './client';
+import { filterAmenityQuery, filterTimeRange } from './filterOptions';
+import type { FloorPlan, FloorPlanFilter, LayoutQuery } from './types';
 import { EMPTY_FILTER } from './types';
 
-// Two SWR resources with different cadences:
-//   - layout: fetched once per floor, revalidated rarely (furniture rarely moves)
-//   - status: polled on STATUS_POLL_MS (live availability)
-// They are merged client-side by buildFloorPlan().
+// One SWR resource: GET /api/layout, polled on STATUS_POLL_MS for fresh status.
+// Geometry + status are split out of that one response by fetchLayout(), then
+// merged for render by buildFloorPlan().
 
 export const STATUS_POLL_MS = 20_000;
 
@@ -18,6 +17,12 @@ export interface UseFloorPlanOptions {
   filter?: FloorPlanFilter;
   /** Override the status poll interval; 0 disables polling. */
   pollMs?: number;
+  /**
+   * Send the amenity filter (plugCap / hasTvScreen / minSeats) to the backend so
+   * it pre-filters the rows. Default false: the map fetches every table and dims
+   * the non-matching ones instead (so the plan still shows where each table is).
+   */
+  serverFilter?: boolean;
 }
 
 export interface UseFloorPlanResult {
@@ -26,60 +31,50 @@ export interface UseFloorPlanResult {
   /** Layout failed to load AND no sample data could be served (should be rare). */
   isError: boolean;
   error: unknown;
-  /** True while a background status refresh is in flight. */
+  /** True while a background refresh is in flight. */
   isRefreshing: boolean;
-  /** 'mock' when any feed fell back to bundled sample data. */
+  /** 'mock' when the feed fell back to bundled sample data. */
   source: 'api' | 'mock' | undefined;
-  /** Force an immediate status refresh. */
+  /** Force an immediate refresh. */
   refresh: () => void;
 }
 
 export function useFloorPlan(
   floorId: number,
-  { filter = EMPTY_FILTER, pollMs = STATUS_POLL_MS }: UseFloorPlanOptions = {}
+  { filter = EMPTY_FILTER, pollMs = STATUS_POLL_MS, serverFilter = false }: UseFloorPlanOptions = {}
 ): UseFloorPlanResult {
-  const layout = useSWR(['floorPlan/layout', floorId], ([, id]) => fetchFloorLayout(id), {
-    revalidateOnFocus: false,
-    revalidateIfStale: false,
-    dedupingInterval: 60_000,
+  // A fresh object each render is fine: SWR hashes the key by content, so an
+  // identical query resolves to the same cache entry and doesn't refetch.
+  const query: LayoutQuery = {
+    floorId,
+    ...filterTimeRange(filter),
+    ...(serverFilter ? filterAmenityQuery(filter) : {}),
+  };
+
+  const res = useSWR(['floorPlan', query], ([, q]) => fetchLayout(q), {
+    refreshInterval: pollMs || undefined,
+    revalidateOnFocus: true,
+    dedupingInterval: 5_000,
+    keepPreviousData: true,
   });
 
-  // Only the booking window feeds the status query; amenity filters (plugs, TV)
-  // are applied client-side so the mock honours them too.
-  const timeRange = filterTimeRange(filter);
-  const statusQuery: SeatLayoutQuery = useMemo(
-    () => (timeRange ? { ...timeRange } : {}),
-    [timeRange?.startDateTime, timeRange?.endDateTime] // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  const status = useSWR(
-    ['floorPlan/status', floorId, statusQuery.startDateTime ?? '', statusQuery.endDateTime ?? ''],
-    ([, id]) => fetchSeatStatus(id, statusQuery),
-    {
-      refreshInterval: pollMs || undefined,
-      revalidateOnFocus: true,
-      dedupingInterval: 5_000,
-      keepPreviousData: true,
-    }
-  );
-
   const plan = useMemo<FloorPlan | undefined>(() => {
-    if (!layout.data || !status.data) return undefined;
+    if (!res.data) return undefined;
     return buildFloorPlan({
-      layout: layout.data.data,
-      status: status.data.data,
-      source: layout.data.source === 'api' && status.data.source === 'api' ? 'api' : 'mock',
+      geometry: res.data.data.geometry,
+      status: res.data.data.status,
+      source: res.data.source,
       filter,
     });
-  }, [layout.data, status.data, filter]);
+  }, [res.data, filter]);
 
   return {
     plan,
-    isLoading: !layout.data && !layout.error,
-    isError: Boolean(layout.error) && !layout.data,
-    error: layout.error ?? status.error,
-    isRefreshing: status.isValidating,
+    isLoading: !res.data && !res.error,
+    isError: Boolean(res.error) && !res.data,
+    error: res.error,
+    isRefreshing: res.isValidating,
     source: plan?.source,
-    refresh: () => void status.mutate(),
+    refresh: () => void res.mutate(),
   };
 }

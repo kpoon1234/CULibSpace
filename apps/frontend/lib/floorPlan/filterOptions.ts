@@ -16,6 +16,9 @@ export const PLUG_BUCKETS: PlugBucket[] = [
   { label: '7+ plugs', range: [7, Number.POSITIVE_INFINITY] },
 ];
 
+/** "Minimum seats" options for the Table Filter — maps to the backend `minSeats`. */
+export const MIN_SEATS_OPTIONS: number[] = [2, 4, 6, 8];
+
 /** True when a table clears every active amenity constraint in `filter`. */
 export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): boolean {
   if (filter.requiresLargeScreen && !table.hasTvScreen) return false;
@@ -26,7 +29,22 @@ export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): 
     if (plugs < min || plugs > max) return false;
   }
 
+  if (filter.minSeats != null && table.seats < filter.minSeats) return false;
+
   return true;
+}
+
+/** The attribute filters as GET /api/layout query params (time window excluded). */
+export function filterAmenityQuery(filter: FloorPlanFilter): {
+  plugCap?: number;
+  hasTvScreen?: boolean;
+  minSeats?: number;
+} {
+  const q: { plugCap?: number; hasTvScreen?: boolean; minSeats?: number } = {};
+  if (filter.plugRange) q.plugCap = filter.plugRange[0];
+  if (filter.requiresLargeScreen) q.hasTvScreen = true;
+  if (filter.minSeats != null) q.minSeats = filter.minSeats;
+  return q;
 }
 
 /** True when the filter carries a usable booking window (both ends set, ordered). */
@@ -39,13 +57,14 @@ export function activeFilterCount(filter: FloorPlanFilter): number {
   let n = 0;
   if (filter.requiresLargeScreen) n++;
   if (filter.plugRange) n++;
+  if (filter.minSeats != null) n++;
   if (hasValidTimeRange(filter)) n++;
   return n;
 }
 
 /**
  * The booking window to check availability against — the Figma "Start Date Time"
- * / "End Date Time" fields, passed straight to GET /api/seats/layout (which takes
+ * / "End Date Time" fields, passed straight to GET /api/layout (which takes
  * exactly `startDateTime` + `endDateTime`). Returns null unless both ends are set
  * and start is before end.
  */

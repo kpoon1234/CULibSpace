@@ -3,12 +3,13 @@ export * from './types';
 export * from './statusStyle';
 export * from './filterOptions';
 export * from './format';
+export { synthesizeLayout } from './autoLayout';
 export {
-  fetchFloorLayout,
-  fetchSeatStatus,
+  fetchLayout,
   buildFloorPlan,
   pickZone,
   type Sourced,
+  type LayoutResult,
   type BuildFloorPlanArgs,
 } from './client';
 export {

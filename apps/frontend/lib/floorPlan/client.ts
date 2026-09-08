@@ -1,4 +1,5 @@
 import { API_URL } from '@/lib/auth';
+import { synthesizeLayout } from './autoLayout';
 import { tablePassesFilter } from './filterOptions';
 import { mockFloorLayout, mockSeatStatus } from './mockData';
 import type {
@@ -7,25 +8,26 @@ import type {
   FloorPlanFilter,
   FloorPlanTable,
   FloorPlanZone,
-  SeatLayoutEnvelope,
-  SeatLayoutQuery,
+  LayoutEnvelope,
+  LayoutQuery,
+  RawLayoutZone,
   SeatStatusZone,
   TableStatus,
   ZoneType,
 } from './types';
 import { TABLE_STATUSES } from './types';
 
-// Data access for the floor-plan UI. Two endpoints:
+// Data access for the floor-plan UI. One backend endpoint:
 //
-//   GET /api/floors/:floorId/layout   -> FloorLayoutResponse   (NOT built yet)
-//   GET /api/seats/layout?<query>     -> SeatLayoutEnvelope     (seatAPI branch)
+//   GET /api/layout?<query>  ->  { success, data: RawLayoutZone[] }   (bare array also OK)
 //
-// Both fall back to bundled sample data on any network/parse error so the UI is
-// demoable before either lands. Every fetcher reports whether it served real or
-// mock data via the `source` field it threads through to FloorPlan.source.
+// Each zone lists its tables with a live `status` (computed for the requested
+// time window) plus attributes. Geometry (x/y/shape/size, zone bounds) is
+// optional — synthesizeLayout() fills any gaps so the map always renders. On any
+// network/parse error the whole thing falls back to bundled sample data, tagged
+// `source: 'mock'` so sample numbers are never shown as live.
 
-const LAYOUT_PATH = (floorId: number) => `${API_URL}/api/floors/${floorId}/layout`;
-const SEAT_LAYOUT_PATH = `${API_URL}/api/seats/layout`;
+const LAYOUT_PATH = process.env.NEXT_PUBLIC_FLOORPLAN_PATH || '/api/layout';
 
 /** Set NEXT_PUBLIC_FLOORPLAN_MOCK=1 to skip the network entirely (Storybook, CI, offline demo). */
 const FORCE_MOCK = process.env.NEXT_PUBLIC_FLOORPLAN_MOCK === '1';
@@ -35,48 +37,19 @@ export interface Sourced<T> {
   source: 'api' | 'mock';
 }
 
-// ---------------------------------------------------------------------------
-// 1. Floor layout & zone metadata
-// ---------------------------------------------------------------------------
-
-export async function fetchFloorLayout(
-  floorId: number,
-  signal?: AbortSignal
-): Promise<Sourced<FloorLayoutResponse>> {
-  if (FORCE_MOCK) return { data: mockFloorLayout(floorId), source: 'mock' };
-
-  try {
-    const res = await fetch(LAYOUT_PATH(floorId), {
-      signal,
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) throw new Error(`layout ${res.status}`);
-    const body = (await res.json()) as FloorLayoutResponse | { data: FloorLayoutResponse };
-    // Tolerate either a bare object or a { data } envelope.
-    const data = 'floor' in body ? body : (body as { data: FloorLayoutResponse }).data;
-    if (!data?.floor || !Array.isArray(data.zones)) throw new Error('layout: malformed payload');
-    return { data, source: 'api' };
-  } catch (err) {
-    if ((err as Error)?.name === 'AbortError') throw err;
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn(
-        '[floorPlan] layout API unavailable, using sample layout:',
-        (err as Error).message
-      );
-    }
-    return { data: mockFloorLayout(floorId), source: 'mock' };
-  }
+/** Geometry + live status, both derived from one /api/layout response. */
+export interface LayoutResult {
+  geometry: FloorLayoutResponse;
+  status: SeatStatusZone[];
 }
 
-// ---------------------------------------------------------------------------
-// 2. Live seat status
-// ---------------------------------------------------------------------------
-
-function toQueryString(q: SeatLayoutQuery): string {
+function toQueryString(q: LayoutQuery): string {
   const p = new URLSearchParams();
+  if (q.floorId != null) p.set('floorId', String(q.floorId));
   if (q.zoneType) p.set('zoneType', q.zoneType);
   if (q.plugCap != null) p.set('plugCap', String(q.plugCap));
   if (q.hasTvScreen != null) p.set('hasTvScreen', String(q.hasTvScreen));
+  if (q.minSeats != null) p.set('minSeats', String(q.minSeats));
   if (q.date) p.set('date', q.date);
   if (q.timeSlot) p.set('timeSlot', q.timeSlot);
   if (q.startDateTime) p.set('startDateTime', q.startDateTime);
@@ -85,33 +58,69 @@ function toQueryString(q: SeatLayoutQuery): string {
   return s ? `?${s}` : '';
 }
 
-export async function fetchSeatStatus(
-  floorId: number,
-  query: SeatLayoutQuery = {},
+/** Split a raw /api/layout payload into a status feed for buildFloorPlan(). */
+function toStatusFeed(zones: RawLayoutZone[]): SeatStatusZone[] {
+  return zones.map((z) => ({
+    zoneId: z.zoneId,
+    zoneType: z.zoneType,
+    tables: z.tables.map((t) => ({
+      tableId: t.tableId,
+      zoneId: t.zoneId ?? z.zoneId,
+      numberOfSeat: t.numberOfSeat,
+      plugCap: t.plugCap ?? null,
+      hasTvScreen: Boolean(t.hasTvScreen),
+      status: (t.status ?? 'Available') as TableStatus,
+      isLocked: Boolean(t.isLocked),
+    })),
+  }));
+}
+
+function mockResult(floorId: number): LayoutResult {
+  return { geometry: mockFloorLayout(floorId), status: mockSeatStatus(floorId) };
+}
+
+/**
+ * Fetch GET /api/layout and shape it for the UI. `query.floorId` is sent as a
+ * hint and used to pick the sample floor on fallback.
+ */
+export async function fetchLayout(
+  query: LayoutQuery = {},
   signal?: AbortSignal
-): Promise<Sourced<SeatStatusZone[]>> {
-  if (FORCE_MOCK) return { data: mockSeatStatus(floorId), source: 'mock' };
+): Promise<Sourced<LayoutResult>> {
+  const floorId = query.floorId ?? 1;
+  if (FORCE_MOCK) return { data: mockResult(floorId), source: 'mock' };
 
   try {
-    const res = await fetch(`${SEAT_LAYOUT_PATH}${toQueryString(query)}`, {
+    const res = await fetch(`${API_URL}${LAYOUT_PATH}${toQueryString(query)}`, {
       signal,
       headers: { Accept: 'application/json' },
     });
-    if (!res.ok) throw new Error(`seats ${res.status}`);
-    const body = (await res.json()) as SeatLayoutEnvelope;
-    if (!body.success || !Array.isArray(body.data)) {
-      throw new Error(body.error || 'seats: unsuccessful response');
+    if (!res.ok) throw new Error(`layout ${res.status}`);
+
+    const body = (await res.json()) as LayoutEnvelope | RawLayoutZone[] | { data: RawLayoutZone[] };
+    if (!Array.isArray(body) && 'success' in body && body.success === false) {
+      throw new Error(body.error || 'layout: unsuccessful response');
     }
-    return { data: body.data, source: 'api' };
+    const zones: RawLayoutZone[] = Array.isArray(body)
+      ? body
+      : ((body as { data?: RawLayoutZone[] }).data ?? []);
+    if (!Array.isArray(zones) || zones.length === 0) {
+      throw new Error('layout: empty or malformed payload');
+    }
+
+    return {
+      data: { geometry: synthesizeLayout(zones), status: toStatusFeed(zones) },
+      source: 'api',
+    };
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') throw err;
     if (process.env.NODE_ENV !== 'production') {
       console.warn(
-        '[floorPlan] seat-status API unavailable, using sample status:',
+        '[floorPlan] /api/layout unavailable, using sample data:',
         (err as Error).message
       );
     }
-    return { data: mockSeatStatus(floorId), source: 'mock' };
+    return { data: mockResult(floorId), source: 'mock' };
   }
 }
 
@@ -126,7 +135,7 @@ function emptyCounts(): Record<TableStatus, number> {
 }
 
 export interface BuildFloorPlanArgs {
-  layout: FloorLayoutResponse;
+  geometry: FloorLayoutResponse;
   status: SeatStatusZone[];
   source: 'api' | 'mock';
   /** Client-side amenity filter. Non-matching tables are FLAGGED, never dropped,
@@ -135,18 +144,23 @@ export interface BuildFloorPlanArgs {
 }
 
 /**
- * Joins the static layout with the live-status feed by tableId. Tables missing
- * from the status feed default to Available so the plan never renders blank.
- * The amenity filter only sets `matchesFilter` per table — every table stays in
- * the zone so a filtered plan still reads as a room full of tables.
+ * Joins the geometry layout with the live-status feed by tableId. Tables missing
+ * from the status feed default to Available so the plan never renders blank. The
+ * amenity filter only sets `matchesFilter` per table — every table stays in the
+ * zone so a filtered plan still reads as a room full of tables.
  */
-export function buildFloorPlan({ layout, status, source, filter }: BuildFloorPlanArgs): FloorPlan {
+export function buildFloorPlan({
+  geometry,
+  status,
+  source,
+  filter,
+}: BuildFloorPlanArgs): FloorPlan {
   const statusByTableId = new Map<number, SeatStatusZone['tables'][number]>();
   for (const zone of status) {
     for (const t of zone.tables) statusByTableId.set(t.tableId, t);
   }
 
-  const zones: FloorPlanZone[] = layout.zones.map((zone) => {
+  const zones: FloorPlanZone[] = geometry.zones.map((zone) => {
     const counts = emptyCounts();
     let matchCount = 0;
     const tables: FloorPlanTable[] = zone.tables.map((t) => {
@@ -177,7 +191,7 @@ export function buildFloorPlan({ layout, status, source, filter }: BuildFloorPla
     };
   });
 
-  return { floor: layout.floor, zones, source };
+  return { floor: geometry.floor, zones, source };
 }
 
 export function pickZone(plan: FloorPlan, zoneType: ZoneType): FloorPlanZone | undefined {
