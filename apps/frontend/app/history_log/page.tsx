@@ -8,110 +8,45 @@ type HistoryRecord = {
   date: string;
   start: string;
   end: string;
-  score: string | number; // e.g., "-5", "+10", or "0"
+  score: string | number;
   reason: string;
 };
 
 export default function HistoryPage() {
   const ITEMS_PER_PAGE = 5; // Number of records to show at a time
+  const [historyData, setHistoryData] = useState<HistoryRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
 
   const handleSeeMore = () => {
     setVisibleCount((prev) => prev + ITEMS_PER_PAGE);
   };
-  // [BACKEND INTEGRATION POINT 2]: Replace this state with your actual data fetching hook (e.g., SWR, React Query, or a fetch call inside useEffect).
-  const [historyData, setHistoryData] = useState<HistoryRecord[]>([
-    //อันนี้ actual data backend บอกกุทีทำไง
-    {
-      id: '1',
-      date: '2026-09-04',
-      start: '11:30',
-      end: '13:30',
-      score: '-10',
-      reason: 'No-show for reserved table at Main Library',
-    },
-    {
-      id: '2',
-      date: '2026-08-28',
-      start: '11:30',
-      end: '13:30',
-      score: '+5',
-      reason: 'Perfect attendance for the week',
-    },
-    {
-      id: '3',
-      date: '2026-08-15',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Cancelled reservation within allowed time',
-    },
-    {
-      id: '4',
-      date: '2026-08-01',
-      start: '11:30',
-      end: '13:30',
-      score: '-5',
-      reason: 'Late arrival (exceeded 15 minutes)',
-    },
-    {
-      id: '5',
-      date: '2026-07-20',
-      start: '11:30',
-      end: '13:30',
-      score: '+10',
-      reason: 'Completed library etiquette survey',
-    },
-    {
-      id: '6',
-      date: '2026-07-10',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Standard reservation completed',
-    },
-    {
-      id: '7',
-      date: '2026-07-10',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Standard reservation completed',
-    },
-    {
-      id: '8',
-      date: '2026-07-10',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Standard reservation completed',
-    },
-    {
-      id: '9',
-      date: '2026-07-10',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Standard reservation completed',
-    },
-    {
-      id: '10',
-      date: '2026-07-10',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Standard reservation completed',
-    },
-    {
-      id: '11',
-      date: '2026-07-10',
-      start: '11:30',
-      end: '13:30',
-      score: '0',
-      reason: 'Standard reservation completed',
-    },
-    //อันนี้ actual data backend บอกกุทีทำไง
-  ]);
+  //อันนี้ actual data backend บอกกุทีทำไง
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        setIsLoading(true);
+        // Replace '/api/history' with your actual backend endpoint
+        const response = await fetch('/api/history'); //ตรงนี้
+
+        if (!response.ok) {
+          throw new Error('Failed to load history records');
+        }
+
+        const data: HistoryRecord[] = await response.json();
+        setHistoryData(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchHistory();
+  }, []);
+
+  //อันนี้ actual data backend บอกกุทีทำไง
 
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col justify-between bg-pink-100 p-4 sm:p-8">
