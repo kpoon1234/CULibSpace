@@ -179,15 +179,17 @@ export interface FloorPlanFilter {
   plugRange: [number, number] | null;
   /** true = only tables with a TV / large screen. */
   requiresLargeScreen: boolean;
-  /** Booking window the user is checking against, feeds SeatLayoutQuery. */
-  startTime: string | null;
-  /** Minutes. */
-  durationMinutes: number | null;
+  /** Booking-window start as a local datetime string ("2026-09-08T14:00"), or
+   *  null. Figma's Table Filter has this as a free "Start Date Time" field; it
+   *  feeds SeatLayoutQuery.startDateTime verbatim. */
+  startDateTime: string | null;
+  /** Booking-window end, same format, or null. Feeds SeatLayoutQuery.endDateTime. */
+  endDateTime: string | null;
 }
 
 export const EMPTY_FILTER: FloorPlanFilter = {
   plugRange: null,
   requiresLargeScreen: false,
-  startTime: null,
-  durationMinutes: null,
+  startDateTime: null,
+  endDateTime: null,
 };

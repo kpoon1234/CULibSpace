@@ -16,23 +16,6 @@ export const PLUG_BUCKETS: PlugBucket[] = [
   { label: '7+ plugs', range: [7, Number.POSITIVE_INFINITY] },
 ];
 
-/** Booking-start options, 30-min steps across typical library hours. */
-export const START_TIME_OPTIONS: string[] = (() => {
-  const out: string[] = [];
-  for (let h = 8; h <= 20; h++) {
-    out.push(`${String(h).padStart(2, '0')}:00`);
-    if (h !== 20) out.push(`${String(h).padStart(2, '0')}:30`);
-  }
-  return out;
-})();
-
-export const DURATION_OPTIONS: { label: string; minutes: number }[] = [
-  { label: '30 min', minutes: 30 },
-  { label: '1 hour', minutes: 60 },
-  { label: '1.5 hours', minutes: 90 },
-  { label: '2 hours', minutes: 120 },
-];
-
 /** True when a table clears every active amenity constraint in `filter`. */
 export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): boolean {
   if (filter.requiresLargeScreen && !table.hasTvScreen) return false;
@@ -46,26 +29,31 @@ export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): 
   return true;
 }
 
-/** How many amenity constraints are currently active (for the filter badge). */
+/** True when the filter carries a usable booking window (both ends set, ordered). */
+export function hasValidTimeRange(filter: FloorPlanFilter): boolean {
+  return filterTimeRange(filter) !== null;
+}
+
+/** How many constraints are currently active (for the filter badge). */
 export function activeFilterCount(filter: FloorPlanFilter): number {
   let n = 0;
   if (filter.requiresLargeScreen) n++;
   if (filter.plugRange) n++;
-  if (filter.startTime) n++;
+  if (hasValidTimeRange(filter)) n++;
   return n;
 }
 
-/** Derives the SeatLayoutQuery time range from the filter's start + duration. */
+/**
+ * The booking window to check availability against — the Figma "Start Date Time"
+ * / "End Date Time" fields, passed straight to GET /api/seats/layout (which takes
+ * exactly `startDateTime` + `endDateTime`). Returns null unless both ends are set
+ * and start is before end.
+ */
 export function filterTimeRange(
-  filter: FloorPlanFilter,
-  today = new Date()
+  filter: FloorPlanFilter
 ): { startDateTime: string; endDateTime: string } | null {
-  if (!filter.startTime || !filter.durationMinutes) return null;
-
-  const [h, m] = filter.startTime.split(':').map(Number);
-  const start = new Date(today);
-  start.setHours(h, m, 0, 0);
-  const end = new Date(start.getTime() + filter.durationMinutes * 60_000);
-
-  return { startDateTime: start.toISOString(), endDateTime: end.toISOString() };
+  const { startDateTime, endDateTime } = filter;
+  if (!startDateTime || !endDateTime) return null;
+  if (new Date(startDateTime).getTime() >= new Date(endDateTime).getTime()) return null;
+  return { startDateTime, endDateTime };
 }

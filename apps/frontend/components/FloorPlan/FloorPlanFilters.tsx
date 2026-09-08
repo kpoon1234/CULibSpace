@@ -1,13 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import {
-  DURATION_OPTIONS,
-  EMPTY_FILTER,
-  PLUG_BUCKETS,
-  START_TIME_OPTIONS,
-  type FloorPlanFilter,
-} from '@/lib/floorPlan';
+import { EMPTY_FILTER, PLUG_BUCKETS, type FloorPlanFilter } from '@/lib/floorPlan';
 import { CloseIcon } from './icons';
 
 interface FloorPlanFiltersProps {
@@ -18,7 +12,7 @@ interface FloorPlanFiltersProps {
   onApply: (next: FloorPlanFilter) => void;
 }
 
-const selectCls =
+const fieldCls =
   'mt-1 w-full rounded-md border border-gray-300 bg-paper px-3 py-2 text-sm text-ink focus:border-rose-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-200';
 
 function plugKey(range: FloorPlanFilter['plugRange']): string {
@@ -27,12 +21,21 @@ function plugKey(range: FloorPlanFilter['plugRange']): string {
 }
 
 // Table Filter dialog — maps the Figma panel to the SeatLayoutQuery inputs:
-// large screen -> hasTvScreen, plug amount -> plugCap bucket, start time +
-// duration -> the booking window the status feed is evaluated against.
+// large screen -> hasTvScreen, plug amount -> plugCap bucket, and the free
+// "Start Date Time" / "End Date Time" fields -> startDateTime / endDateTime,
+// the booking window the status feed is evaluated against.
 export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanFiltersProps) {
   const [draft, setDraft] = useState<FloorPlanFilter>(value);
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  const bothTimesSet = Boolean(draft.startDateTime) && Boolean(draft.endDateTime);
+  const oneTimeSet = Boolean(draft.startDateTime) !== Boolean(draft.endDateTime);
+  const outOfOrder =
+    bothTimesSet &&
+    new Date(draft.startDateTime as string).getTime() >=
+      new Date(draft.endDateTime as string).getTime();
+  const timeInvalid = oneTimeSet || outOfOrder;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -87,7 +90,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
           <label className="block text-sm font-medium text-gray-700">
             Power outlets
             <select
-              className={selectCls}
+              className={fieldCls}
               value={plugKey(draft.plugRange)}
               onChange={(e) => {
                 const v = e.target.value;
@@ -105,49 +108,37 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             </select>
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block text-sm font-medium text-gray-700">
-              Start time
-              <select
-                className={selectCls}
-                value={draft.startTime ?? 'any'}
-                onChange={(e) =>
-                  setDraft((d) => ({
-                    ...d,
-                    startTime: e.target.value === 'any' ? null : e.target.value,
-                  }))
-                }
-              >
-                <option value="any">Any</option>
-                {START_TIME_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+              Start date &amp; time
+              <input
+                type="datetime-local"
+                className={fieldCls}
+                value={draft.startDateTime ?? ''}
+                onChange={(e) => setDraft((d) => ({ ...d, startDateTime: e.target.value || null }))}
+              />
             </label>
 
             <label className="block text-sm font-medium text-gray-700">
-              Duration
-              <select
-                className={selectCls}
-                value={draft.durationMinutes ?? 60}
-                disabled={!draft.startTime}
-                onChange={(e) =>
-                  setDraft((d) => ({ ...d, durationMinutes: Number(e.target.value) }))
-                }
-              >
-                {DURATION_OPTIONS.map((o) => (
-                  <option key={o.minutes} value={o.minutes}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              End date &amp; time
+              <input
+                type="datetime-local"
+                className={fieldCls}
+                value={draft.endDateTime ?? ''}
+                min={draft.startDateTime ?? undefined}
+                onChange={(e) => setDraft((d) => ({ ...d, endDateTime: e.target.value || null }))}
+              />
             </label>
           </div>
-          <p className="text-xs text-gray-500">
-            Start time and duration set the booking window that availability is checked against.
-          </p>
+          {timeInvalid ? (
+            <p className="text-xs text-red-600">
+              Enter both a start and an end, with the start before the end.
+            </p>
+          ) : (
+            <p className="text-xs text-gray-500">
+              Enter the start and end of the booking window to check availability for that slot.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-5 py-4">
@@ -160,14 +151,12 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
           </button>
           <button
             type="button"
+            disabled={timeInvalid}
             onClick={() => {
-              onApply({
-                ...draft,
-                durationMinutes: draft.startTime ? (draft.durationMinutes ?? 60) : null,
-              });
+              onApply(draft);
               onClose();
             }}
-            className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Apply filter
           </button>
