@@ -3,8 +3,9 @@
 import { useState, FormEvent, Suspense } from 'react';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
-import { API_URL, saveAuth } from '@/lib/auth';
+import { API_URL, saveAuth, getAuthToken, getStoredUser } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 type Role = 'user' | 'admin';
 
@@ -18,6 +19,15 @@ export default function LogIn() {
 
 function LoginPageContent() {
   const router = useRouter();
+
+  useEffect(() => {
+    const token = getAuthToken();
+    const user = getStoredUser();
+    if (token && user) {
+      router.replace(user.isProfileComplete ? '/' : '/onboarding');
+    }
+  }, [router]);
+
   const [role, setRole] = useState<Role>('user');
   const [emailError, setEmailError] = useState(false);
   const [emailErrorMessage, setEmailErrorMessage] = useState('');
