@@ -14,21 +14,23 @@ import {
 interface TableShapeProps {
   table: FloorPlanTable;
   selected: boolean;
-  dimmed: boolean;
+  /** True when the active filter excludes this table: still drawn, but faded
+   *  and non-interactive so it reads as "a table you can't pick right now". */
+  filteredOut: boolean;
   onSelect: (table: FloorPlanTable) => void;
 }
 
 // One table on the plan, as an SVG <g>. rect or circle per the layout geometry.
 // Status drives the fill (see STATUS_STYLE); selection is a claret ring, never a
-// fill. Closed tables are non-interactive and carry a hatch overlay so the state
-// reads without relying on colour.
-function TableShapeBase({ table, selected, dimmed, onSelect }: TableShapeProps) {
+// fill. Closed tables — and tables the filter excludes — are non-interactive; the
+// former carry a hatch overlay, the latter are faded, so neither relies on colour.
+function TableShapeBase({ table, selected, filteredOut, onSelect }: TableShapeProps) {
   const style = STATUS_STYLE[table.status];
   const { x, y, width, height } = table;
   const cx = x + width / 2;
   const cy = y + height / 2;
   const isCircle = table.shape === 'circle';
-  const interactive = !style.disabled;
+  const interactive = !style.disabled && !filteredOut;
 
   const labelSize = Math.min(width, height) * 0.28;
 
@@ -51,8 +53,13 @@ function TableShapeBase({ table, selected, dimmed, onSelect }: TableShapeProps) 
       tabIndex={interactive ? 0 : -1}
       aria-label={
         `Table ${table.code}, ${style.text}. ${amenitySummary(table)}.` +
-        (interactive ? ` ${statusVerb(table.status, table.isLocked)}.` : '')
+        (filteredOut
+          ? " Doesn't match the current filters — not selectable."
+          : interactive
+            ? ` ${statusVerb(table.status, table.isLocked)}.`
+            : '')
       }
+      aria-disabled={filteredOut || undefined}
       aria-pressed={interactive ? selected : undefined}
       onClick={interactive ? () => onSelect(table) : undefined}
       onKeyDown={
@@ -67,8 +74,8 @@ function TableShapeBase({ table, selected, dimmed, onSelect }: TableShapeProps) 
       }
       className={`fp-table ${interactive ? 'fp-table--interactive' : ''}`}
       style={{
-        opacity: dimmed && !selected ? 0.32 : 1,
-        cursor: interactive ? 'pointer' : 'default',
+        opacity: filteredOut && !selected ? 0.35 : 1,
+        cursor: interactive ? 'pointer' : filteredOut ? 'not-allowed' : 'default',
         transition: 'opacity 120ms ease',
       }}
     >

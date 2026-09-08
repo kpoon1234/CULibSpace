@@ -7,8 +7,6 @@ import { FunnelIcon, MinusIcon, PlusIcon, RecenterIcon } from './icons';
 
 interface FloorCanvasProps {
   zone: FloorPlanZone;
-  /** Full (unfiltered) table count for the zone, for the "n hidden" note. */
-  zoneTotal: number;
   selectedTableId: number | null;
   onSelect: (table: FloorPlanTable) => void;
   onOpenFilters: () => void;
@@ -23,7 +21,6 @@ const ctrlBtn =
 // container and handles wheel / drag / button zoom.
 export default function FloorCanvas({
   zone,
-  zoneTotal,
   selectedTableId,
   onSelect,
   onOpenFilters,
@@ -31,7 +28,8 @@ export default function FloorCanvas({
 }: FloorCanvasProps) {
   const { containerRef, matrix, isPanning, onPointerDown, onWheel, zoomIn, zoomOut, reset } =
     usePanZoom(zone.bounds, [zone.zoneId]);
-  const hiddenCount = zoneTotal - zone.tables.length;
+  const filtering = activeFilterCount > 0;
+  const excludedCount = zone.total - zone.matchCount;
 
   return (
     <div
@@ -74,7 +72,7 @@ export default function FloorCanvas({
               key={t.tableId}
               table={t}
               selected={t.tableId === selectedTableId}
-              dimmed={false}
+              filteredOut={filtering && !t.matchesFilter}
               onSelect={onSelect}
             />
           ))}
@@ -110,23 +108,33 @@ export default function FloorCanvas({
         </button>
       </div>
 
-      {/* Empty-after-filter overlay */}
-      {zone.tables.length === 0 && (
+      {/* Genuinely-empty zone (no tables mapped yet) */}
+      {zone.total === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
           <div className="pointer-events-auto max-w-xs rounded-xl border border-gray-200 bg-paper p-5 text-center shadow-sm">
-            <p className="text-sm font-medium text-gray-900">No tables match your filters</p>
+            <p className="text-sm font-medium text-gray-900">No tables in {zone.label} yet</p>
             <p className="mt-1 text-xs text-gray-500">
-              All {zoneTotal} tables in {zone.label} were filtered out. Adjust the plug or screen
-              filter to see more.
+              This zone has no tables mapped on this floor.
             </p>
           </div>
         </div>
       )}
 
-      {/* "n hidden by filter" note */}
-      {zone.tables.length > 0 && hiddenCount > 0 && (
-        <p className="absolute bottom-3 left-3 rounded-md bg-paper/90 px-2 py-1 text-xs text-gray-500 shadow-sm">
-          {hiddenCount} of {zoneTotal} hidden by filters
+      {/* Filter status — tables that don't match stay on the plan, dimmed. */}
+      {filtering && zone.total > 0 && (
+        <p className="absolute bottom-3 left-3 max-w-[16rem] rounded-md bg-paper/90 px-2 py-1 text-xs text-gray-600 shadow-sm">
+          {zone.matchCount === 0 ? (
+            <>
+              No tables match your filters — all {zone.total} are dimmed and can&apos;t be picked.
+            </>
+          ) : (
+            <>
+              <span className="font-medium tabular-nums text-gray-900">
+                {zone.matchCount} of {zone.total}
+              </span>{' '}
+              match your filters. The other {excludedCount} are dimmed and can&apos;t be picked.
+            </>
+          )}
         </p>
       )}
     </div>

@@ -6,6 +6,7 @@ import {
   activeFilterCount,
   availabilityLine,
   pickZone,
+  tablePassesFilter,
   useFloorPlan,
   type FloorPlanFilter,
   type FloorPlanTable,
@@ -115,7 +116,6 @@ export default function FloorPlanView({
         <div className="h-[420px] sm:h-[520px]">
           <FloorCanvas
             zone={activeZone}
-            zoneTotal={activeZone.total}
             selectedTableId={selectedTableId}
             onSelect={(t) => setSelectedTableId(t.tableId)}
             onOpenFilters={() => setFiltersOpen(true)}
@@ -138,7 +138,13 @@ export default function FloorPlanView({
         <FloorPlanFilters
           value={filter}
           onClose={() => setFiltersOpen(false)}
-          onApply={setFilter}
+          onApply={(next) => {
+            setFilter(next);
+            // Drop the selection only if the new filter would exclude it.
+            if (selectedTable && !tablePassesFilter(selectedTable, next)) {
+              setSelectedTableId(null);
+            }
+          }}
         />
       )}
     </section>

@@ -129,13 +129,16 @@ export interface BuildFloorPlanArgs {
   layout: FloorLayoutResponse;
   status: SeatStatusZone[];
   source: 'api' | 'mock';
-  /** Client-side amenity filter; matched tables are flagged, not dropped. */
+  /** Client-side amenity filter. Non-matching tables are FLAGGED, never dropped,
+   *  so the plan keeps showing where every table is. */
   filter?: FloorPlanFilter;
 }
 
 /**
  * Joins the static layout with the live-status feed by tableId. Tables missing
  * from the status feed default to Available so the plan never renders blank.
+ * The amenity filter only sets `matchesFilter` per table — every table stays in
+ * the zone so a filtered plan still reads as a room full of tables.
  */
 export function buildFloorPlan({ layout, status, source, filter }: BuildFloorPlanArgs): FloorPlan {
   const statusByTableId = new Map<number, SeatStatusZone['tables'][number]>();
@@ -145,16 +148,20 @@ export function buildFloorPlan({ layout, status, source, filter }: BuildFloorPla
 
   const zones: FloorPlanZone[] = layout.zones.map((zone) => {
     const counts = emptyCounts();
+    let matchCount = 0;
     const tables: FloorPlanTable[] = zone.tables.map((t) => {
       const live = statusByTableId.get(t.tableId);
       const tableStatus: TableStatus = live?.status ?? 'Available';
       counts[tableStatus] += 1;
+      const matchesFilter = filter ? tablePassesFilter(t, filter) : true;
+      if (matchesFilter) matchCount += 1;
       return {
         ...t,
         zoneId: zone.zoneId,
         zoneType: zone.zoneType,
         status: tableStatus,
         isLocked: live?.isLocked ?? false,
+        matchesFilter,
       };
     });
 
@@ -163,9 +170,10 @@ export function buildFloorPlan({ layout, status, source, filter }: BuildFloorPla
       zoneType: zone.zoneType,
       label: zone.label,
       bounds: zone.bounds,
-      tables: filter ? tables.filter((t) => tablePassesFilter(t, filter)) : tables,
+      tables,
       counts,
       total: zone.tables.length,
+      matchCount,
     };
   });
 

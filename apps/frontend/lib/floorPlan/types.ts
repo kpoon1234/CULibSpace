@@ -147,6 +147,10 @@ export interface FloorPlanTable extends TableLayout {
   /** From the live feed; falls back to 'Available' if the feed omits the table. */
   status: TableStatus;
   isLocked: boolean;
+  /** False when the active amenity filter excludes this table. Such tables stay
+   *  on the plan — drawn dimmed and non-interactive — so the space still reads
+   *  as occupied by a table you simply can't pick right now. */
+  matchesFilter: boolean;
 }
 
 export interface FloorPlanZone {
@@ -154,10 +158,13 @@ export interface FloorPlanZone {
   zoneType: ZoneType;
   label: string;
   bounds: Rect;
+  /** Every table in the zone (filtering never removes them, only flags them). */
   tables: FloorPlanTable[];
   /** Convenience counts for headers / summaries. */
   counts: Record<TableStatus, number>;
   total: number;
+  /** How many of `tables` pass the active filter (=== total when no filter). */
+  matchCount: number;
 }
 
 export interface FloorPlan {
