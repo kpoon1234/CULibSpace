@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import SplitHero from '@/components/HomeComponent/SplitHero';
 import ZoneAvailabilityGraphic from '@/components/HomeComponent/ZoneAvailabilityGraphic';
 import {
@@ -64,13 +65,19 @@ export default function Home() {
         <div className={`${tile} gap-5 sm:col-span-2 lg:row-span-2`}>
           <ZoneAvailabilityGraphic />
 
-          <div className="mt-auto flex flex-col gap-2">
+          <div className="mt-auto flex flex-col items-start gap-2">
             <PinIcon className="h-6 w-6 text-rose-600" />
             <h3 className="text-lg font-semibold text-gray-900">Live zone visibility</h3>
             <p className="max-w-[52ch] text-sm text-gray-600">
               Silent, Group, and Common — see which zones have room right now, filtered by seats,
               plugs, and screens.
             </p>
+            <Link
+              href="/zones"
+              className="text-sm font-medium text-rose-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              Browse the floor plan →
+            </Link>
           </div>
         </div>
 
