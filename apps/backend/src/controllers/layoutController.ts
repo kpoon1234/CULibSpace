@@ -74,7 +74,7 @@ export class LayoutController {
       console.error('[LayoutController] Error fetching layout:', err);
       res.status(500).json({
         success: false,
-        error: 'Failed to fetch seat layout', // ข้อความ Error คงที่ตาม EPIC2
+        error: 'Failed to fetch table layout', // ข้อความ Error คงที่ตาม EPIC2
       });
     }
   }
