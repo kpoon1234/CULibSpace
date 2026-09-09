@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
+import { getAuthToken, resolveAvatarUrl, saveAuth, type AuthUser } from '@/lib/auth';
 import { getExtraIdFields, getProfileFields } from '@/lib/fieldLock';
 
 type ProfileContentProps = {
@@ -21,6 +21,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
   // something actually differs from them.
   const [savedValues, setSavedValues] = useState({ firstname: '', lastname: '', phone: '' });
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -33,9 +34,12 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
     }
 
     async function loadUser() {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/auth/me`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (!res.ok) {
         router.replace('/login');
@@ -60,11 +64,28 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
   const hasChanges =
     firstname !== savedValues.firstname ||
     lastname !== savedValues.lastname ||
-    phone !== savedValues.phone;
+    phone !== savedValues.phone ||
+    selectedFile !== null;
 
   function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!validTypes.includes(file.type)) {
+      setError('Please select a valid image file (JPEG, PNG, WebP, GIF).');
+      return;
+    }
+
+    // Validate size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image size must be less than 5 MB.');
+      return;
+    }
+
+    setError('');
+    setSelectedFile(file);
     setPhotoPreview(URL.createObjectURL(file));
   }
 
@@ -86,33 +107,67 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
     setIsSaving(true);
     try {
-      // Photo upload is still UI-only: the API can set an imageUrl string,
-      // but there's no file-storage endpoint yet to turn the local file the
-      // user picked into a hosted URL, so it can't be sent along here.
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/profile`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ firstname, lastname, phone }),
-      });
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      let currentUser = user;
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Unable to update your profile.');
-        return;
+      // 1. Upload photo if selected
+      if (selectedFile) {
+        const formData = new FormData();
+        formData.append('image', selectedFile);
+
+        const uploadRes = await fetch(`${apiBase}/api/profile/upload-image`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok || !uploadData.success) {
+          setError(uploadData.error || 'Failed to upload profile image.');
+          return;
+        }
+
+        currentUser = uploadData.user;
+        setSelectedFile(null);
+      }
+
+      // 2. Update text fields if changed
+      const hasTextChanges =
+        firstname !== savedValues.firstname ||
+        lastname !== savedValues.lastname ||
+        phone !== savedValues.phone;
+
+      if (hasTextChanges) {
+        const res = await fetch(`${apiBase}/api/profile`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ firstname, lastname, phone }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          setError(data.error || 'Unable to update your profile.');
+          return;
+        }
+
+        currentUser = data.user;
       }
 
       // Update stored auth user to reflect profile changes
-      saveAuth(token, data.user);
-      setUser(data.user);
+      saveAuth(token, currentUser);
+      setUser(currentUser);
+      setPhotoPreview(null);
       setSavedValues({
-        firstname: data.user.firstname,
-        lastname: data.user.lastname,
-        phone: data.user.phone || '',
+        firstname: currentUser.firstname,
+        lastname: currentUser.lastname,
+        phone: currentUser.phone || '',
       });
-      setNotice('Profile updated.');
+      setNotice('Profile updated successfully.');
     } catch {
       setError('Unable to connect to the server. Please try again.');
     } finally {
@@ -163,7 +218,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
             {photoPreview || user.imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={photoPreview || user.imageUrl || undefined}
+                src={photoPreview || resolveAvatarUrl(user.imageUrl)}
                 alt="Profile"
                 className="h-full w-full object-cover"
               />
@@ -174,12 +229,12 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,image/gif"
             onChange={handlePhotoChange}
             className="hidden"
           />
           <p className="text-center text-xs text-gray-400">
-            Photo upload is a preview only — saving isn&apos;t supported yet.
+            Click to upload a new photo (JPG, PNG, WebP up to 5MB).
           </p>
         </div>
 

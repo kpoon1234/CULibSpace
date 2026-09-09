@@ -5,7 +5,14 @@ import Link from 'next/link';
 import { useMemo, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
-import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
+import {
+  API_URL,
+  clearAuth,
+  getAuthSnapshot,
+  resolveAvatarUrl,
+  subscribeToAuth,
+  type AuthUser,
+} from '@/lib/auth';
 import { useProfileModal } from '@/lib/profileModalContext';
 
 export default function TopMenu() {
@@ -62,14 +69,24 @@ export default function TopMenu() {
                 aria-haspopup="dialog"
                 aria-expanded={isProfileOpen}
                 aria-label={`Open profile for ${user.firstname}`}
-                className={`flex min-w-0 flex-col justify-center rounded-md px-2 py-1.5 text-right transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-3 ${
+                className={`flex min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-right transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-chula-pink sm:px-3 ${
                   isProfileOpen ? 'bg-chula-pink-hover' : 'hover:bg-chula-pink-hover'
                 } cursor-pointer`}
               >
-                <span className="truncate text-sm font-semibold text-ink">{user.firstname}</span>
-                <span className="hidden text-[11px] font-medium uppercase tracking-wide text-ink/70 sm:block">
-                  {user.role}
+                <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full ring-1 ring-white/80">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={resolveAvatarUrl(user.imageUrl)}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
                 </span>
+                <div className="flex flex-col text-right">
+                  <span className="truncate text-sm font-semibold text-ink">{user.firstname}</span>
+                  <span className="hidden text-[11px] font-medium uppercase tracking-wide text-ink/70 sm:block">
+                    {user.role}
+                  </span>
+                </div>
               </button>
               <button
                 type="button"

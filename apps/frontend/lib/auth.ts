@@ -59,3 +59,13 @@ export function subscribeToAuth(listener: () => void): () => void {
   window.addEventListener(AUTH_CHANGE_EVENT, listener);
   return () => window.removeEventListener(AUTH_CHANGE_EVENT, listener);
 }
+
+export function resolveAvatarUrl(url?: string | null): string {
+  if (!url) {
+    return 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+  }
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  return `${API_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+}
