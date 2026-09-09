@@ -110,6 +110,7 @@ export class AuthService {
         firstname: user.firstname,
         lastname: user.lastname,
         phone: user.phone,
+        imageUrl: user.imageUrl,
         isProfileComplete: user.isProfileComplete,
         behaviourScore: Number(user.behaviourScore),
         role: classification.role,
@@ -147,6 +148,12 @@ export class AuthService {
       where: { uid: payload.uid },
       include: {
         universityUser: true,
+        outsideUser: {
+          include: {
+            thaiUser: true,
+            foreignUser: true,
+          },
+        },
       },
     });
 
@@ -158,11 +165,14 @@ export class AuthService {
       firstname: user.firstname,
       lastname: user.lastname,
       phone: user.phone,
+      imageUrl: user.imageUrl,
       isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
       role: payload.role,
       userType: user.userType,
       studentId: user.universityUser?.studentId,
+      citizenId: user.outsideUser?.thaiUser?.citizenId,
+      passportId: user.outsideUser?.foreignUser?.passportId,
     };
   }
 
@@ -299,6 +309,7 @@ export class AuthService {
         firstname: updatedUser.firstname,
         lastname: updatedUser.lastname,
         phone: updatedUser.phone,
+        imageUrl: updatedUser.imageUrl,
         isProfileComplete: updatedUser.isProfileComplete,
         behaviourScore: Number(updatedUser.behaviourScore),
         role: classification.role,
