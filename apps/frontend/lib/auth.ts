@@ -16,6 +16,11 @@ export type AuthUser = {
   userType?: 'UNIVERSITY' | 'THAI' | 'FOREIGN';
   isProfileComplete?: boolean;
   behaviourScore?: number;
+  phone?: string | null;
+  studentId?: string;
+  citizenId?: string;
+  passportId?: string;
+  imageUrl?: string | null;
 };
 
 export function saveAuth(token: string, user: AuthUser): void {

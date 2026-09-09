@@ -77,7 +77,7 @@ export class AuthController {
 
   /**
    * POST /api/auth/complete-profile
-   * Saves the first-login information and refreshes the JWT claims.
+   * Saves the user-entered profile details and refreshes the JWT claims.
    */
   static async completeProfile(req: Request, res: Response): Promise<void> {
     try {
@@ -87,7 +87,19 @@ export class AuthController {
         return;
       }
 
-      const { phone, identityType, citizenId, passportId } = req.body;
+      const { firstname, lastname, phone, identityType, citizenId, passportId } = req.body;
+
+      // Validate required names from user input
+      if (!firstname || typeof firstname !== 'string' || !firstname.trim()) {
+        res.status(400).json({ success: false, error: 'First name is required' });
+        return;
+      }
+
+      if (!lastname || typeof lastname !== 'string' || !lastname.trim()) {
+        res.status(400).json({ success: false, error: 'Last name is required' });
+        return;
+      }
+
       if (typeof phone !== 'string' || !/^\d{10}$/.test(phone)) {
         res
           .status(400)
@@ -125,6 +137,8 @@ export class AuthController {
 
       const result = await AuthService.completeProfile({
         uid: authReq.user.uid,
+        firstname: firstname.trim(),
+        lastname: lastname.trim(),
         phone,
         identityType,
         citizenId,
