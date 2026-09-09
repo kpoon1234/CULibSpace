@@ -10,6 +10,7 @@ export interface AuthenticateUserInput {
   lastname: string;
   phone?: string;
   studentId?: string;
+  imageUrl?: string;
 }
 
 export interface CompleteProfileInput {
@@ -52,6 +53,7 @@ export class AuthService {
             firstname: input.firstname,
             lastname: input.lastname,
             phone,
+            imageUrl: input.imageUrl,
             isProfileComplete,
             userType: classification.userType,
             universityUser: studentId
@@ -74,6 +76,7 @@ export class AuthService {
             firstname: input.firstname,
             lastname: input.lastname,
             phone,
+            imageUrl: input.imageUrl,
             isProfileComplete,
             userType: UserType.THAI,
           },
@@ -86,6 +89,13 @@ export class AuthService {
       // Existing user
       if (user.userType === UserType.UNIVERSITY) {
         studentId = user.universityUser?.studentId;
+      }
+      if (input.imageUrl && (!user.imageUrl || user.imageUrl.includes('gravatar.com'))) {
+        user = await prisma.user.update({
+          where: { uid: user.uid },
+          data: { imageUrl: input.imageUrl },
+          include: { universityUser: true },
+        });
       }
     }
 
