@@ -124,7 +124,7 @@ ightarrow$ ระบบบันทึกข้อมูล และอัป�
 - **Admin Authentication**: บรรณารักษ์ล็อกอินผ่าน Admin Portal โดยใช้ Email + Password (bcrypt hash)
 - **Profile Management**: ผู้ใช้สามารถดูคะแนนพฤติกรรม (`behaviourScore`) ประวัติการถูกตัด/เพิ่มคะแนน (`ManageScore`) และแก้ไขเบอร์โทรศัพท์ได้
 
-### Module 2: Seat Searching & Real-time Browsing (FR-2.1 - FR-2.4 | EPIC 2)
+### Module 2: Table Searching & Real-time Browsing (FR-2.1 - FR-2.4 | EPIC 2)
 - **Interactive 2D Map**: แสดงผังโซน (Silent, Group, Common) และตำแหน่งโต๊ะ
 - **Real-time Status Polling (SWR)**: ดึงสถานะโต๊ะ (`AVAILABLE`, `RESERVED`, `OCCUPIED`, `CLOSED`) แบบเรียลไทม์
 - **Filtering System**: กรองโต๊ะตามประเภทโซน, ปลั๊กไฟ (`plugCap`), จอ TV (`hasTvScreen`)
@@ -171,15 +171,15 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
 - `GET /api/auth/me` : ดึงข้อมูลส่วนตัว, สิทธิ์ผู้ใช้, คะแนนพฤติกรรม และสถานะโปรไฟล์
 - `PUT /api/auth/profile` : แก้ไขข้อมูลส่วนตัว (เบอร์โทรศัพท์)
 
-### 5.2 Seat & Zone Module (`/api/seats`)
-- `GET /api/seats/layout` : ดึงผังโซนและโต๊ะทั้งหมด พร้อมกรองด้วย Query Parameters (`zoneType`, `plugCap`, `hasTvScreen`, `date`, `timeSlot`)
-- `GET /api/seats/:tableId/availability` : ตรวจสอบช่วงเวลาว่างของโต๊ะที่เลือก
+### 5.2 Table & Zone Module (`/api/tables`)
+- `GET /api/tables/layout` : ดึงผังโซนและโต๊ะทั้งหมด พร้อมกรองด้วย Query Parameters (`zoneType`, `plugCap`, `hasTvScreen`, `date`, `timeSlot`)
+- `GET /api/tables/:tableId/availability` : ตรวจสอบช่วงเวลาว่างของโต๊ะที่เลือก
 
 ### 5.3 Booking Module (`/api/bookings`)
 - `POST /api/bookings/hold` : สั่ง Hold ล็อกโต๊ะชั่วคราว 5 นาที (`lockToken`)
-- `POST /api/bookings` : ยืนยันการจองที่นั่ง
+- `POST /api/bookings` : ยืนยันการจองโต๊ะ
 - `GET /api/bookings/my-history` : ดึงประวัติการจองของผู้ใช้ (เรียงลำดับจากล่าสุด)
-- `POST /api/bookings/:bookingId/check-in` : เช็กอินเข้าใช้งานที่นั่ง
+- `POST /api/bookings/:bookingId/check-in` : เช็กอินเข้าใช้งานโต๊ะ
 - `POST /api/bookings/:bookingId/cancel` : ยกเลิกการจองก่อนถึง cutoff time
 
 ### 5.4 Visitor Ticket Module (`/api/tickets`)
