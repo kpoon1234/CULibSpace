@@ -7,6 +7,8 @@ import { PrismaClient } from '@prisma/client';
 import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import layoutRoutes from './routes/layoutRoutes.js';
+// 1. Import ตัว LockService
+import { LockService } from './services/lockService.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -53,4 +55,7 @@ app.get('/api/hello', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on ${BASE_URL}`);
+
+  // 2. สั่งเริ่มการทำงานของ Worker
+  LockService.startExpirationWorker();
 });
