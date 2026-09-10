@@ -48,29 +48,34 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
     new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
   );
 
-  // The window is expressed as one date + two half-hour times; derive those from
-  // the stored startDateTime / endDateTime.
-  const startP = parts(draft.startDateTime);
-  const endP = parts(draft.endDateTime);
-  const bookDate = startP.date || endP.date;
-  const fromTime = startP.time;
-  const toTime = endP.time;
-
-  // Rebuild startDateTime / endDateTime from whichever of the three fields changed.
-  const setWindow = (next: { date?: string; from?: string; to?: string }) => {
-    const date = next.date ?? bookDate;
-    const from = next.from ?? fromTime;
-    const to = next.to ?? toTime;
-    setDraft((d) => ({
-      ...d,
-      startDateTime: date && from ? `${date}T${from}` : null,
-      endDateTime: date && to ? `${date}T${to}` : null,
-    }));
-  };
+  // The booking window is a same-day Date + From + To, each held on its own so a
+  // half-picked window (e.g. a time chosen before a date) still shows what you
+  // clicked. They're combined into startDateTime / endDateTime only on Apply.
+  const [bookDate, setBookDate] = useState(
+    () => parts(value.startDateTime).date || parts(value.endDateTime).date
+  );
+  const [fromTime, setFromTime] = useState(() => parts(value.startDateTime).time);
+  const [toTime, setToTime] = useState(() => parts(value.endDateTime).time);
 
   const anyTimeField = Boolean(bookDate || fromTime || toTime);
   const allTimeFields = Boolean(bookDate && fromTime && toTime);
   const timeInvalid = (anyTimeField && !allTimeFields) || (allTimeFields && toTime <= fromTime);
+
+  const apply = () => {
+    onApply({
+      ...draft,
+      startDateTime: allTimeFields ? `${bookDate}T${fromTime}` : null,
+      endDateTime: allTimeFields ? `${bookDate}T${toTime}` : null,
+    });
+    onClose();
+  };
+
+  const clearAll = () => {
+    setDraft(EMPTY_FILTER);
+    setBookDate('');
+    setFromTime('');
+    setToTime('');
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -174,7 +179,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 className={fieldCls}
                 value={bookDate}
                 min={today}
-                onChange={(e) => setWindow({ date: e.target.value })}
+                onChange={(e) => setBookDate(e.target.value)}
               />
             </label>
 
@@ -184,7 +189,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 <select
                   className={fieldCls}
                   value={fromTime}
-                  onChange={(e) => setWindow({ from: e.target.value })}
+                  onChange={(e) => setFromTime(e.target.value)}
                 >
                   <option value="">—</option>
                   {TIME_SLOTS.map((t) => (
@@ -200,7 +205,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 <select
                   className={fieldCls}
                   value={toTime}
-                  onChange={(e) => setWindow({ to: e.target.value })}
+                  onChange={(e) => setToTime(e.target.value)}
                 >
                   <option value="">—</option>
                   {TIME_SLOTS.map((t) => (
@@ -224,7 +229,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
         <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-5 py-4">
           <button
             type="button"
-            onClick={() => setDraft(EMPTY_FILTER)}
+            onClick={clearAll}
             className="rounded-md px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
           >
             Clear all
@@ -232,10 +237,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
           <button
             type="button"
             disabled={timeInvalid}
-            onClick={() => {
-              onApply(draft);
-              onClose();
-            }}
+            onClick={apply}
             className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Apply filter
