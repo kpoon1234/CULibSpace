@@ -55,10 +55,6 @@ app.get('/api/hello', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on ${BASE_URL}`);
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
 
   // 2. สั่งเริ่มการทำงานของ Worker
   LockService.startExpirationWorker();
