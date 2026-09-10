@@ -5,6 +5,8 @@ import {
   EMPTY_FILTER,
   MIN_SEATS_OPTIONS,
   PLUG_BUCKETS,
+  SLOT_MINUTES,
+  snapToSlot,
   type FloorPlanFilter,
 } from '@/lib/floorPlan';
 import { CloseIcon } from './icons';
@@ -34,11 +36,14 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // `datetime-local` min = now (local wall clock), so a past window (the backend
-  // rejects it with 400) can't be picked. Computed once when the dialog mounts.
-  const [nowLocal] = useState(() =>
-    new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
-  );
+  // `datetime-local` min = the next half-hour slot at or after now, so a past
+  // window (the backend 400s) can't be picked and the min lines up with the
+  // 30-minute step. Computed once when the dialog mounts.
+  const [minSlot] = useState(() => {
+    const slotMs = SLOT_MINUTES * 60_000;
+    const next = new Date(Math.ceil(Date.now() / slotMs) * slotMs);
+    return new Date(next.getTime() - next.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
 
   const bothTimesSet = Boolean(draft.startDateTime) && Boolean(draft.endDateTime);
   const oneTimeSet = Boolean(draft.startDateTime) !== Boolean(draft.endDateTime);
@@ -149,8 +154,14 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 type="datetime-local"
                 className={fieldCls}
                 value={draft.startDateTime ?? ''}
-                min={nowLocal}
-                onChange={(e) => setDraft((d) => ({ ...d, startDateTime: e.target.value || null }))}
+                min={minSlot}
+                step={SLOT_MINUTES * 60}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    startDateTime: e.target.value ? snapToSlot(e.target.value) : null,
+                  }))
+                }
               />
             </label>
 
@@ -160,8 +171,14 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 type="datetime-local"
                 className={fieldCls}
                 value={draft.endDateTime ?? ''}
-                min={draft.startDateTime ?? nowLocal}
-                onChange={(e) => setDraft((d) => ({ ...d, endDateTime: e.target.value || null }))}
+                min={draft.startDateTime ?? minSlot}
+                step={SLOT_MINUTES * 60}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    endDateTime: e.target.value ? snapToSlot(e.target.value) : null,
+                  }))
+                }
               />
             </label>
           </div>
@@ -171,7 +188,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             </p>
           ) : (
             <p className="text-xs text-gray-500">
-              Enter the start and end of the booking window to check availability for that slot.
+              Pick the start and end of the booking window — 30-minute slots (:00 or :30).
             </p>
           )}
         </div>

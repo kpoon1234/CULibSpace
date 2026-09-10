@@ -19,6 +19,28 @@ export const PLUG_BUCKETS: PlugBucket[] = [
 /** "Minimum seats" options for the Table Filter — maps to the backend `minSeats`. */
 export const MIN_SEATS_OPTIONS: number[] = [2, 4, 6, 8];
 
+/** Booking slots are half-hourly: start/end times snap to :00 or :30. */
+export const SLOT_MINUTES = 30;
+
+/**
+ * Snap a `datetime-local` value ("YYYY-MM-DDTHH:mm") to the nearest half-hour, so
+ * the booking window is always :00 or :30. Rounds to nearest; caps at 23:30 so a
+ * value never rolls into the next day. Empty / malformed input is returned as-is.
+ */
+export function snapToSlot(local: string): string {
+  if (!local || local.length < 16) return local;
+  const [date, time] = local.split('T');
+  const [h, m] = time.split(':').map(Number);
+  const minsInDay = 24 * 60;
+  const snapped = Math.min(
+    minsInDay - SLOT_MINUTES,
+    Math.round(((h || 0) * 60 + (m || 0)) / SLOT_MINUTES) * SLOT_MINUTES
+  );
+  const hh = String(Math.floor(snapped / 60)).padStart(2, '0');
+  const mm = String(snapped % 60).padStart(2, '0');
+  return `${date}T${hh}:${mm}`;
+}
+
 /** True when a table clears every active amenity constraint in `filter`. */
 export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): boolean {
   if (filter.requiresLargeScreen && !table.hasTvScreen) return false;
