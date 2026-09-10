@@ -1,6 +1,6 @@
 // Types for the 2D floor-plan UI (FR-2: browse zone/table availability before arrival).
 //
-// One backend endpoint drives this UI: **GET /api/seats/layout** (the team's
+// One backend endpoint drives this UI: **GET /api/tables/layout** (the team's
 // LayoutController / LayoutService). It returns every zone with its tables, each
 // table carrying its live `status` (Available / Reserved / Occupied / Closed)
 // recomputed for the requested time window, plus its attributes (seats, plugs,
@@ -95,7 +95,7 @@ export interface FloorLayoutResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Wire shapes — GET /api/seats/layout
+// Wire shapes — GET /api/tables/layout
 // ---------------------------------------------------------------------------
 
 /** One table's live status + attributes, as buildFloorPlan() consumes it. */
@@ -116,7 +116,7 @@ export interface SeatStatusZone {
   tables: SeatStatusTable[];
 }
 
-/** One table exactly as GET /api/seats/layout sends it: status + attributes always,
+/** One table exactly as GET /api/tables/layout sends it: status + attributes always,
  *  geometry (code/shape/x/y/size) optional. */
 export interface RawLayoutTable {
   tableId: number;
@@ -143,14 +143,14 @@ export interface RawLayoutZone {
   tables: RawLayoutTable[];
 }
 
-/** Envelope returned by GET /api/seats/layout (a bare array is also tolerated). */
+/** Envelope returned by GET /api/tables/layout (a bare array is also tolerated). */
 export interface LayoutEnvelope {
   success: boolean;
   data?: RawLayoutZone[];
   error?: string;
 }
 
-/** Query params for GET /api/seats/layout (LayoutController). */
+/** Query params for GET /api/tables/layout (LayoutController). */
 export interface LayoutQuery {
   /** UI-only floor concept — not sent (the backend has no floors); used to pick
    *  the sample floor on fallback. */

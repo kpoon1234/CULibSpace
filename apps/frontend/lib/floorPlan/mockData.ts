@@ -6,8 +6,8 @@ import type {
   ZoneLayout,
 } from './types';
 
-// Bundled sample layout + status, used when the backend endpoints are not
-// reachable (they are not built yet). Geometry mirrors the three Figma frames:
+// Bundled sample layout + status, used when GET /api/tables/layout is
+// unreachable. Geometry mirrors the three Figma frames:
 //   - Common: 7×4 grid of square tables (C1–C28)
 //   - Silent: 7×2 grid of square carrels (S1–S14)
 //   - Group:  mixed shapes — wide tables (G1–G4), round tables (G5–G8),

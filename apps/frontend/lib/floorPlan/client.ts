@@ -19,7 +19,7 @@ import { TABLE_STATUSES } from './types';
 
 // Data access for the floor-plan UI. One backend endpoint (LayoutController):
 //
-//   GET /api/seats/layout?<query>  ->  { success, data: RawLayoutZone[] }
+//   GET /api/tables/layout?<query>  ->  { success, data: RawLayoutZone[] }
 //
 // Each zone lists its tables with a live `status` (computed for the requested
 // time window) plus attributes. Geometry (x/y/shape/size, zone bounds) is
@@ -27,7 +27,7 @@ import { TABLE_STATUSES } from './types';
 // network/parse error the whole thing falls back to bundled sample data, tagged
 // `source: 'mock'` so sample numbers are never shown as live.
 
-const LAYOUT_PATH = process.env.NEXT_PUBLIC_FLOORPLAN_PATH || '/api/seats/layout';
+const LAYOUT_PATH = process.env.NEXT_PUBLIC_FLOORPLAN_PATH || '/api/tables/layout';
 
 /** Set NEXT_PUBLIC_FLOORPLAN_MOCK=1 to skip the network entirely (Storybook, CI, offline demo). */
 const FORCE_MOCK = process.env.NEXT_PUBLIC_FLOORPLAN_MOCK === '1';
@@ -37,13 +37,13 @@ export interface Sourced<T> {
   source: 'api' | 'mock';
 }
 
-/** Geometry + live status, both derived from one /api/seats/layout response. */
+/** Geometry + live status, both derived from one /api/tables/layout response. */
 export interface LayoutResult {
   geometry: FloorLayoutResponse;
   status: SeatStatusZone[];
 }
 
-// GET /api/seats/layout params, per LayoutController: zoneType, plugCap,
+// GET /api/tables/layout params, per LayoutController: zoneType, plugCap,
 // hasTvScreen, minSeats, startDateTime, endDateTime. `floorId` is a UI-only hint
 // (no floor concept in the backend) and is not sent.
 function toQueryString(q: LayoutQuery): string {
@@ -82,7 +82,7 @@ function normalizeRawZones(zones: RawLayoutZone[]): RawLayoutZone[] {
   }));
 }
 
-/** Split a raw /api/seats/layout payload into a status feed for buildFloorPlan(). */
+/** Split a raw /api/tables/layout payload into a status feed for buildFloorPlan(). */
 function toStatusFeed(zones: RawLayoutZone[]): SeatStatusZone[] {
   return zones.map((z) => ({
     zoneId: z.zoneId,
@@ -104,7 +104,7 @@ function mockResult(floorId: number): LayoutResult {
 }
 
 /**
- * Fetch GET /api/seats/layout and shape it for the UI. `query.floorId` is not
+ * Fetch GET /api/tables/layout and shape it for the UI. `query.floorId` is not
  * sent (no floor concept in the backend); it only picks the sample floor on
  * fallback.
  */
@@ -142,7 +142,7 @@ export async function fetchLayout(
     if ((err as Error)?.name === 'AbortError') throw err;
     if (process.env.NODE_ENV !== 'production') {
       console.warn(
-        '[floorPlan] /api/seats/layout unavailable, using sample data:',
+        '[floorPlan] /api/tables/layout unavailable, using sample data:',
         (err as Error).message
       );
     }

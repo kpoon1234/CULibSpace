@@ -41,7 +41,7 @@ export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): 
   return true;
 }
 
-/** The attribute filters as GET /api/seats/layout query params (time window excluded). */
+/** The attribute filters as GET /api/tables/layout query params (time window excluded). */
 export function filterAmenityQuery(filter: FloorPlanFilter): {
   plugCap?: number;
   hasTvScreen?: boolean;
@@ -71,7 +71,7 @@ export function activeFilterCount(filter: FloorPlanFilter): number {
 
 /**
  * The booking window to check availability against — the Figma "Start Date Time"
- * / "End Date Time" fields, passed straight to GET /api/seats/layout (which takes
+ * / "End Date Time" fields, passed straight to GET /api/tables/layout (which takes
  * exactly `startDateTime` + `endDateTime`). Returns null unless both ends are set
  * and start is before end.
  */

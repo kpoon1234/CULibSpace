@@ -33,8 +33,8 @@ const PANEL_ID = 'floor-plan-panel';
 
 // Top-level composition of the 2D floor-plan UI: zone tabs + pan/zoom canvas +
 // selected-table detail + amenity filter + floor navigation. Data comes from
-// useFloorPlan, which serves bundled sample data until the backend endpoints
-// (GET /api/floors/:id/layout, GET /api/seats/layout) are live.
+// useFloorPlan (GET /api/tables/layout), which falls back to bundled sample
+// data when the API is unreachable.
 export default function FloorPlanView({
   initialFloorId,
   initialZone = 'Common',

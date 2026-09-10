@@ -2,12 +2,9 @@
 
 import { FloorPlanView } from '@/components/FloorPlan';
 
-// Preview route for the 2D floor-plan UI (FR-2). Renders on bundled sample data
-// until the backend endpoints land:
-//   GET /api/floors/:floorId/layout   (layout & zone metadata — not built yet)
-//   GET /api/seats/layout             (live status — prototyped on `seatAPI`)
-// Once both exist, FloorPlanView switches to live data automatically; no change
-// needed here. See lib/floorPlan for the data contract.
+// Route for the 2D floor-plan UI (FR-2). Data comes from GET /api/tables/layout
+// (see lib/floorPlan/README.md); it falls back to bundled sample data, shown
+// with a "Sample data" badge, when the API is unreachable.
 export default function ZonesPreviewPage() {
   return (
     <div className="px-6 py-10 sm:px-10 lg:px-16 xl:px-24">

@@ -33,7 +33,7 @@ function parts(local: string | null): { date: string; time: string } {
   return { date, time: time.slice(0, 5) };
 }
 
-// Table Filter dialog — maps the Figma panel to the GET /api/seats/layout params:
+// Table Filter dialog — maps the Figma panel to the GET /api/tables/layout params:
 // large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
 // minSeats, and a same-day Date + From + To (each a fixed half-hour slot) ->
 // startDateTime / endDateTime, the window the status is evaluated against.

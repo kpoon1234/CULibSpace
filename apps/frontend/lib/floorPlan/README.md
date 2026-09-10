@@ -5,9 +5,9 @@ arrival). Built to plug into the team's `LayoutController` / `LayoutService`.
 
 ## The one endpoint
 
-### `GET /api/seats/layout` (`LayoutController`)
+### `GET /api/tables/layout` (`LayoutController`)
 
-Override the path with `NEXT_PUBLIC_FLOORPLAN_PATH` (default `/api/seats/layout`).
+Override the path with `NEXT_PUBLIC_FLOORPLAN_PATH` (default `/api/tables/layout`).
 
 Returns every zone with its tables. Each table carries its **live `status`**
 (`Available` / `Reserved` / `Occupied` / `Closed`, computed for the requested
@@ -73,7 +73,7 @@ floors so the stepper is demoable.
 
 ```
 useFloorPlan(floorId, { filter, serverFilter? })   // the only thing components call
-  └─ fetchLayout(query)          // GET /api/seats/layout, polled every STATUS_POLL_MS (20s)
+  └─ fetchLayout(query)          // GET /api/tables/layout, polled every STATUS_POLL_MS (20s)
        ├─ synthesizeLayout(zones) -> geometry
        └─ toStatusFeed(zones)     -> live status
   └─ buildFloorPlan({ geometry, status, source, filter })
@@ -81,7 +81,7 @@ useFloorPlan(floorId, { filter, serverFilter? })   // the only thing components 
 ```
 
 - **Amenity filtering is client-side by default.** `useFloorPlan` sends only the
-  **time window** to `/api/seats/layout`; `plugCap` / `hasTvScreen` / `minSeats` are
+  **time window** to `/api/tables/layout`; `plugCap` / `hasTvScreen` / `minSeats` are
   applied in `buildFloorPlan`, which _flags_ non-matching tables
   (`matchesFilter: false`) rather than dropping them — the map dims them so the
   room still reads as full of tables. Pass `serverFilter: true` to instead send
@@ -94,7 +94,7 @@ useFloorPlan(floorId, { filter, serverFilter? })   // the only thing components 
 ## Going live
 
 Point `NEXT_PUBLIC_API_URL` at the backend (already the convention in
-`lib/auth.ts`) and make sure `GET /api/seats/layout` responds. Nothing in
+`lib/auth.ts`) and make sure `GET /api/tables/layout` responds. Nothing in
 `components/FloorPlan` or `app/zones` changes — the fetcher stops falling back
 and `source` becomes `'api'`. Add table geometry to the payload whenever the
 schema supports it; the UI picks it up with no further work.
