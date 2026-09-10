@@ -5,8 +5,7 @@ import {
   EMPTY_FILTER,
   MIN_SEATS_OPTIONS,
   PLUG_BUCKETS,
-  SLOT_MINUTES,
-  snapToSlot,
+  TIME_SLOTS,
   type FloorPlanFilter,
 } from '@/lib/floorPlan';
 import { CloseIcon } from './icons';
@@ -27,31 +26,51 @@ function plugKey(range: FloorPlanFilter['plugRange']): string {
   return `${range[0]}-${range[1]}`;
 }
 
+/** Split a stored "YYYY-MM-DDTHH:mm" into date + "HH:mm" parts (or blanks). */
+function parts(local: string | null): { date: string; time: string } {
+  if (!local || local.length < 16) return { date: '', time: '' };
+  const [date, time] = local.split('T');
+  return { date, time: time.slice(0, 5) };
+}
+
 // Table Filter dialog — maps the Figma panel to the GET /api/seats/layout params:
 // large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
-// minSeats, and the free "Start Date Time" / "End Date Time" fields ->
+// minSeats, and a same-day Date + From + To (each a fixed half-hour slot) ->
 // startDateTime / endDateTime, the window the status is evaluated against.
 export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanFiltersProps) {
   const [draft, setDraft] = useState<FloorPlanFilter>(value);
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // `datetime-local` min = the next half-hour slot at or after now, so a past
-  // window (the backend 400s) can't be picked and the min lines up with the
-  // 30-minute step. Computed once when the dialog mounts.
-  const [minSlot] = useState(() => {
-    const slotMs = SLOT_MINUTES * 60_000;
-    const next = new Date(Math.ceil(Date.now() / slotMs) * slotMs);
-    return new Date(next.getTime() - next.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-  });
+  // Today (local), the earliest date the window can start on — the backend 400s
+  // a past window. Computed once when the dialog mounts.
+  const [today] = useState(() =>
+    new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+  );
 
-  const bothTimesSet = Boolean(draft.startDateTime) && Boolean(draft.endDateTime);
-  const oneTimeSet = Boolean(draft.startDateTime) !== Boolean(draft.endDateTime);
-  const outOfOrder =
-    bothTimesSet &&
-    new Date(draft.startDateTime as string).getTime() >=
-      new Date(draft.endDateTime as string).getTime();
-  const timeInvalid = oneTimeSet || outOfOrder;
+  // The window is expressed as one date + two half-hour times; derive those from
+  // the stored startDateTime / endDateTime.
+  const startP = parts(draft.startDateTime);
+  const endP = parts(draft.endDateTime);
+  const bookDate = startP.date || endP.date;
+  const fromTime = startP.time;
+  const toTime = endP.time;
+
+  // Rebuild startDateTime / endDateTime from whichever of the three fields changed.
+  const setWindow = (next: { date?: string; from?: string; to?: string }) => {
+    const date = next.date ?? bookDate;
+    const from = next.from ?? fromTime;
+    const to = next.to ?? toTime;
+    setDraft((d) => ({
+      ...d,
+      startDateTime: date && from ? `${date}T${from}` : null,
+      endDateTime: date && to ? `${date}T${to}` : null,
+    }));
+  };
+
+  const anyTimeField = Boolean(bookDate || fromTime || toTime);
+  const allTimeFields = Boolean(bookDate && fromTime && toTime);
+  const timeInvalid = (anyTimeField && !allTimeFields) || (allTimeFields && toTime <= fromTime);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -147,48 +166,57 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             </label>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-3">
             <label className="block text-sm font-medium text-gray-700">
-              Start date &amp; time
+              Date
               <input
-                type="datetime-local"
+                type="date"
                 className={fieldCls}
-                value={draft.startDateTime ?? ''}
-                min={minSlot}
-                step={SLOT_MINUTES * 60}
-                onChange={(e) =>
-                  setDraft((d) => ({
-                    ...d,
-                    startDateTime: e.target.value ? snapToSlot(e.target.value) : null,
-                  }))
-                }
+                value={bookDate}
+                min={today}
+                onChange={(e) => setWindow({ date: e.target.value })}
               />
             </label>
 
-            <label className="block text-sm font-medium text-gray-700">
-              End date &amp; time
-              <input
-                type="datetime-local"
-                className={fieldCls}
-                value={draft.endDateTime ?? ''}
-                min={draft.startDateTime ?? minSlot}
-                step={SLOT_MINUTES * 60}
-                onChange={(e) =>
-                  setDraft((d) => ({
-                    ...d,
-                    endDateTime: e.target.value ? snapToSlot(e.target.value) : null,
-                  }))
-                }
-              />
-            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm font-medium text-gray-700">
+                From
+                <select
+                  className={fieldCls}
+                  value={fromTime}
+                  onChange={(e) => setWindow({ from: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {TIME_SLOTS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-medium text-gray-700">
+                To
+                <select
+                  className={fieldCls}
+                  value={toTime}
+                  onChange={(e) => setWindow({ to: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {TIME_SLOTS.map((t) => (
+                    <option key={t} value={t} disabled={Boolean(fromTime) && t <= fromTime}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
           {timeInvalid ? (
-            <p className="text-xs text-red-600">
-              Enter both a start and an end, with the start before the end.
-            </p>
+            <p className="text-xs text-red-600">Pick a date, a start time and a later end time.</p>
           ) : (
             <p className="text-xs text-gray-500">
-              Pick the start and end of the booking window — 30-minute slots (:00 or :30).
+              Same-day window in 30-minute slots (e.g. 10:00 – 10:30).
             </p>
           )}
         </div>
