@@ -28,8 +28,14 @@ export interface UseFloorPlanOptions {
 export interface UseFloorPlanResult {
   plan: FloorPlan | undefined;
   isLoading: boolean;
-  /** Layout failed to load AND no sample data could be served (should be rare). */
+  /** Layout failed to load (network or server error) — no data to render. */
   isError: boolean;
+  /**
+   * A refresh (poll or manual retry) failed after a plan was already showing.
+   * `keepPreviousData` keeps `plan` populated through this, so `isError` alone
+   * never catches it — surface it separately instead of leaving the failure silent.
+   */
+  isStale: boolean;
   error: unknown;
   /** True while a background refresh is in flight. */
   isRefreshing: boolean;
@@ -72,6 +78,7 @@ export function useFloorPlan(
     plan,
     isLoading: !res.data && !res.error,
     isError: Boolean(res.error) && !res.data,
+    isStale: Boolean(res.error) && Boolean(res.data),
     error: res.error,
     isRefreshing: res.isValidating,
     source: plan?.source,
