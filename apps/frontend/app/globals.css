@@ -17,14 +17,24 @@
  * emit Tailwind's stock values. That is intentional: it keeps the palette in one
  * file instead of scattered across every className. Read the values, not the names.
  *
- * Crisp Paper & Deep Berry (2026-09-06, revised) — home page + header only.
+ * Crisp Paper & Deep Berry (2026-09-06) — home page + header only.
  * A second, cooler-neutral system layered on top for the home page and the site
- * header: a deep berry-rose (same hue family as Chula Pink, pulled down in
- * lightness/saturation) is the primary CTA color there, bright Chula Pink stays
- * a small but clearly visible secondary accent, and canvas/ink shift cool. This
- * does NOT touch claret/brass/scarlet or the stone gray ramp below — the login,
- * onboarding, and admin surfaces keep the warm Reading Lamp treatment untouched.
- * (An earlier pass used a navy primary/footer — replaced per visual feedback.)
+ * header: bright Chula Pink stays a small but clearly visible secondary accent,
+ * and canvas/ink shift cool. This does NOT touch claret/brass/scarlet or the
+ * stone gray ramp below — the login, onboarding, and admin surfaces keep the
+ * warm Reading Lamp treatment untouched.
+ *
+ * One action color, one step lighter (2026-09-11). The 2026-09-06 pass above
+ * also gave the header/home CTA and the footer their own darker, undocumented
+ * pair (a "deep berry" ~#9b2c4f and a near-black wine footer, #5c1f30) separate
+ * from the Claret ramp every other page's buttons already used (claret-600
+ * #a12049). Two unrelated dark reds plus a near-black footer read as several
+ * different "oxblood" tones depending on which page you were on — direct
+ * feedback confirmed it. Fix: `cta-primary`/`cta-primary-hover` now alias
+ * Claret 500/600 (one step lighter than the old canonical claret-600 CTA, and
+ * the same pair every `bg-rose-500` button already uses), and `footer-bg` moved
+ * from that near-black wine to a soft Claret 100 tint — still visibly pink, not
+ * white — see DESIGN.md's Claret and Site Footer sections for the full rationale.
  */
 :root {
   /* Surfaces */
@@ -37,14 +47,14 @@
   --chula-pink: #e03e6c;
   --chula-pink-hover: #c0325a;
 
-  /* Primary CTA — deep berry-rose, same hue family as Chula Pink (~343°) but darker/less
-     saturated so it reads as an institutional action color, not a decorative accent. */
-  --cta-primary: #9b2c4f;
-  --cta-primary-hover: #7a1f39;
+  /* Primary CTA — the same Claret action color every other page's buttons use
+     (Claret 500 resting / Claret 600 hover — declared below), not a separate pair. */
+  --cta-primary: var(--claret-500);
+  --cta-primary-hover: var(--claret-600);
 
-  /* Footer — deep wine, distinct from the CTA color. 24% lightness keeps white-text
-     contrast at ~12:1 (WCAG AAA) while reading as wine rather than near-black. */
-  --footer-bg: #5c1f30;
+  /* Footer — a soft pink tint (Claret 100), not the near-black wine it was, and not
+     plain white/Paper either: it should still read as visibly pink at a glance. */
+  --footer-bg: var(--claret-100);
 
   /* Hairline border for crisp-paper cards/header (cooler than the warm stone ramp below) */
   --hairline: #e2e8f0;
@@ -208,4 +218,27 @@ body {
 /* Numerals in data positions should not jitter as values change. */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 2D floor-plan tables (components/FloorPlan). The hover/focus ring is a
+ * separate SVG shape whose opacity CSS toggles, so it never competes with the
+ * claret selection ring drawn on the table body. On focus-visible it recolours
+ * to claret — the action colour — matching the rest of the app's focus states.
+ */
+.fp-table--interactive {
+  outline: none;
+}
+.fp-table__ring {
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.fp-table--interactive:hover .fp-table__ring {
+  opacity: 1;
+}
+.fp-table--interactive:focus-visible .fp-table__ring {
+  opacity: 1;
+  stroke: var(--claret-500);
+  stroke-width: 3px;
 }

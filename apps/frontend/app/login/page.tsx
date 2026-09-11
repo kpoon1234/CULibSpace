@@ -172,7 +172,7 @@ function LoginPageContent() {
             <button
               type="submit"
               onClick={validateInputs}
-              className="w-full rounded-md bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-700"
+              className="w-full rounded-md bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-600"
             >
               Login as Admin
             </button>

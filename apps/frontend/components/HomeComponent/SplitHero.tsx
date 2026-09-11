@@ -22,7 +22,7 @@ export default function SplitHero() {
 
         {/* Update Link destination and text based on auth state */}
         <Link
-          href={storedUser ? '#capabilities-heading' : '/login'}
+          href={storedUser ? '/zones' : '/login'}
           className="mt-2 w-fit rounded-md bg-cta-primary px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-cta-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2"
         >
           {storedUser ? 'Browse available zones' : 'Reserve a table now'}
