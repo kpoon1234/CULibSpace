@@ -43,6 +43,13 @@ const zones: Zone[] = [
   },
 ];
 
+// Fallback hex and RGBA values for environments where CSS variables are missing or unsupported
+const FALLBACK_SPRUCE = '#1b4d3e';
+const FALLBACK_SPRUCE_BG = 'rgba(27, 77, 62, 0.1)';
+const FALLBACK_OCHRE = '#c87d20';
+const FALLBACK_OCHRE_BG = 'rgba(200, 125, 32, 0.1)';
+const FALLBACK_OCHRE_TRACK = 'rgba(200, 125, 32, 0.15)';
+
 export default function ZoneAvailabilityGraphic() {
   return (
     <div className="flex flex-col gap-5">
@@ -56,19 +63,33 @@ export default function ZoneAvailabilityGraphic() {
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-gray-900">{name}</span>
                 <span
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    isFull ? 'bg-ochre/10 text-ochre' : 'bg-spruce/10 text-spruce'
-                  }`}
+                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: isFull
+                      ? `var(--color-ochre-bg, ${FALLBACK_OCHRE_BG})`
+                      : `var(--color-spruce-bg, ${FALLBACK_SPRUCE_BG})`,
+                    color: isFull
+                      ? `var(--color-ochre, ${FALLBACK_OCHRE})`
+                      : `var(--color-spruce, ${FALLBACK_SPRUCE})`,
+                  }}
                 >
                   {isFull ? 'Full / In Use' : `${pctAvailable}% Available`}
                 </span>
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="h-2 flex-1 overflow-hidden rounded-full bg-ochre/15">
+                <span
+                  className="h-2 flex-1 overflow-hidden rounded-full"
+                  style={{
+                    backgroundColor: `var(--color-ochre-track, ${FALLBACK_OCHRE_TRACK})`,
+                  }}
+                >
                   <span
-                    className="block h-full rounded-full bg-spruce"
-                    style={{ width: `${pctAvailable}%` }}
+                    className="block h-full rounded-full"
+                    style={{
+                      width: `${pctAvailable}%`,
+                      backgroundColor: `var(--color-spruce, ${FALLBACK_SPRUCE})`,
+                    }}
                   />
                 </span>
                 <span className="w-24 flex-none text-right text-sm tabular-nums text-gray-600">

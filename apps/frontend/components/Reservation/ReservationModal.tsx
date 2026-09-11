@@ -25,11 +25,20 @@ export default function ReservationModal({
   const [startTime, setStartTime] = useState(TIME_SLOTS[0] || '');
   const [endTime, setEndTime] = useState(TIME_SLOTS[1] || '');
   const [step, setStep] = useState<Step>('form');
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setError(null);
+
+    // Time validation check
+    if (startTime >= endTime) {
+      setError('End time must be after start time.');
+      return;
+    }
+
     onConfirm(startTime, endTime);
     setStep('result');
   };
@@ -37,6 +46,7 @@ export default function ReservationModal({
   const handleClose = () => {
     onClose();
     setStep('form');
+    setError(null);
   };
 
   return (
@@ -69,7 +79,7 @@ export default function ReservationModal({
             <button
               type="button"
               onClick={handleClose}
-              className="mt-8 w-full rounded-full bg-[#ff4d9e] px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-pink-500 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:ring-offset-2"
+              className="mt-8 w-full rounded-full bg-chula-400 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-pink-500 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:ring-offset-2"
             >
               Done
             </button>
@@ -93,7 +103,7 @@ export default function ReservationModal({
                     type="text"
                     value={date}
                     readOnly
-                    className="w-full cursor-not-allowed rounded-xl bg-[#e2e2e2] px-4 py-3 pr-10 text-gray-600 focus:outline-none"
+                    className="w-full cursor-not-allowed rounded-xl bg-gray-200 px-4 py-3 pr-10 text-gray-600 focus:outline-none"
                   />
                   {/* Calendar Icon */}
                   <svg
@@ -117,7 +127,10 @@ export default function ReservationModal({
                   <label className="block text-sm text-gray-500 mb-1.5 ml-1">Start time</label>
                   <select
                     value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
+                    onChange={(e) => {
+                      setStartTime(e.target.value);
+                      setError(null);
+                    }}
                     className="w-full rounded-xl bg-[#e2e2e2] px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-400 appearance-none"
                     required
                   >
@@ -132,8 +145,11 @@ export default function ReservationModal({
                   <label className="block text-sm text-gray-500 mb-1.5 ml-1">End time</label>
                   <select
                     value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full rounded-xl bg-[#e2e2e2] px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-400 appearance-none"
+                    onChange={(e) => {
+                      setEndTime(e.target.value);
+                      setError(null);
+                    }}
+                    className="w-full rounded-xl bg-gray-200 px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-400 appearance-none"
                     required
                   >
                     {TIME_SLOTS.map((time) => (
@@ -144,6 +160,9 @@ export default function ReservationModal({
                   </select>
                 </div>
               </div>
+
+              {/* Error Message */}
+              {error && <p className="text-xs font-medium text-red-500 ml-1">{error}</p>}
 
               {/* Action Buttons */}
               <div className="mt-8 flex justify-end gap-3 pt-4">
@@ -156,7 +175,7 @@ export default function ReservationModal({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-full bg-[#ff4d9e] px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-pink-500 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:ring-offset-2"
+                  className="rounded-full bg-chula-400 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-pink-500 focus:outline-none focus:ring-2 focus:ring-pink-400 focus:ring-offset-2"
                 >
                   Confirm Reservation
                 </button>
