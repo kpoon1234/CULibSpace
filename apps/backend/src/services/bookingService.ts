@@ -54,6 +54,30 @@ export interface BookingValidationResult {
 
 export class BookingService {
   /**
+   * Execute an asynchronous database operation with a strict timeout guard
+   * to prevent connection pool starvation and deadlock under high concurrency.
+   */
+  static async withTimeout<T>(operation: () => Promise<T>, timeoutMs: number = 5000): Promise<T> {
+    let timer: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject({
+          status: 504,
+          code: 'DATABASE_TIMEOUT',
+          message: `Database query timed out after ${timeoutMs}ms during concurrent reservation validation. Please try again.`,
+        } as BookingValidationError);
+      }, timeoutMs);
+      timer.unref?.();
+    });
+
+    try {
+      return await Promise.race([operation(), timeoutPromise]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  }
+
+  /**
    * Validate all booking rules under US3-1 (FR-3.1, FR-3.2, FR-3.3, FR-5.3, FR-6.3)
    *
    * Validates:
@@ -63,10 +87,13 @@ export class BookingService {
    * 4. Table existence, maintenance status (not CLOSED), and availability (no overlapping bookings)
    * 5. Table hold-lock concurrency (if lockedUntil > now, verifies lockToken matches)
    * 6. Outside visitor ticket check (THAI and FOREIGN users require active PAID ticket covering the slot)
+   *
+   * Protected with strict timeout guard (default 5000ms) to eliminate concurrent deadlock risks.
    */
   static async validateBookingRules(
     input: BookingValidationInput,
-    prisma: any = defaultPrisma
+    prisma: any = defaultPrisma,
+    timeoutMs: number = 5000
   ): Promise<BookingValidationResult> {
     const { userId, tableId, startDateTime, endDateTime, lockToken } = input;
 
@@ -83,176 +110,182 @@ export class BookingService {
       (endDateTime.getTime() - startDateTime.getTime()) / (60 * 1000)
     );
 
-    // Fetch SystemConfig for rules (or fallback defaults)
-    let config: SystemConfig | null = null;
-    try {
-      config = await prisma.systemConfig.findFirst();
-    } catch {
-      // Fallback if table doesn't exist yet or query fails
-    }
-
-    const minScoreToBook = Number(config?.minScoreToBook ?? 50.0);
-
     // ==========================================
-    // 2. User Lookup & Behavior Credit Score Check (US3-1 / FR-5.3)
+    // Database Queries protected with Concurrency Timeout Guard
     // ==========================================
-    const user = await prisma.user.findUnique({
-      where: { uid: userId },
-      select: {
-        uid: true,
-        firstname: true,
-        lastname: true,
-        behaviourScore: true,
-        userType: true,
-        outsideUser: {
-          include: {
-            tickets: {
-              where: {
-                status: TicketStatus.PAID,
-                startDateTime: { lte: startDateTime },
-                endDateTime: { gte: endDateTime },
+    return await this.withTimeout(async () => {
+      // Fetch SystemConfig for rules (or fallback defaults)
+      let config: SystemConfig | null = null;
+      try {
+        config = await prisma.systemConfig.findFirst();
+      } catch {
+        // Fallback if table doesn't exist yet or query fails
+      }
+
+      const minScoreToBook = Number(config?.minScoreToBook ?? 50.0);
+
+      // ==========================================
+      // 2. User Lookup & Behavior Credit Score Check (US3-1 / FR-5.3)
+      // ==========================================
+      const user = await prisma.user.findUnique({
+        where: { uid: userId },
+        select: {
+          uid: true,
+          firstname: true,
+          lastname: true,
+          behaviourScore: true,
+          userType: true,
+          outsideUser: {
+            include: {
+              tickets: {
+                where: {
+                  status: TicketStatus.PAID,
+                  startDateTime: { lte: startDateTime },
+                  endDateTime: { gte: endDateTime },
+                },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    if (!user) {
-      throw {
-        status: 404,
-        code: 'USER_NOT_FOUND',
-        message: `User with ID ${userId} not found`,
-      } as BookingValidationError;
-    }
-
-    const userScore = Number(user.behaviourScore);
-    if (userScore < minScoreToBook) {
-      throw {
-        status: 403,
-        code: 'INSUFFICIENT_BEHAVIOUR_SCORE',
-        message: `Your behavior credit score (${userScore.toFixed(1)}) is below the minimum required (${minScoreToBook.toFixed(1)}) to make a reservation`,
-      } as BookingValidationError;
-    }
-
-    // ==========================================
-    // 3. 1-Booking-Per-User Policy (US3-1 / FR-3.2)
-    // ==========================================
-    const userOverlap = await prisma.booking.findFirst({
-      where: {
-        uid: userId,
-        status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
-        startDateTime: { lt: endDateTime },
-        endDateTime: { gt: startDateTime },
-      },
-    });
-
-    if (userOverlap) {
-      throw {
-        status: 409,
-        code: 'USER_BOOKING_OVERLAP',
-        message:
-          'You already have an active or pending reservation during this time window (1-booking-per-user policy)',
-      } as BookingValidationError;
-    }
-
-    // ==========================================
-    // 4. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
-    // ==========================================
-    const table = await prisma.table.findUnique({
-      where: { tableId },
-    });
-
-    if (!table) {
-      throw {
-        status: 404,
-        code: 'TABLE_NOT_FOUND',
-        message: `Table with ID ${tableId} not found`,
-      } as BookingValidationError;
-    }
-
-    if (table.status === TableStatus.CLOSED) {
-      throw {
-        status: 400,
-        code: 'TABLE_CLOSED',
-        message: 'This table is currently closed for maintenance',
-      } as BookingValidationError;
-    }
-
-    // Check if table is currently locked by another user (5-min Hold Lock)
-    const now = new Date();
-    const isHoldLocked = table.lockedUntil && new Date(table.lockedUntil) > now;
-    if (isHoldLocked) {
-      // If user does not provide the token or token does not match
-      if (!lockToken || table.lockToken !== lockToken) {
+      if (!user) {
         throw {
-          status: 409,
-          code: 'TABLE_LOCKED',
-          message:
-            'This table is currently on hold by another user. Please choose another table or try again later.',
+          status: 404,
+          code: 'USER_NOT_FOUND',
+          message: `User with ID ${userId} not found`,
         } as BookingValidationError;
       }
-    }
 
-    // Check overlapping bookings on this table
-    const tableOverlap = await prisma.booking.findFirst({
-      where: {
-        tableId,
-        status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
-        startDateTime: { lt: endDateTime },
-        endDateTime: { gt: startDateTime },
-      },
-    });
-
-    if (tableOverlap) {
-      throw {
-        status: 409,
-        code: 'TABLE_ALREADY_BOOKED',
-        message: 'This table is already reserved by another user during the requested time window',
-      } as BookingValidationError;
-    }
-
-    // ==========================================
-    // 5. Outside Visitor Ticket Check (US3-1 / FR-6.3)
-    // ==========================================
-    if (user.userType === UserType.THAI || user.userType === UserType.FOREIGN) {
-      const activeTickets = user.outsideUser?.tickets || [];
-      if (activeTickets.length === 0) {
+      const userScore = Number(user.behaviourScore);
+      if (userScore < minScoreToBook) {
         throw {
           status: 403,
-          code: 'TICKET_REQUIRED',
-          message:
-            'External visitors (Thai / Foreign) require an active paid ticket covering the requested reservation time window',
+          code: 'INSUFFICIENT_BEHAVIOUR_SCORE',
+          message: `Your behavior credit score (${userScore.toFixed(1)}) is below the minimum required (${minScoreToBook.toFixed(1)}) to make a reservation`,
         } as BookingValidationError;
       }
-    }
 
-    return {
-      valid: true,
-      user: {
-        uid: user.uid,
-        firstname: user.firstname,
-        lastname: user.lastname,
-        behaviourScore: userScore,
-        userType: user.userType,
-      },
-      table: {
-        tableId: table.tableId,
-        numberOfSeat: table.numberOfSeat,
-        zoneId: table.zoneId,
-        status: table.status,
-      },
-      timeWindow: {
-        startDateTime,
-        endDateTime,
-        durationMinutes,
-      },
-      schedule: {
-        name: scheduleValidation.schedule.name,
-        openTime: scheduleValidation.schedule.openTime,
-        closeTime: scheduleValidation.schedule.closeTime,
-        is24Hours: scheduleValidation.schedule.is24Hours,
-      },
-    };
+      // ==========================================
+      // 3. 1-Booking-Per-User Policy (US3-1 / FR-3.2)
+      // ==========================================
+      const userOverlap = await prisma.booking.findFirst({
+        where: {
+          uid: userId,
+          status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+          startDateTime: { lt: endDateTime },
+          endDateTime: { gt: startDateTime },
+        },
+      });
+
+      if (userOverlap) {
+        throw {
+          status: 409,
+          code: 'USER_BOOKING_OVERLAP',
+          message:
+            'You already have an active or pending reservation during this time window (1-booking-per-user policy)',
+        } as BookingValidationError;
+      }
+
+      // ==========================================
+      // 4. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
+      // ==========================================
+      const table = await prisma.table.findUnique({
+        where: { tableId },
+      });
+
+      if (!table) {
+        throw {
+          status: 404,
+          code: 'TABLE_NOT_FOUND',
+          message: `Table with ID ${tableId} not found`,
+        } as BookingValidationError;
+      }
+
+      if (table.status === TableStatus.CLOSED) {
+        throw {
+          status: 400,
+          code: 'TABLE_CLOSED',
+          message: 'This table is currently closed for maintenance',
+        } as BookingValidationError;
+      }
+
+      // Check if table is currently locked by another user (5-min Hold Lock)
+      const now = new Date();
+      const isHoldLocked = table.lockedUntil && new Date(table.lockedUntil) > now;
+      if (isHoldLocked) {
+        // If user does not provide the token or token does not match
+        if (!lockToken || table.lockToken !== lockToken) {
+          throw {
+            status: 409,
+            code: 'TABLE_LOCKED',
+            message:
+              'This table is currently on hold by another user. Please choose another table or try again later.',
+          } as BookingValidationError;
+        }
+      }
+
+      // Check overlapping bookings on this table
+      const tableOverlap = await prisma.booking.findFirst({
+        where: {
+          tableId,
+          status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+          startDateTime: { lt: endDateTime },
+          endDateTime: { gt: startDateTime },
+        },
+      });
+
+      if (tableOverlap) {
+        throw {
+          status: 409,
+          code: 'TABLE_ALREADY_BOOKED',
+          message:
+            'This table is already reserved by another user during the requested time window',
+        } as BookingValidationError;
+      }
+
+      // ==========================================
+      // 5. Outside Visitor Ticket Check (US3-1 / FR-6.3)
+      // ==========================================
+      if (user.userType === UserType.THAI || user.userType === UserType.FOREIGN) {
+        const activeTickets = user.outsideUser?.tickets || [];
+        if (activeTickets.length === 0) {
+          throw {
+            status: 403,
+            code: 'TICKET_REQUIRED',
+            message:
+              'External visitors (Thai / Foreign) require an active paid ticket covering the requested reservation time window',
+          } as BookingValidationError;
+        }
+      }
+
+      return {
+        valid: true,
+        user: {
+          uid: user.uid,
+          firstname: user.firstname,
+          lastname: user.lastname,
+          behaviourScore: userScore,
+          userType: user.userType,
+        },
+        table: {
+          tableId: table.tableId,
+          numberOfSeat: table.numberOfSeat,
+          zoneId: table.zoneId,
+          status: table.status,
+        },
+        timeWindow: {
+          startDateTime,
+          endDateTime,
+          durationMinutes,
+        },
+        schedule: {
+          name: scheduleValidation.schedule.name,
+          openTime: scheduleValidation.schedule.openTime,
+          closeTime: scheduleValidation.schedule.closeTime,
+          is24Hours: scheduleValidation.schedule.is24Hours,
+        },
+      };
+    }, timeoutMs);
   }
 }

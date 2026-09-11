@@ -354,6 +354,34 @@ async function runTests() {
     assert(false, `Case 12: Valid booking should PASS, failed: ${err.message}`);
   }
 
+  // ==========================================
+  // Suite 7: Concurrency Timeout Protection
+  // ==========================================
+  console.log('\n📋 Suite 7: Concurrency Timeout Protection');
+
+  // Case 13: Query hanging/timing out under heavy concurrent load
+  try {
+    const hangingPrisma = {
+      systemConfig: {
+        findFirst: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      },
+      user: {
+        findUnique: () => new Promise((resolve) => setTimeout(resolve, 200)),
+      },
+    };
+    await BookingService.validateBookingRules(
+      { userId: 101, tableId: 1, startDateTime: validStart, endDateTime: validEnd },
+      hangingPrisma as any,
+      50 // 50ms timeout limit
+    );
+    assert(false, 'Case 13: Hanging query should fail with timeout');
+  } catch (err: any) {
+    assert(
+      err.status === 504 && err.code === 'DATABASE_TIMEOUT',
+      'Case 13: Timed out query throws 504 DATABASE_TIMEOUT'
+    );
+  }
+
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`📊 Booking Validation Test Results: ${passed} passed, ${failed} failed`);
   if (failed === 0) {
