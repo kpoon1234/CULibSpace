@@ -7,7 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import layoutRoutes from './routes/layoutRoutes.js';
-// 1. Import ตัว LockService
+import bookingRoutes from './routes/bookingRoutes.js';
 import { LockService } from './services/lockService.js';
 
 const app = express();
@@ -47,6 +47,7 @@ app.use(passport.session());
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/tables/layout', layoutRoutes);
+app.use('/api/bookings', bookingRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {
