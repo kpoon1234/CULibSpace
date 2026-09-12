@@ -354,12 +354,18 @@ export class BookingService {
   /**
    * Release hold lock manually when user cancels or leaves the modal
    */
-  static async releaseLock(tableId: number, lockToken: string, prisma: any = defaultPrisma) {
+  static async releaseLock(
+    tableId: number,
+    lockToken: string,
+    userId: number,
+    prisma: any = defaultPrisma
+  ) {
     return await this.withTimeout(async () => {
-      await prisma.table.updateMany({
+      const lockRelease = await prisma.table.updateMany({
         where: {
           tableId,
           lockToken,
+          lockedByUid: userId,
         },
         data: {
           lockToken: null,
@@ -367,6 +373,16 @@ export class BookingService {
           lockedByUid: null,
         },
       });
+
+      // If no records were updated, the token is invalid, expired, or belongs to someone else
+      if (lockRelease.count === 0) {
+        throw {
+          status: 400,
+          code: 'INVALID_LOCK',
+          message: 'Invalid lock token, unauthorized, or the lock has already expired.',
+        };
+      }
+
       return { success: true };
     });
   }
