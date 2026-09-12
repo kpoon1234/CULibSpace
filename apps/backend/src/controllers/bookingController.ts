@@ -109,6 +109,16 @@ export class BookingController {
     }
   }
 
+  static async releaseLock(req: Request, res: Response): Promise<void> {
+    try {
+      const { tableId, lockToken } = req.body;
+      await BookingService.releaseLock(Number(tableId), String(lockToken));
+      res.status(200).json({ success: true, message: 'Lock released successfully' });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ success: false, error: err.message });
+    }
+  }
+
   static async create(req: Request, res: Response): Promise<void> {
     try {
       const authReq = req as AuthenticatedRequest;

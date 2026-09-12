@@ -290,41 +290,105 @@ export class BookingService {
     }, timeoutMs);
   }
 
-  static async acquireLock(tableId: number, userId: number, prisma: any = defaultPrisma) {
+  static async acquireLock(
+    tableId: number,
+    userId: number,
+    startDateTime?: Date,
+    endDateTime?: Date,
+    prisma: any = defaultPrisma
+  ) {
     return await this.withTimeout(async () => {
-      const table = await prisma.table.findUnique({ where: { tableId } });
-
-      if (!table) throw { status: 404, code: 'TABLE_NOT_FOUND', message: 'Table not found' };
-      if (table.status === TableStatus.CLOSED)
-        throw { status: 400, code: 'TABLE_CLOSED', message: 'Table is closed' };
-
       const now = new Date();
-      if (table.lockedUntil && new Date(table.lockedUntil) > now) {
-        throw {
-          status: 409,
-          code: 'TABLE_LOCKED',
-          message: 'Table is currently on hold by another user.',
-        };
+
+      // If time window is provided, pre-verify schedule and conflicts early
+      if (startDateTime && endDateTime) {
+        await ScheduleService.validateTargetTimeWindow(startDateTime, endDateTime, true);
+
+        const overlap = await prisma.booking.findFirst({
+          where: {
+            tableId,
+            status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+            startDateTime: { lt: endDateTime },
+            endDateTime: { gt: startDateTime },
+          },
+        });
+
+        if (overlap) {
+          throw {
+            status: 409,
+            code: 'TABLE_ALREADY_BOOKED',
+            message: 'This table is already booked for the requested time window.',
+          };
+        }
       }
 
       const lockToken = crypto.randomUUID();
-      const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes hold
+      const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
 
-      await prisma.table.update({
-        where: { tableId },
-        data: { lockToken, lockedUntil },
+      // ATOMIC UPDATE: Only lock if NOT closed and NOT actively held
+      const updated = await prisma.table.updateMany({
+        where: {
+          tableId,
+          status: { not: TableStatus.CLOSED },
+          OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+        },
+        data: {
+          lockToken,
+          lockedUntil,
+          lockedByUid: userId,
+        },
       });
+
+      if (updated.count === 0) {
+        throw {
+          status: 409,
+          code: 'TABLE_LOCKED',
+          message: 'Table is currently on hold, closed, or unavailable.',
+        };
+      }
 
       return { lockToken, lockedUntil };
     });
   }
 
-  static async createBooking(input: BookingValidationInput, prisma: any = defaultPrisma) {
-    // Re-validate all rules before saving (prevents bypassed holds)
-    await this.validateBookingRules(input, prisma);
+  /**
+   * Release hold lock manually when user cancels or leaves the modal
+   */
+  static async releaseLock(tableId: number, lockToken: string, prisma: any = defaultPrisma) {
+    return await this.withTimeout(async () => {
+      await prisma.table.updateMany({
+        where: {
+          tableId,
+          lockToken,
+        },
+        data: {
+          lockToken: null,
+          lockedUntil: null,
+          lockedByUid: null,
+        },
+      });
+      return { success: true };
+    });
+  }
 
-    // Execute database transaction to guarantee atomicity
+  /**
+   * Create finalized booking (US3-1 / FR-3.1 - FR-3.3)
+   * Fixes Bug 2 & 4: Atomic transaction with validation inside tx and scoped lock cleanup
+   */
+  static async createBooking(input: BookingValidationInput, prisma: any = defaultPrisma) {
+    if (!input.lockToken) {
+      throw {
+        status: 400,
+        code: 'LOCK_TOKEN_REQUIRED',
+        message: 'A valid table hold lock is required to complete this reservation.',
+      };
+    }
+
     return await prisma.$transaction(async (tx: any) => {
+      // 1. Run all rule checks INSIDE the transaction using tx
+      await this.validateBookingRules(input, tx);
+
+      // 2. Insert new reservation
       const newBooking = await tx.booking.create({
         data: {
           uid: input.userId,
@@ -335,11 +399,26 @@ export class BookingService {
         },
       });
 
-      // Clear the hold-lock since the reservation is now secured
-      await tx.table.update({
-        where: { tableId: input.tableId },
-        data: { lockToken: null, lockedUntil: null },
+      // 3. Clear the hold lock ONLY if matching this specific lockToken
+      const lockRelease = await tx.table.updateMany({
+        where: {
+          tableId: input.tableId,
+          lockToken: input.lockToken,
+        },
+        data: {
+          lockToken: null,
+          lockedUntil: null,
+          lockedByUid: null,
+        },
       });
+
+      if (lockRelease.count === 0) {
+        throw {
+          status: 409,
+          code: 'LOCK_EXPIRED',
+          message: 'Your hold on this table expired before the booking could be finalized.',
+        };
+      }
 
       return newBooking;
     });
