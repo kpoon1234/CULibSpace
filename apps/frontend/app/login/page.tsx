@@ -172,7 +172,7 @@ function LoginPageContent() {
             <button
               type="submit"
               onClick={validateInputs}
-              className="w-full rounded-md bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-600"
+              className="w-full rounded-md bg-chula-pink px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-chula-pink-hover"
             >
               Login as Admin
             </button>
@@ -180,7 +180,7 @@ function LoginPageContent() {
             <button
               type="button"
               onClick={handleClickOpen}
-              className="self-center text-sm text-rose-600 hover:underline"
+              className="self-center text-sm text-chula-pink hover:underline"
             >
               Forgot your password?
             </button>

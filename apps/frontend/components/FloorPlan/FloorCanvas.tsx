@@ -146,7 +146,7 @@ export default function FloorCanvas({
             <button
               type="button"
               onClick={onClearFilters}
-              className="mt-3 rounded-md bg-rose-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              className="mt-3 rounded-md bg-chula-pink px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-chula-pink-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-chula-pink"
             >
               Clear filters
             </button>

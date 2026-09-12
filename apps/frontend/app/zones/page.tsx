@@ -1,11 +1,25 @@
 'use client';
 
+import { useEffect, useSyncExternalStore } from 'react';
+import { useRouter } from 'next/navigation';
+import { getAuthToken, subscribeToAuth } from '@/lib/auth';
 import { FloorPlanView } from '@/components/FloorPlan';
 
 // Route for the 2D floor-plan UI (FR-2). Data comes from GET /api/tables/layout
-// (see lib/floorPlan/README.md); a network/server failure shows an error state
+// (see lib/ARCHITECTURE.md); a network/server failure shows an error state
 // with a retry button instead of the plan.
 export default function ZonesPreviewPage() {
+  const router = useRouter();
+  const token = useSyncExternalStore(subscribeToAuth, getAuthToken, () => null);
+
+  useEffect(() => {
+    if (!token) {
+      router.replace('/login');
+    }
+  }, [token, router]);
+
+  if (!token) return null;
+
   return (
     <div className="px-6 py-10 sm:px-10 lg:px-16 xl:px-24">
       <header className="mb-6 max-w-2xl">

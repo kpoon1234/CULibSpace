@@ -45,6 +45,29 @@ async function runTests() {
     'Case 2: End time correctly parsed'
   );
 
+  // Regression: the frontend's toOffsetDateTime() sends startDateTime/endDateTime
+  // with an explicit UTC offset (e.g. "+07:00") rather than a bare local string,
+  // specifically so the server parses the same instant the browser picked no
+  // matter which timezone this process runs in. Two equivalent offset forms of
+  // the same wall-clock instant must resolve to the identical UTC instant.
+  const p2b = ScheduleService.parseTargetTimeWindow({
+    startDateTime: '2026-09-15T17:00:00+07:00',
+    endDateTime: '2026-09-15T19:00:00+07:00',
+  });
+  assert(
+    p2b.targetStart.toISOString() === '2026-09-15T10:00:00.000Z',
+    'Case 2b: +07:00-offset startDateTime resolves to the correct UTC instant'
+  );
+  assert(
+    p2b.targetEnd.toISOString() === '2026-09-15T12:00:00.000Z',
+    'Case 2b: +07:00-offset endDateTime resolves to the correct UTC instant'
+  );
+  assert(
+    p2b.targetStart.getTime() === p2.targetStart.getTime() &&
+      p2b.targetEnd.getTime() === p2.targetEnd.getTime(),
+    'Case 2b: offset and Z forms of the same instant parse identically, regardless of server timezone'
+  );
+
   const p3 = ScheduleService.parseTargetTimeWindow({
     date: '2026-09-15',
     timeSlot: '10:00-12:00',

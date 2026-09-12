@@ -26,6 +26,26 @@ export const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
   return `${h}:${i % 2 === 0 ? '00' : '30'}`;
 });
 
+/** Minutes since midnight for a "HH:mm" `TIME_SLOTS` entry. */
+export function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/** An end-time slot is unusable once a start is picked: earlier/equal slots,
+ *  or ones that would make the window longer than the backend allows. Shared
+ *  by the Table Filter dialog and the reservation modal so both enforce the
+ *  same max-duration rule. */
+export function isEndTimeDisabled(
+  candidate: string,
+  startTime: string,
+  maxWindowMinutes: number
+): boolean {
+  if (!startTime) return false;
+  if (candidate <= startTime) return true;
+  return timeToMinutes(candidate) - timeToMinutes(startTime) > maxWindowMinutes;
+}
+
 /** True when a table clears every active amenity constraint in `filter`. */
 export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): boolean {
   if (filter.requiresLargeScreen && !table.hasTvScreen) return false;
@@ -67,6 +87,28 @@ export function activeFilterCount(filter: FloorPlanFilter): number {
   if (filter.minSeats != null) n++;
   if (hasValidTimeRange(filter)) n++;
   return n;
+}
+
+/**
+ * Combine a "YYYY-MM-DD" date and "HH:mm" time into an ISO string that carries
+ * this browser's UTC offset (e.g. "2026-09-11T14:00:00+07:00"). A bare
+ * "YYYY-MM-DDTHH:mm" string has no timezone designator, so `new Date(...)`
+ * parses it as local time OF WHATEVER MACHINE RUNS THE CODE — the backend
+ * re-interprets it in the server's own timezone, not the browser's. That
+ * silently shifts the intended instant whenever the two differ (e.g. a
+ * Bangkok browser against a UTC-hosted API), which can push a valid window
+ * outside operating hours or the past-date tolerance and 400 the request —
+ * which client.ts then swallows into the mock-data fallback. Encoding the
+ * offset makes the instant unambiguous no matter where it's parsed.
+ */
+export function toOffsetDateTime(date: string, time: string): string {
+  const local = new Date(`${date}T${time}:00`);
+  const offsetMin = -local.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMin);
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm = String(abs % 60).padStart(2, '0');
+  return `${date}T${time}:00${sign}${hh}:${mm}`;
 }
 
 /**
