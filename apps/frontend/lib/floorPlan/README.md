@@ -86,15 +86,18 @@ useFloorPlan(floorId, { filter, serverFilter? })   // the only thing components 
   (`matchesFilter: false`) rather than dropping them — the map dims them so the
   room still reads as full of tables. Pass `serverFilter: true` to instead send
   the amenity params to the backend and let it pre-filter the rows.
-- Any fetch/parse failure falls back to bundled sample data (`mockData.ts`) and
-  sets `plan.source = 'mock'`, which the UI shows as a **"Sample data"** badge so
+- A fetch/HTTP/parse failure REJECTS — `useFloorPlan` surfaces it as `isError`
+  and `FloorPlanView` renders `FloorPlanError` (message + a "Try again" button
+  that calls `refresh()`). There is no silent fallback to sample data.
+- `NEXT_PUBLIC_FLOORPLAN_MOCK=1` is the only way to get bundled sample data
+  (`mockData.ts`, `plan.source = 'mock'`, shown as a **"Sample data"** badge) —
+  an explicit opt-in for offline demos / Storybook, never an error fallback, so
   sample numbers are never presented as live (PRODUCT.md, _Real-time truth_).
-- `NEXT_PUBLIC_FLOORPLAN_MOCK=1` skips the network entirely.
 
 ## Going live
 
 Point `NEXT_PUBLIC_API_URL` at the backend (already the convention in
 `lib/auth.ts`) and make sure `GET /api/tables/layout` responds. Nothing in
-`components/FloorPlan` or `app/zones` changes — the fetcher stops falling back
-and `source` becomes `'api'`. Add table geometry to the payload whenever the
-schema supports it; the UI picks it up with no further work.
+`components/FloorPlan` or `app/zones` changes — `source` becomes `'api'`. Add
+table geometry to the payload whenever the schema supports it; the UI picks it
+up with no further work.

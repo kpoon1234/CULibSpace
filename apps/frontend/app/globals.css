@@ -16,16 +16,52 @@
  * `gray-*`, `rose-*`, and `red-*` are REMAPPED here — these utilities no longer
  * emit Tailwind's stock values. That is intentional: it keeps the palette in one
  * file instead of scattered across every className. Read the values, not the names.
+ *
+ * Crisp Paper & Deep Berry (2026-09-06) — home page + header only.
+ * A second, cooler-neutral system layered on top for the home page and the site
+ * header: bright Chula Pink stays a small but clearly visible secondary accent,
+ * and canvas/ink shift cool. This does NOT touch claret/brass/scarlet or the
+ * stone gray ramp below — the login, onboarding, and admin surfaces keep the
+ * warm Reading Lamp treatment untouched.
+ *
+ * One action color, one step lighter (2026-09-11). The 2026-09-06 pass above
+ * also gave the header/home CTA and the footer their own darker, undocumented
+ * pair (a "deep berry" ~#9b2c4f and a near-black wine footer, #5c1f30) separate
+ * from the Claret ramp every other page's buttons already used (claret-600
+ * #a12049). Two unrelated dark reds plus a near-black footer read as several
+ * different "oxblood" tones depending on which page you were on — direct
+ * feedback confirmed it. Fix: `cta-primary`/`cta-primary-hover` now alias
+ * Claret 500/600 (one step lighter than the old canonical claret-600 CTA, and
+ * the same pair every `bg-rose-500` button already uses), and `footer-bg` moved
+ * from that near-black wine to a soft Claret 100 tint — still visibly pink, not
+ * white — see DESIGN.md's Claret and Site Footer sections for the full rationale.
  */
 :root {
   /* Surfaces */
-  --canvas: #fdf9f4; /* page ground — warm cream, the desk */
+  --canvas: #f9f8f7; /* page ground — barely-dimmed off-white, not stark pure white */
+  --canvas-subtle: #f8f9fa; /* cool off-white — reserved for section bands/dividers only, never the whole page */
   --paper: #ffffff; /* raised sheets — cards, tiles, the login card */
-  --ink: #1d140d; /* warm near-black body text */
+  --ink: #1f2937; /* charcoal body text */
 
-  /* Chula Pink — brand chrome only, unchanged by this pass */
-  --chula-pink: #db93b0;
-  --chula-pink-hover: #e0a3bc;
+  /* Chula Pink — secondary accent, but a visible one: dots, active states, hover text, thin borders. Never a large fill/background. */
+  --chula-pink: #e03e6c;
+  --chula-pink-hover: #c0325a;
+
+  /* Primary CTA — the same Claret action color every other page's buttons use
+     (Claret 500 resting / Claret 600 hover — declared below), not a separate pair. */
+  --cta-primary: var(--claret-500);
+  --cta-primary-hover: var(--claret-600);
+
+  /* Footer — a soft pink tint (Claret 100), not the near-black wine it was, and not
+     plain white/Paper either: it should still read as visibly pink at a glance. */
+  --footer-bg: var(--claret-100);
+
+  /* Hairline border for crisp-paper cards/header (cooler than the warm stone ramp below) */
+  --hairline: #e2e8f0;
+
+  /* Availability meters (home page zone section) */
+  --spruce: #1b4d3e; /* available / open capacity */
+  --ochre: #c2410c; /* full / booked capacity */
 
   /* Stone — warm neutral ramp (hue 58-68) */
   --stone-50: #fbfaf9;
@@ -86,10 +122,17 @@
   --font-mono: var(--font-geist-mono);
 
   --color-canvas: var(--canvas);
+  --color-canvas-subtle: var(--canvas-subtle);
   --color-paper: var(--paper);
   --color-ink: var(--ink);
   --color-chula-pink: var(--chula-pink);
   --color-chula-pink-hover: var(--chula-pink-hover);
+  --color-cta-primary: var(--cta-primary);
+  --color-cta-primary-hover: var(--cta-primary-hover);
+  --color-footer-bg: var(--footer-bg);
+  --color-hairline: var(--hairline);
+  --color-spruce: var(--spruce);
+  --color-ochre: var(--ochre);
 
   /* gray-* remapped to the warm stone ramp */
   --color-gray-50: var(--stone-50);

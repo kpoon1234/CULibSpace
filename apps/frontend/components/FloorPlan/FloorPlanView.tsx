@@ -19,11 +19,12 @@ import TableDetailPanel from './TableDetailPanel';
 import FloorPlanFilters from './FloorPlanFilters';
 import FloorNav from './FloorNav';
 import { FloorPlanError, FloorPlanSkeleton } from './FloorPlanStates';
+import ReservationModal from '../Reservation/ReservationModal';
 
 interface FloorPlanViewProps {
   initialFloorId: number;
   initialZone?: ZoneType;
-  /** Wire to the booking flow (FR-3) when it exists. */
+  /** Called once a reservation is confirmed in the booking modal (FR-3). */
   onReserve?: (table: FloorPlanTable) => void;
   /** Wire to issue reporting (FR-7) when it exists. */
   onReportIssue?: (table: FloorPlanTable) => void;
@@ -31,10 +32,15 @@ interface FloorPlanViewProps {
 
 const PANEL_ID = 'floor-plan-panel';
 
+/** "12 October 2026" — day-month-year, spelled out, matching ReservationModal's date field. */
+function formatDateLabel(d: Date): string {
+  return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'long' })} ${d.getFullYear()}`;
+}
+
 // Top-level composition of the 2D floor-plan UI: zone tabs + pan/zoom canvas +
 // selected-table detail + amenity filter + floor navigation. Data comes from
-// useFloorPlan (GET /api/tables/layout), which falls back to bundled sample
-// data when the API is unreachable.
+// useFloorPlan (GET /api/tables/layout); a network/server failure renders
+// FloorPlanError with a retry button instead of the plan.
 export default function FloorPlanView({
   initialFloorId,
   initialZone = 'Common',
@@ -46,10 +52,12 @@ export default function FloorPlanView({
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [filter, setFilter] = useState<FloorPlanFilter>(EMPTY_FILTER);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [reservingTable, setReservingTable] = useState<FloorPlanTable | null>(null);
 
-  const { plan, isLoading, isError, isRefreshing, source, refresh } = useFloorPlan(floorId, {
-    filter,
-  });
+  const { plan, isLoading, isError, isStale, isRefreshing, source, refresh } = useFloorPlan(
+    floorId,
+    { filter }
+  );
 
   // The requested zone may not exist on every floor; fall back to the first.
   const activeZone = useMemo(() => {
@@ -82,7 +90,7 @@ export default function FloorPlanView({
               Sample data
             </span>
           )}
-          {source === 'api' && isRefreshing && (
+          {source === 'api' && isRefreshing && !isStale && (
             <span className="text-xs text-gray-400">Updating…</span>
           )}
         </div>
@@ -94,6 +102,25 @@ export default function FloorPlanView({
           }}
         />
       </div>
+
+      {/* A later refresh failed but a plan is still on screen (keepPreviousData) —
+          isError alone can't catch this, so surface it as its own inline notice
+          instead of leaving a stale, silently-broken plan on screen. */}
+      {isStale && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+        >
+          <span>Couldn&apos;t refresh the floor plan — showing the last known layout.</span>
+          <button
+            type="button"
+            onClick={refresh}
+            className="rounded-md border border-rose-300 bg-paper px-2.5 py-1 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       {/* Zone switch + availability line */}
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -119,6 +146,7 @@ export default function FloorPlanView({
             selectedTableId={selectedTableId}
             onSelect={(t) => setSelectedTableId(t.tableId)}
             onOpenFilters={() => setFiltersOpen(true)}
+            onClearFilters={() => setFilter(EMPTY_FILTER)}
             activeFilterCount={activeFilterCount(filter)}
           />
         </div>
@@ -126,7 +154,7 @@ export default function FloorPlanView({
           table={selectedTable}
           zoneLabel={activeZone.label}
           onClose={() => setSelectedTableId(null)}
-          onReserve={onReserve}
+          onReserve={setReservingTable}
           onReportIssue={onReportIssue}
         />
       </div>
@@ -145,6 +173,17 @@ export default function FloorPlanView({
               setSelectedTableId(null);
             }
           }}
+        />
+      )}
+
+      {reservingTable && (
+        <ReservationModal
+          isOpen
+          onClose={() => setReservingTable(null)}
+          tableCode={reservingTable.code}
+          tableZone={activeZone.label}
+          date={formatDateLabel(new Date())}
+          onConfirm={() => onReserve?.(reservingTable)}
         />
       )}
     </section>

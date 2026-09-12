@@ -1,10 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
-import {
-  getBookingHistory,
-  getActiveBooking,
-  BookingWithTableAndZone,
-} from '../services/bookingService.js';
+import { getBookingHistory, getActiveBooking } from '../services/bookingService.js';
 
 export class BookingController {
   /**

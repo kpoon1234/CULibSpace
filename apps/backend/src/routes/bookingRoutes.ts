@@ -4,7 +4,7 @@ import { authenticateToken } from '../middlewares/authMiddleware.js';
 
 const router = Router();
 
-router.get('/history', authenticateToken, BookingController.getBookingHistory);
-router.get('/active', authenticateToken, BookingController.getActiveBooking);
+router.get('/my-history', authenticateToken, BookingController.getBookingHistory);
+router.get('/my-active', authenticateToken, BookingController.getActiveBooking);
 
 export default router;

@@ -33,14 +33,17 @@ export interface BookingWithTableAndZone {
 export async function getBookingHistory(uid: number): Promise<BookingWithTableAndZone[]> {
   const now = new Date();
 
-  // History: bookings where status is not ACTIVE (or we could also filter by endDateTime < now)
-  // We'll consider history as bookings that are not active (status != ACTIVE)
+  // History: bookings that are NOT active
+  // Active booking = status in [PENDING, ACTIVE] AND endDateTime > now()
+  // So history = NOT (status in [PENDING, ACTIVE] AND endDateTime > now())
+  // Which is: (status not in [PENDING, ACTIVE]) OR (endDateTime <= now())
   const bookings = await prisma.booking.findMany({
     where: {
       uid,
-      status: {
-        not: BookingStatus.ACTIVE,
-      },
+      OR: [
+        { status: { notIn: [BookingStatus.PENDING, BookingStatus.ACTIVE] } },
+        { endDateTime: { lte: now } },
+      ],
     },
     include: {
       table: {
@@ -66,10 +69,16 @@ export async function getBookingHistory(uid: number): Promise<BookingWithTableAn
  * @returns The active booking with table and zone information, or null if none
  */
 export async function getActiveBooking(uid: number): Promise<BookingWithTableAndZone | null> {
+  const now = new Date();
   const booking = await prisma.booking.findFirst({
     where: {
       uid,
-      status: BookingStatus.ACTIVE,
+      status: {
+        in: [BookingStatus.PENDING, BookingStatus.ACTIVE],
+      },
+      endDateTime: {
+        gt: now,
+      },
     },
     include: {
       table: {

@@ -27,13 +27,12 @@ export function FloorPlanError({ onRetry }: { onRetry: () => void }) {
     >
       <h3 className="text-base font-semibold text-gray-900">Couldn&apos;t load the floor plan</h3>
       <p className="mx-auto mt-1 max-w-sm text-sm text-gray-600">
-        The layout service didn&apos;t respond and no offline copy was available. Check your
-        connection and try again.
+        The layout service didn&apos;t respond. Check your connection and try again.
       </p>
       <button
         type="button"
         onClick={onRetry}
-        className="mt-4 rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+        className="mt-4 rounded-md bg-rose-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
       >
         Try again
       </button>
