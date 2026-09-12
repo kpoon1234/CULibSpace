@@ -56,6 +56,10 @@ export default function ReservationModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [denyReason, setDenyReason] = useState('');
+  // Lazy initializer: React guarantees this runs once at mount, so it's the
+  // sanctioned place for a one-time impure Date.now() read (calling it inline
+  // during render trips react-hooks/purity).
+  const [maxDate] = useState(() => new Date(Date.now() + MAX_ADVANCE_DAYS * 86_400_000));
 
   if (!isOpen) return null;
 
@@ -171,7 +175,7 @@ export default function ReservationModal({
                   type="date"
                   value={toDateInputValue(selectedDate)}
                   min={toDateInputValue(new Date())}
-                  max={toDateInputValue(new Date(Date.now() + MAX_ADVANCE_DAYS * 86_400_000))}
+                  max={toDateInputValue(maxDate)}
                   onChange={(e) => {
                     if (!e.target.value) return;
                     const [y, m, d] = e.target.value.split('-').map(Number);
