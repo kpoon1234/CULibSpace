@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import layoutRoutes from './routes/layoutRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
+import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import { LockService } from './services/lockService.js';
 
 const app = express();
@@ -48,6 +49,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/tables/layout', layoutRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/system-config', systemConfigRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {
