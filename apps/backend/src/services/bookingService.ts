@@ -7,6 +7,7 @@ import {
   SystemConfig,
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
+import crypto from 'crypto';
 
 const defaultPrisma = new PrismaClient();
 
@@ -287,5 +288,60 @@ export class BookingService {
         },
       };
     }, timeoutMs);
+  }
+
+  static async acquireLock(tableId: number, userId: number, prisma: any = defaultPrisma) {
+    return await this.withTimeout(async () => {
+      const table = await prisma.table.findUnique({ where: { tableId } });
+
+      if (!table) throw { status: 404, code: 'TABLE_NOT_FOUND', message: 'Table not found' };
+      if (table.status === TableStatus.CLOSED)
+        throw { status: 400, code: 'TABLE_CLOSED', message: 'Table is closed' };
+
+      const now = new Date();
+      if (table.lockedUntil && new Date(table.lockedUntil) > now) {
+        throw {
+          status: 409,
+          code: 'TABLE_LOCKED',
+          message: 'Table is currently on hold by another user.',
+        };
+      }
+
+      const lockToken = crypto.randomUUID();
+      const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes hold
+
+      await prisma.table.update({
+        where: { tableId },
+        data: { lockToken, lockedUntil },
+      });
+
+      return { lockToken, lockedUntil };
+    });
+  }
+
+  static async createBooking(input: BookingValidationInput, prisma: any = defaultPrisma) {
+    // Re-validate all rules before saving (prevents bypassed holds)
+    await this.validateBookingRules(input, prisma);
+
+    // Execute database transaction to guarantee atomicity
+    return await prisma.$transaction(async (tx: any) => {
+      const newBooking = await tx.booking.create({
+        data: {
+          uid: input.userId,
+          tableId: input.tableId,
+          startDateTime: input.startDateTime,
+          endDateTime: input.endDateTime,
+          status: BookingStatus.PENDING,
+        },
+      });
+
+      // Clear the hold-lock since the reservation is now secured
+      await tx.table.update({
+        where: { tableId: input.tableId },
+        data: { lockToken: null, lockedUntil: null },
+      });
+
+      return newBooking;
+    });
   }
 }

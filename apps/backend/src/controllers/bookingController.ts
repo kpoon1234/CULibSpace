@@ -86,4 +86,64 @@ export class BookingController {
       });
     }
   }
+  static async lockTable(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.user?.uid;
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const tableId = parseInt(String(req.body.tableId), 10);
+      if (isNaN(tableId)) {
+        res.status(400).json({ success: false, error: 'Valid tableId required' });
+        return;
+      }
+
+      const lockData = await BookingService.acquireLock(tableId, userId);
+      res.status(200).json({ success: true, data: lockData });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ success: false, error: err.message, code: err.code });
+    }
+  }
+
+  static async create(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.user?.uid;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { tableId, startDateTime, endDateTime, lockToken } = req.body;
+      const parsedTableId = parseInt(String(tableId), 10);
+      const parsedStart = new Date(startDateTime);
+      const parsedEnd = new Date(endDateTime);
+
+      if (
+        isNaN(parsedTableId) ||
+        isNaN(parsedStart.getTime()) ||
+        isNaN(parsedEnd.getTime()) ||
+        !lockToken
+      ) {
+        res.status(400).json({ success: false, error: 'Missing or invalid required fields' });
+        return;
+      }
+
+      const booking = await BookingService.createBooking({
+        userId,
+        tableId: parsedTableId,
+        startDateTime: parsedStart,
+        endDateTime: parsedEnd,
+        lockToken: String(lockToken),
+      });
+
+      res.status(201).json({ success: true, data: booking });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ success: false, error: err.message, code: err.code });
+    }
+  }
 }

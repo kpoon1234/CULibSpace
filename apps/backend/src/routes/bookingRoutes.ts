@@ -18,4 +18,12 @@ router.post(
   BookingController.validate
 );
 
+// POST /api/bookings/lock
+// Acquires a 5-minute temporary hold on a table
+router.post('/lock', authenticateToken, BookingController.lockTable);
+
+// POST /api/bookings
+// Submits and finalizes a booking reservation
+router.post('/', authenticateToken, BookingController.create);
+
 export default router;
