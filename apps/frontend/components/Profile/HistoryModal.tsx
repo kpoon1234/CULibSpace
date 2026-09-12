@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { API_URL, getAuthToken } from '@/lib/auth';
 
 type HistoryRecord = {
   id: string;
@@ -28,21 +29,68 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
   };
 
   useEffect(() => {
-    // Only fetch if the modal is open to save unnecessary network requests
+    // Only fetch if the modal is open
     if (!isOpen) return;
 
     const fetchHistory = async () => {
       try {
         setIsLoading(true);
-        // Replace '/api/history' with your actual backend endpoint
-        const response = await fetch('/api/history');
+        setError(null);
+        const token = getAuthToken();
+        if (!token) {
+          setError('Please log in to view behavior score history.');
+          return;
+        }
+
+        const response = await fetch(`${API_URL}/api/auth/score`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
         if (!response.ok) {
           throw new Error('Failed to load history records');
         }
 
-        const data: HistoryRecord[] = await response.json();
-        setHistoryData(data);
+        const data = await response.json();
+        if (data && Array.isArray(data.history)) {
+          const formatted: HistoryRecord[] = data.history.map(
+            (
+              entry: {
+                timestamp: string;
+                scoreChange: number;
+                adminName?: string;
+              },
+              idx: number
+            ) => {
+              const dt = new Date(entry.timestamp);
+              const dateStr = !isNaN(dt.getTime())
+                ? dt.toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                  })
+                : '—';
+              const timeStr = !isNaN(dt.getTime())
+                ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : '—';
+              const scoreStr =
+                entry.scoreChange > 0 ? `+${entry.scoreChange}` : `${entry.scoreChange}`;
+
+              return {
+                id: `${entry.timestamp}-${idx}`,
+                date: dateStr,
+                start: timeStr,
+                end: '—',
+                score: scoreStr,
+                reason: entry.adminName ? `Adjusted by ${entry.adminName}` : 'Score Adjustment',
+              };
+            }
+          );
+          setHistoryData(formatted);
+        } else {
+          setHistoryData([]);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
@@ -57,24 +105,33 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
   if (!isOpen) return null;
 
   return (
-    // Modal Overlay (Backdrop)
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 sm:p-8">
+    // Modal Overlay (Backdrop with outside click)
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm sm:p-8"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Behavior Score History"
+    >
       {/* Modal Container */}
-      <div className="relative w-full max-w-4xl flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative flex w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         {/* Header Bar */}
-        <div className="bg-chula-400 py-4 text-center relative">
+        <div className="relative bg-pink-400 py-4 text-center">
           <h1 className="text-lg font-semibold text-white">Behavior Score History</h1>
 
           {/* Close Button */}
           <button
+            type="button"
             onClick={onClose}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white transition-colors p-1"
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
             aria-label="Close modal"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -88,12 +145,12 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-8 bg-gray-50/30">
+        <div className="bg-gray-50/30 p-4 sm:p-8">
           <div className="flex flex-col rounded-md border border-gray-200 bg-white">
             {/* Table Headers */}
             <div className="grid grid-cols-12 bg-gray-200 p-3 text-sm font-semibold text-gray-700">
               <div className="col-span-2 text-center">Date</div>
-              <div className="col-span-2 text-center">Start time</div>
+              <div className="col-span-2 text-center">Time</div>
               <div className="col-span-2 text-center">End time</div>
               <div className="col-span-2 text-center">Score</div>
               <div className="col-span-4 pl-4">Reason</div>

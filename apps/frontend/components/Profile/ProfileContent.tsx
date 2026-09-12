@@ -244,10 +244,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
           )}
 
           <div>
-            <div className="flex items-center justify-between text-sm font-medium text-gray-700">
-              <span>Behaviour Score</span>
-              <span className="text-xs text-gray-400">[ view history ]</span>
-            </div>
+            <div className="block text-sm font-medium text-gray-700">Behaviour Score</div>
             <div className="relative mt-1 h-6 w-full overflow-hidden rounded-full bg-red-500">
               <div
                 className={`h-full ${scoreColor}`}
