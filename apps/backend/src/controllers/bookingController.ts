@@ -144,6 +144,61 @@ export class BookingController {
       res.status(err.status || 500).json({ success: false, error: err.message, code: err.code });
     }
   }
+
+  /**
+   * Validate booking request using BookingService
+   * POST /api/bookings/validate
+   */
+  static async validate(req: Request, res: Response): Promise<void> {
+    try {
+      // Extract userId from authenticated request or fallback to body (for testing flexibility)
+      const authReq = req as AuthenticatedRequest;
+      const userIdFromAuth = authReq.user?.uid;
+      const userIdFromBody = req.body.userId;
+      const userId = userIdFromAuth ?? userIdFromBody;
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
+        return;
+      }
+
+      const { tableId, startDateTime, endDateTime, lockToken } = req.body;
+
+      // Parse and validate required fields
+      const parsedTableId = parseInt(String(tableId), 10);
+      const parsedStart = startDateTime ? new Date(startDateTime) : undefined;
+      const parsedEnd = endDateTime ? new Date(endDateTime) : undefined;
+
+      if (isNaN(parsedTableId) || !parsedStart || !parsedEnd) {
+        res
+          .status(400)
+          .json({
+            success: false,
+            error: 'Missing or invalid required fields: tableId, startDateTime, endDateTime',
+          });
+        return;
+      }
+
+      // Call the service validation method
+      const validationResult = await BookingService.validateBookingRules({
+        userId: userId,
+        tableId: parsedTableId,
+        startDateTime: parsedStart,
+        endDateTime: parsedEnd,
+        lockToken: lockToken ?? undefined, // lockToken is optional in the service
+      });
+
+      // Return success response with validation data
+      res.status(200).json({ success: true, data: validationResult });
+    } catch (err: any) {
+      // Handle validation errors from the service
+      res.status(err.status || 500).json({
+        success: false,
+        error: err.message || 'Internal server error',
+        code: err.code || 'VALIDATION_ERROR',
+      });
+    }
+  }
 }
 
 export default BookingController;
