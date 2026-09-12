@@ -47,14 +47,14 @@
   --chula-pink: #e03e6c;
   --chula-pink-hover: #c0325a;
 
-  /* Primary CTA — the same Claret action color every other page's buttons use
-     (Claret 500 resting / Claret 600 hover — declared below), not a separate pair. */
-  --cta-primary: var(--claret-500);
-  --cta-primary-hover: var(--claret-600);
+  /* Primary CTA — repointed to Chula Pink (2026-09-12): every button hover in the
+     app now uses the brand pink instead of Claret. */
+  --cta-primary: var(--chula-pink);
+  --cta-primary-hover: var(--chula-pink-hover);
 
-  /* Footer — a soft pink tint (Claret 100), not the near-black wine it was, and not
-     plain white/Paper either: it should still read as visibly pink at a glance. */
-  --footer-bg: var(--claret-100);
+  /* Footer — solid Chula Pink (2026-09-12), matching the "Reserve a table now" CTA.
+     Every footer text/link color is white — see siteFooter.tsx. */
+  --footer-bg: var(--chula-pink);
 
   /* Hairline border for crisp-paper cards/header (cooler than the warm stone ramp below) */
   --hairline: #e2e8f0;

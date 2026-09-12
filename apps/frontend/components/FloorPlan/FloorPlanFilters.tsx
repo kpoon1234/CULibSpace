@@ -6,6 +6,7 @@ import {
   MIN_SEATS_OPTIONS,
   PLUG_BUCKETS,
   TIME_SLOTS,
+  isEndTimeDisabled,
   timeToMinutes,
   toOffsetDateTime,
   type FloorPlanFilter,
@@ -34,14 +35,6 @@ function parts(local: string | null): { date: string; time: string } {
   if (!local || local.length < 16) return { date: '', time: '' };
   const [date, time] = local.split('T');
   return { date, time: time.slice(0, 5) };
-}
-
-/** A "To" slot is unusable once a "From" is picked: earlier/equal slots, or
- *  ones that would make the window longer than the backend allows. */
-function isToTimeDisabled(candidate: string, fromTime: string, maxWindowMinutes: number): boolean {
-  if (!fromTime) return false;
-  if (candidate <= fromTime) return true;
-  return timeToMinutes(candidate) - timeToMinutes(fromTime) > maxWindowMinutes;
 }
 
 /** Latest date (local, "YYYY-MM-DD") a booking window can start on. */
@@ -267,7 +260,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                     <option
                       key={t}
                       value={t}
-                      disabled={isToTimeDisabled(t, fromTime, maxBookingWindowMinutes)}
+                      disabled={isEndTimeDisabled(t, fromTime, maxBookingWindowMinutes)}
                     >
                       {t}
                     </option>
@@ -298,7 +291,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             type="button"
             disabled={timeInvalid}
             onClick={apply}
-            className="rounded-md bg-rose-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-chula-pink px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-chula-pink-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-chula-pink disabled:cursor-not-allowed disabled:opacity-50"
           >
             Apply filter
           </button>

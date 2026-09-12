@@ -92,7 +92,7 @@ export default function TableDetailPanel({
           type="button"
           disabled={!canReserve}
           onClick={() => onReserve?.(table)}
-          className="w-full rounded-md bg-rose-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-md bg-chula-pink px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-chula-pink-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           Reserve this table
         </button>

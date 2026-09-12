@@ -210,7 +210,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
               <button
                 type="button"
                 onClick={handleSeeMore}
-                className="text-sm font-medium text-gray-400 transition-colors hover:text-rose-600 focus:outline-none"
+                className="text-sm font-medium text-gray-400 transition-colors hover:text-chula-pink focus:outline-none"
               >
                 [ see more ]
               </button>

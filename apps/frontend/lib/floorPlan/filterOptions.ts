@@ -32,6 +32,20 @@ export function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+/** An end-time slot is unusable once a start is picked: earlier/equal slots,
+ *  or ones that would make the window longer than the backend allows. Shared
+ *  by the Table Filter dialog and the reservation modal so both enforce the
+ *  same max-duration rule. */
+export function isEndTimeDisabled(
+  candidate: string,
+  startTime: string,
+  maxWindowMinutes: number
+): boolean {
+  if (!startTime) return false;
+  if (candidate <= startTime) return true;
+  return timeToMinutes(candidate) - timeToMinutes(startTime) > maxWindowMinutes;
+}
+
 /** True when a table clears every active amenity constraint in `filter`. */
 export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): boolean {
   if (filter.requiresLargeScreen && !table.hasTvScreen) return false;

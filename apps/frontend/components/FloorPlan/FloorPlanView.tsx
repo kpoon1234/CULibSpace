@@ -32,11 +32,6 @@ interface FloorPlanViewProps {
 
 const PANEL_ID = 'floor-plan-panel';
 
-/** "12 October 2026" — day-month-year, spelled out, matching ReservationModal's date field. */
-function formatDateLabel(d: Date): string {
-  return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'long' })} ${d.getFullYear()}`;
-}
-
 // Top-level composition of the 2D floor-plan UI: zone tabs + pan/zoom canvas +
 // selected-table detail + amenity filter + floor navigation. Data comes from
 // useFloorPlan (GET /api/tables/layout); a network/server failure renders
@@ -79,6 +74,11 @@ export default function FloorPlanView({
       ? (activeZone.tables.find((t) => t.tableId === selectedTableId) ?? null)
       : null;
 
+  // Falls back to "now" only when the filter has no booking window set —
+  // otherwise the reservation modal should open pre-filled with whatever
+  // date/time the user already picked in the filter.
+  const reservationDate = new Date();
+
   return (
     <section aria-label="Floor plan" className="flex flex-col gap-4">
       {/* Header */}
@@ -115,7 +115,7 @@ export default function FloorPlanView({
           <button
             type="button"
             onClick={refresh}
-            className="rounded-md border border-rose-300 bg-paper px-2.5 py-1 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            className="rounded-md border border-chula-pink/40 bg-paper px-2.5 py-1 text-xs font-medium text-chula-pink transition-colors hover:bg-chula-pink/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-chula-pink"
           >
             Try again
           </button>
@@ -180,9 +180,11 @@ export default function FloorPlanView({
         <ReservationModal
           isOpen
           onClose={() => setReservingTable(null)}
+          tableId={reservingTable.tableId}
           tableCode={reservingTable.code}
           tableZone={activeZone.label}
-          date={formatDateLabel(new Date())}
+          initialDate={reservationDate}
+          filter={filter}
           onConfirm={() => onReserve?.(reservingTable)}
         />
       )}

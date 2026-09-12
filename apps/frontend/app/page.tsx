@@ -10,28 +10,24 @@ const capabilities = [
     description:
       'See which tables are already reserved and which are still open, before you commit to a time slot.',
     Icon: ClockIcon,
-    featured: true,
   },
   {
     title: 'Filter by exact study preferences',
     description:
       'Search by seats, power outlets, screens, or quiet level to find the table that actually fits.',
     Icon: FilterIcon,
-    featured: false,
   },
   {
     title: 'Reserve ahead, held for you',
     description:
       'Pick a table and time slot in advance; the hold keeps anyone else from booking it while you finish.',
     Icon: CalendarIcon,
-    featured: false,
   },
   {
     title: 'Accountable check-in & fair use',
     description:
       'Check in on arrival or cancel free of charge — a visible behaviour score keeps no-shows accountable.',
     Icon: CheckInIcon,
-    featured: false,
   },
 ];
 
@@ -54,17 +50,10 @@ export default function Home() {
         />
 
         <div className="grid grid-cols-1 gap-4 min-[860px]:grid-cols-2">
-          {capabilities.map(({ title, description, Icon, featured }) => (
-            <div
-              key={title}
-              className={`${card} ${featured ? 'border-2 border-chula-pink' : 'border-hairline'}`}
-            >
-              <span
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  featured ? 'bg-chula-pink/10' : 'border border-hairline bg-white'
-                }`}
-              >
-                <Icon className={`h-5 w-5 ${featured ? 'text-chula-pink' : 'text-cta-primary'}`} />
+          {capabilities.map(({ title, description, Icon }) => (
+            <div key={title} className={`${card} border-hairline`}>
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-hairline bg-white">
+                <Icon className="h-5 w-5 text-cta-primary" />
               </span>
               <div className="flex flex-col gap-1.5">
                 <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
