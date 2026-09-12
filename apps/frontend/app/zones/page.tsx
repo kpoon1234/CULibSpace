@@ -3,7 +3,7 @@
 import { FloorPlanView } from '@/components/FloorPlan';
 
 // Route for the 2D floor-plan UI (FR-2). Data comes from GET /api/tables/layout
-// (see lib/floorPlan/README.md); it falls back to bundled sample data, shown
+// (see lib/ARCHITECTURE.md); it falls back to bundled sample data, shown
 // with a "Sample data" badge, when the API is unreachable.
 export default function ZonesPreviewPage() {
   return (

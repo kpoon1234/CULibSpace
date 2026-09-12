@@ -1,11 +1,17 @@
-# `lib/floorPlan` — 2D floor-plan data layer
+# `lib/` — data-layer architecture
+
+One architecture doc for the modules under `lib/`, rather than a README per
+module — add new sections here as `lib/` grows instead of starting another
+README.
+
+## `lib/floorPlan` — 2D floor-plan data layer
 
 Feeds the `components/FloorPlan` UI (FR-2: browse zone/table availability before
 arrival). Built to plug into the team's `LayoutController` / `LayoutService`.
 
-## The one endpoint
+### The one endpoint
 
-### `GET /api/tables/layout` (`LayoutController`)
+#### `GET /api/tables/layout` (`LayoutController`)
 
 Override the path with `NEXT_PUBLIC_FLOORPLAN_PATH` (default `/api/tables/layout`).
 
@@ -50,7 +56,7 @@ or a bare `RawLayoutZone[]` — both accepted.
 end, `end <= start`, or a past `start`) makes the backend return HTTP 400 — the
 Table Filter dialog validates the pair before it can be applied.
 
-## Geometry is optional — the map still renders
+### Geometry is optional — the map still renders
 
 The `Table` / `Zone` models have no coordinates yet. `autoLayout.ts →
 synthesizeLayout()` takes whatever the payload gives and produces a complete
@@ -69,7 +75,7 @@ Because the backend has no floor concept, the synthesised `FloorMeta` is a singl
 shows the name with both arrows disabled). The bundled sample data keeps two
 floors so the stepper is demoable.
 
-## How it's wired
+### How it's wired
 
 ```
 useFloorPlan(floorId, { filter, serverFilter? })   // the only thing components call
@@ -91,7 +97,7 @@ useFloorPlan(floorId, { filter, serverFilter? })   // the only thing components 
   sample numbers are never presented as live (PRODUCT.md, _Real-time truth_).
 - `NEXT_PUBLIC_FLOORPLAN_MOCK=1` skips the network entirely.
 
-## Going live
+### Going live
 
 Point `NEXT_PUBLIC_API_URL` at the backend (already the convention in
 `lib/auth.ts`) and make sure `GET /api/tables/layout` responds. Nothing in
