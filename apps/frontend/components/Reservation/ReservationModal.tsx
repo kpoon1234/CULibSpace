@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useEffect, useRef, useState, FormEvent } from 'react';
 import { TIME_SLOTS } from '@/lib/floorPlan'; // Assuming this is an array of time strings, e.g., ['08:00', '09:00', ...]
-import { createBooking } from '@/lib/bookings';
+import { createBooking, lockTable, unlockTable } from '@/lib/bookings';
 
 interface ReservationModalProps {
   isOpen: boolean;
@@ -56,10 +56,49 @@ export default function ReservationModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [denyReason, setDenyReason] = useState('');
+  const [lockToken, setLockToken] = useState<string | null>(null);
+  const [locking, setLocking] = useState(true);
+  // Bumped by handleTryAgain to re-run the lock-acquisition effect below.
+  const [retryToken, setRetryToken] = useState(0);
   // Lazy initializer: React guarantees this runs once at mount, so it's the
   // sanctioned place for a one-time impure Date.now() read (calling it inline
   // during render trips react-hooks/purity).
   const [maxDate] = useState(() => new Date(Date.now() + MAX_ADVANCE_DAYS * 86_400_000));
+
+  // Mirrored into refs so the unmount cleanup below (which closes over stale
+  // state otherwise) always releases the most recently acquired token, and
+  // skips releasing one already consumed by a successful booking.
+  const lockTokenRef = useRef<string | null>(null);
+  const bookedRef = useRef(false);
+
+  useEffect(() => {
+    bookedRef.current = false;
+    let cancelled = false;
+
+    const acquireLock = async () => {
+      setLocking(true);
+      const result = await lockTable({ tableId });
+      if (cancelled) return;
+      setLocking(false);
+      if (result.ok && result.lockToken) {
+        lockTokenRef.current = result.lockToken;
+        setLockToken(result.lockToken);
+      } else {
+        setDenyReason(result.reason || 'This table is currently on hold by another user.');
+        setStep('fail');
+      }
+    };
+
+    acquireLock();
+
+    return () => {
+      cancelled = true;
+      if (lockTokenRef.current && !bookedRef.current) {
+        unlockTable({ tableId, lockToken: lockTokenRef.current });
+      }
+      lockTokenRef.current = null;
+    };
+  }, [tableId, retryToken]);
 
   if (!isOpen) return null;
 
@@ -73,15 +112,23 @@ export default function ReservationModal({
       return;
     }
 
+    if (!lockToken) {
+      setError('Still holding this table for you — please wait a moment and try again.');
+      return;
+    }
+
     setSubmitting(true);
     const result = await createBooking({
       tableId,
       startDateTime: combineDateAndTime(selectedDate, startTime).toISOString(),
       endDateTime: combineDateAndTime(selectedDate, endTime).toISOString(),
+      lockToken,
     });
     setSubmitting(false);
 
     if (result.ok) {
+      // The backend clears the hold lock as part of creating the booking.
+      bookedRef.current = true;
       onConfirm(startTime, endTime);
       setStep('success');
     } else {
@@ -99,6 +146,9 @@ export default function ReservationModal({
   const handleTryAgain = () => {
     setStep('form');
     setError(null);
+    if (!lockToken) {
+      setRetryToken((c) => c + 1);
+    }
   };
 
   return (
@@ -241,10 +291,10 @@ export default function ReservationModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || locking}
                   className="rounded-full bg-chula-pink px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-chula-pink-hover focus:outline-none focus:ring-2 focus:ring-chula-pink focus:ring-offset-2 disabled:opacity-60"
                 >
-                  {submitting ? 'Checking…' : 'Confirm Reservation'}
+                  {submitting ? 'Checking…' : locking ? 'Holding table…' : 'Confirm Reservation'}
                 </button>
               </div>
             </form>
