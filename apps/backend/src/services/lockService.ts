@@ -22,7 +22,6 @@ export class LockService {
           lockToken: null,
           lockedUntil: null,
           lockedByUid: null,
-          status: 'AVAILABLE', // คืนสถานะโต๊ะให้ว่าง
         },
       });
 

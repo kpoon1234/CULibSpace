@@ -224,6 +224,15 @@ export class BookingService {
               'This table is currently on hold by another user. Please choose another table or try again later.',
           } as BookingValidationError;
         }
+
+        // Check sneaky token
+        if (table.lockedByUid !== userId) {
+          throw {
+            status: 403,
+            code: 'UNAUTHORIZED_LOCK_OWNER',
+            message: 'You do not have permission to use this hold lock.',
+          } as BookingValidationError;
+        }
       }
 
       // Check overlapping bookings on this table
@@ -300,7 +309,6 @@ export class BookingService {
     return await this.withTimeout(async () => {
       const now = new Date();
 
-      // If time window is provided, pre-verify schedule and conflicts early
       if (startDateTime && endDateTime) {
         await ScheduleService.validateTargetTimeWindow(startDateTime, endDateTime, true);
 
@@ -322,15 +330,26 @@ export class BookingService {
         }
       }
 
+      await prisma.table.updateMany({
+        where: {
+          lockedByUid: userId,
+          tableId: { not: tableId },
+        },
+        data: {
+          lockToken: null,
+          lockedUntil: null,
+          lockedByUid: null,
+        },
+      });
+
       const lockToken = crypto.randomUUID();
       const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
 
-      // ATOMIC UPDATE: Only lock if NOT closed and NOT actively held
       const updated = await prisma.table.updateMany({
         where: {
           tableId,
           status: { not: TableStatus.CLOSED },
-          OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+          OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }, { lockedByUid: userId }],
         },
         data: {
           lockToken,
