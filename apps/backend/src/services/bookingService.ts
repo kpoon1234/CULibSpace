@@ -31,6 +31,7 @@ export interface BookingWithTableAndZone {
  * @returns Array of bookings with table and zone information, ordered by startDateTime descending
  */
 export async function getBookingHistory(uid: number): Promise<BookingWithTableAndZone[]> {
+  // History: bookings that are
   const now = new Date();
 
   // History: bookings that are NOT active

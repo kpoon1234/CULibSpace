@@ -4,7 +4,7 @@ import { getBookingHistory, getActiveBooking } from '../services/bookingService.
 
 export class BookingController {
   /**
-   * GET /api/bookings/history
+   * GET /api/bookings/my-history
    * Fetch booking history for the logged-in user
    */
   static async getBookingHistory(req: Request, res: Response): Promise<void> {
@@ -27,7 +27,7 @@ export class BookingController {
   }
 
   /**
-   * GET /api/bookings/active
+   * GET /api/bookings/my-active
    * Fetch current active booking for the logged-in user
    */
   static async getActiveBooking(req: Request, res: Response): Promise<void> {
