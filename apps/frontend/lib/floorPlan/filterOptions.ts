@@ -26,25 +26,6 @@ export const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
   return `${h}:${i % 2 === 0 ? '00' : '30'}`;
 });
 
-/**
- * Longest booking window the backend will evaluate a status for — mirrors
- * `SystemConfig.maxBookingDurationMinutes` (seeded to 120). `LayoutController`
- * runs every `startDateTime`/`endDateTime` request through the same US2-4
- * reservation validation, so any wider window 400s and `client.ts` falls back
- * to mock data. Kept as a constant here (rather than fetched) because the
- * backend has no endpoint exposing `SystemConfig` yet — if that value ever
- * changes, update this too.
- */
-export const MAX_BOOKING_WINDOW_MINUTES = 120;
-
-/**
- * Furthest a booking date can be in the future — mirrors
- * `SystemConfig.maxAdvanceBookingDays` (seeded to 7). Same US2-4 validation as
- * `MAX_BOOKING_WINDOW_MINUTES` above, same reason it's a constant here rather
- * than fetched: a date past this 400s and falls back to mock data.
- */
-export const MAX_ADVANCE_BOOKING_DAYS = 7;
-
 /** Minutes since midnight for a "HH:mm" `TIME_SLOTS` entry. */
 export function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
