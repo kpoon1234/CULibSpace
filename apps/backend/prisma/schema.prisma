@@ -175,6 +175,7 @@ model Table {
   // Temporary Hold Lock Mechanism (Double Booking Prevention / Concurrency)
   lockToken    String?     @map("lock_token")
   lockedUntil  DateTime?   @map("locked_until") @db.Timestamptz
+  lockedByUid  Int?        @map("locked_by_uid")
 
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
