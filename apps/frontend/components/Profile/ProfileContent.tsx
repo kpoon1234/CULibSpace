@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
 import { getExtraIdFields, getProfileFields } from '@/lib/fieldLock';
+import { useProfileModal } from '@/lib/profileModalContext';
 
 type ProfileContentProps = {
   /** Shown as an ✕ button in the header when provided (modal usage). */
@@ -12,6 +13,7 @@ type ProfileContentProps = {
 
 export default function ProfileContent({ onClose }: ProfileContentProps) {
   const router = useRouter();
+  const { openHistory, closeProfile } = useProfileModal();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [firstname, setFirstname] = useState('');
@@ -244,7 +246,19 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
           )}
 
           <div>
-            <div className="block text-sm font-medium text-gray-700">Behaviour Score</div>
+            <div className="flex items-center justify-between text-sm font-medium text-gray-700">
+              <span>Behaviour Score</span>
+              <button
+                type="button"
+                onClick={() => {
+                  closeProfile();
+                  openHistory();
+                }}
+                className="cursor-pointer text-xs text-gray-400 hover:text-rose-600 hover:underline focus:outline-none"
+              >
+                [ view history ]
+              </button>
+            </div>
             <div className="relative mt-1 h-6 w-full overflow-hidden rounded-full bg-red-500">
               <div
                 className={`h-full ${scoreColor}`}

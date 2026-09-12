@@ -7,14 +7,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
 import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
 import { useProfileModal } from '@/lib/profileModalContext';
-import HistoryModal from '../Profile/HistoryModal';
 
 export default function TopMenu() {
   const router = useRouter();
   const pathname = usePathname();
-  const { openProfile } = useProfileModal();
+  const { openProfile, openHistory } = useProfileModal();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
     if (!storedUser) return null;
@@ -132,7 +130,7 @@ export default function TopMenu() {
                         role="menuitem"
                         type="button"
                         onClick={() => {
-                          setIsHistoryOpen(true);
+                          openHistory();
                           setIsDropdownOpen(false);
                         }}
                         className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
@@ -161,8 +159,6 @@ export default function TopMenu() {
           </div>
         </nav>
       </header>
-
-      <HistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
     </>
   );
 }
