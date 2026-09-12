@@ -23,9 +23,10 @@ import { TABLE_STATUSES } from './types';
 //
 // Each zone lists its tables with a live `status` (computed for the requested
 // time window) plus attributes. Geometry (x/y/shape/size, zone bounds) is
-// optional — synthesizeLayout() fills any gaps so the map always renders. On any
-// network/parse error the whole thing falls back to bundled sample data, tagged
-// `source: 'mock'` so sample numbers are never shown as live.
+// optional — synthesizeLayout() fills any gaps so the map always renders. A
+// network/server/parse failure REJECTS (no silent mock fallback) so the UI can
+// show FloorPlanError + a retry button. Bundled sample data is only served when
+// NEXT_PUBLIC_FLOORPLAN_MOCK=1 is set explicitly (offline demo / Storybook).
 
 const LAYOUT_PATH = process.env.NEXT_PUBLIC_FLOORPLAN_PATH || '/api/tables/layout';
 
@@ -115,39 +116,31 @@ export async function fetchLayout(
   const floorId = query.floorId ?? 1;
   if (FORCE_MOCK) return { data: mockResult(floorId), source: 'mock' };
 
-  try {
-    const res = await fetch(`${API_URL}${LAYOUT_PATH}${toQueryString(query)}`, {
-      signal,
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) throw new Error(`layout ${res.status}`);
+  // Network failures, non-2xx responses, and malformed payloads all throw here
+  // and are left to propagate — SWR surfaces them as `error`, which the UI turns
+  // into FloorPlanError + a retry button. No silent fallback to sample data.
+  const res = await fetch(`${API_URL}${LAYOUT_PATH}${toQueryString(query)}`, {
+    signal,
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`layout ${res.status}`);
 
-    const body = (await res.json()) as LayoutEnvelope | RawLayoutZone[] | { data: RawLayoutZone[] };
-    if (!Array.isArray(body) && 'success' in body && body.success === false) {
-      throw new Error(body.error || 'layout: unsuccessful response');
-    }
-    const raw: RawLayoutZone[] = Array.isArray(body)
-      ? body
-      : ((body as { data?: RawLayoutZone[] }).data ?? []);
-    if (!Array.isArray(raw) || raw.length === 0) {
-      throw new Error('layout: empty or malformed payload');
-    }
-    const zones = normalizeRawZones(raw);
-
-    return {
-      data: { geometry: synthesizeLayout(zones), status: toStatusFeed(zones) },
-      source: 'api',
-    };
-  } catch (err) {
-    if ((err as Error)?.name === 'AbortError') throw err;
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn(
-        '[floorPlan] /api/tables/layout unavailable, using sample data:',
-        (err as Error).message
-      );
-    }
-    return { data: mockResult(floorId), source: 'mock' };
+  const body = (await res.json()) as LayoutEnvelope | RawLayoutZone[] | { data: RawLayoutZone[] };
+  if (!Array.isArray(body) && 'success' in body && body.success === false) {
+    throw new Error(body.error || 'layout: unsuccessful response');
   }
+  const raw: RawLayoutZone[] = Array.isArray(body)
+    ? body
+    : ((body as { data?: RawLayoutZone[] }).data ?? []);
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('layout: empty or malformed payload');
+  }
+  const zones = normalizeRawZones(raw);
+
+  return {
+    data: { geometry: synthesizeLayout(zones), status: toStatusFeed(zones) },
+    source: 'api',
+  };
 }
 
 // ---------------------------------------------------------------------------

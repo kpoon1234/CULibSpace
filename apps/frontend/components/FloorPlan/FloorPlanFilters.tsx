@@ -279,7 +279,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             type="button"
             disabled={timeInvalid}
             onClick={apply}
-            className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-rose-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Apply filter
           </button>

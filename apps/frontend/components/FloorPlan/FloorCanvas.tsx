@@ -10,6 +10,7 @@ interface FloorCanvasProps {
   selectedTableId: number | null;
   onSelect: (table: FloorPlanTable) => void;
   onOpenFilters: () => void;
+  onClearFilters: () => void;
   activeFilterCount: number;
 }
 
@@ -24,12 +25,14 @@ export default function FloorCanvas({
   selectedTableId,
   onSelect,
   onOpenFilters,
+  onClearFilters,
   activeFilterCount,
 }: FloorCanvasProps) {
   const { containerRef, matrix, isPanning, onPointerDown, onWheel, zoomIn, zoomOut, reset } =
     usePanZoom(zone.bounds, [zone.zoneId]);
   const filtering = activeFilterCount > 0;
   const excludedCount = zone.total - zone.matchCount;
+  const noMatches = filtering && zone.total > 0 && zone.matchCount === 0;
 
   return (
     <div
@@ -121,21 +124,34 @@ export default function FloorCanvas({
       )}
 
       {/* Filter status — tables that don't match stay on the plan, dimmed. */}
-      {filtering && zone.total > 0 && (
+      {filtering && zone.total > 0 && zone.matchCount > 0 && (
         <p className="absolute bottom-3 left-3 max-w-[16rem] rounded-md bg-paper/90 px-2 py-1 text-xs text-gray-600 shadow-sm">
-          {zone.matchCount === 0 ? (
-            <>
-              No tables match your filters — all {zone.total} are dimmed and can&apos;t be picked.
-            </>
-          ) : (
-            <>
-              <span className="font-medium tabular-nums text-gray-900">
-                {zone.matchCount} of {zone.total}
-              </span>{' '}
-              match your filters. The other {excludedCount} are dimmed and can&apos;t be picked.
-            </>
-          )}
+          <span className="font-medium tabular-nums text-gray-900">
+            {zone.matchCount} of {zone.total}
+          </span>{' '}
+          match your filters. The other {excludedCount} are dimmed and can&apos;t be picked.
         </p>
+      )}
+
+      {/* No table in this zone survives the active filter — surface it as its own
+          state rather than making the user notice every table went dim. */}
+      {noMatches && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+          <div className="pointer-events-auto max-w-xs rounded-xl border border-gray-200 bg-paper p-5 text-center shadow-sm">
+            <p className="text-sm font-medium text-gray-900">No tables match your filters</p>
+            <p className="mt-1 text-xs text-gray-500">
+              All {zone.total} tables in {zone.label} are dimmed and can&apos;t be picked with these
+              filters.
+            </p>
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="mt-3 rounded-md bg-rose-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              Clear filters
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
