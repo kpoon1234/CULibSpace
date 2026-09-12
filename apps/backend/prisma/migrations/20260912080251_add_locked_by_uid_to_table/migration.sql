@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "table" ALTER COLUMN "locked_until" SET DATA TYPE TIMESTAMPTZ;
