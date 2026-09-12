@@ -26,6 +26,31 @@ export const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
   return `${h}:${i % 2 === 0 ? '00' : '30'}`;
 });
 
+/**
+ * Longest booking window the backend will evaluate a status for — mirrors
+ * `SystemConfig.maxBookingDurationMinutes` (seeded to 120). `LayoutController`
+ * runs every `startDateTime`/`endDateTime` request through the same US2-4
+ * reservation validation, so any wider window 400s and `client.ts` falls back
+ * to mock data. Kept as a constant here (rather than fetched) because the
+ * backend has no endpoint exposing `SystemConfig` yet — if that value ever
+ * changes, update this too.
+ */
+export const MAX_BOOKING_WINDOW_MINUTES = 120;
+
+/**
+ * Furthest a booking date can be in the future — mirrors
+ * `SystemConfig.maxAdvanceBookingDays` (seeded to 7). Same US2-4 validation as
+ * `MAX_BOOKING_WINDOW_MINUTES` above, same reason it's a constant here rather
+ * than fetched: a date past this 400s and falls back to mock data.
+ */
+export const MAX_ADVANCE_BOOKING_DAYS = 7;
+
+/** Minutes since midnight for a "HH:mm" `TIME_SLOTS` entry. */
+export function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
 /** True when a table clears every active amenity constraint in `filter`. */
 export function tablePassesFilter(table: TableLayout, filter: FloorPlanFilter): boolean {
   if (filter.requiresLargeScreen && !table.hasTvScreen) return false;
@@ -67,6 +92,28 @@ export function activeFilterCount(filter: FloorPlanFilter): number {
   if (filter.minSeats != null) n++;
   if (hasValidTimeRange(filter)) n++;
   return n;
+}
+
+/**
+ * Combine a "YYYY-MM-DD" date and "HH:mm" time into an ISO string that carries
+ * this browser's UTC offset (e.g. "2026-09-11T14:00:00+07:00"). A bare
+ * "YYYY-MM-DDTHH:mm" string has no timezone designator, so `new Date(...)`
+ * parses it as local time OF WHATEVER MACHINE RUNS THE CODE — the backend
+ * re-interprets it in the server's own timezone, not the browser's. That
+ * silently shifts the intended instant whenever the two differ (e.g. a
+ * Bangkok browser against a UTC-hosted API), which can push a valid window
+ * outside operating hours or the past-date tolerance and 400 the request —
+ * which client.ts then swallows into the mock-data fallback. Encoding the
+ * offset makes the instant unambiguous no matter where it's parsed.
+ */
+export function toOffsetDateTime(date: string, time: string): string {
+  const local = new Date(`${date}T${time}:00`);
+  const offsetMin = -local.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMin);
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm = String(abs % 60).padStart(2, '0');
+  return `${date}T${time}:00${sign}${hh}:${mm}`;
 }
 
 /**

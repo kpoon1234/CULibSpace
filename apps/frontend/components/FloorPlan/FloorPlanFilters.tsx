@@ -3,9 +3,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   EMPTY_FILTER,
+  MAX_ADVANCE_BOOKING_DAYS,
+  MAX_BOOKING_WINDOW_MINUTES,
   MIN_SEATS_OPTIONS,
   PLUG_BUCKETS,
   TIME_SLOTS,
+  timeToMinutes,
+  toOffsetDateTime,
   type FloorPlanFilter,
 } from '@/lib/floorPlan';
 import { CloseIcon } from './icons';
@@ -47,6 +51,14 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
   const [today] = useState(() =>
     new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
   );
+  // Latest date the window can start on — mirrors the backend's
+  // MAX_ADVANCE_BOOKING_DAYS (SystemConfig.maxAdvanceBookingDays); a later date
+  // 400s the same way an over-long window does.
+  const [maxDate] = useState(() => {
+    const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000);
+    d.setUTCDate(d.getUTCDate() + MAX_ADVANCE_BOOKING_DAYS);
+    return d.toISOString().slice(0, 10);
+  });
 
   // The booking window is a same-day Date + From + To, each held on its own so a
   // half-picked window (e.g. a time chosen before a date) still shows what you
@@ -59,13 +71,26 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
 
   const anyTimeField = Boolean(bookDate || fromTime || toTime);
   const allTimeFields = Boolean(bookDate && fromTime && toTime);
-  const timeInvalid = (anyTimeField && !allTimeFields) || (allTimeFields && toTime <= fromTime);
+  // The backend (LayoutController / US2-4) 400s any window longer than
+  // MAX_BOOKING_WINDOW_MINUTES, which client.ts then quietly turns into a
+  // mock-data fallback — so this dialog can't offer a "To" the backend would
+  // reject.
+  const tooLong =
+    allTimeFields && timeToMinutes(toTime) - timeToMinutes(fromTime) > MAX_BOOKING_WINDOW_MINUTES;
+  // Same story for a date past MAX_ADVANCE_BOOKING_DAYS — `max={maxDate}` below
+  // stops most of these, but a date typed directly still needs catching.
+  const dateTooFar = Boolean(bookDate) && bookDate > maxDate;
+  const timeInvalid =
+    (anyTimeField && !allTimeFields) ||
+    (allTimeFields && toTime <= fromTime) ||
+    tooLong ||
+    dateTooFar;
 
   const apply = () => {
     onApply({
       ...draft,
-      startDateTime: allTimeFields ? `${bookDate}T${fromTime}` : null,
-      endDateTime: allTimeFields ? `${bookDate}T${toTime}` : null,
+      startDateTime: allTimeFields ? toOffsetDateTime(bookDate, fromTime) : null,
+      endDateTime: allTimeFields ? toOffsetDateTime(bookDate, toTime) : null,
     });
     onClose();
   };
@@ -179,6 +204,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 className={fieldCls}
                 value={bookDate}
                 min={today}
+                max={maxDate}
                 onChange={(e) => setBookDate(e.target.value)}
               />
             </label>
@@ -209,7 +235,15 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 >
                   <option value="">—</option>
                   {TIME_SLOTS.map((t) => (
-                    <option key={t} value={t} disabled={Boolean(fromTime) && t <= fromTime}>
+                    <option
+                      key={t}
+                      value={t}
+                      disabled={
+                        Boolean(fromTime) &&
+                        (t <= fromTime ||
+                          timeToMinutes(t) - timeToMinutes(fromTime) > MAX_BOOKING_WINDOW_MINUTES)
+                      }
+                    >
                       {t}
                     </option>
                   ))}
@@ -218,10 +252,17 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             </div>
           </div>
           {timeInvalid ? (
-            <p className="text-xs text-red-600">Pick a date, a start time and a later end time.</p>
+            <p className="text-xs text-red-600">
+              {dateTooFar
+                ? `Bookings can only be made up to ${MAX_ADVANCE_BOOKING_DAYS} days in advance.`
+                : tooLong
+                  ? `Booking windows can be at most ${MAX_BOOKING_WINDOW_MINUTES / 60} hours.`
+                  : 'Pick a date, a start time and a later end time.'}
+            </p>
           ) : (
             <p className="text-xs text-gray-500">
-              Same-day window in 30-minute slots (e.g. 10:00 – 10:30).
+              Same-day window in 30-minute slots, up to {MAX_BOOKING_WINDOW_MINUTES / 60} hours
+              (e.g. 10:00 – 10:30).
             </p>
           )}
         </div>
