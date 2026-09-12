@@ -6,7 +6,7 @@ import { getAuthToken, subscribeToAuth } from '@/lib/auth';
 import { FloorPlanView } from '@/components/FloorPlan';
 
 // Route for the 2D floor-plan UI (FR-2). Data comes from GET /api/tables/layout
-// (see lib/floorPlan/README.md); a network/server failure shows an error state
+// (see lib/ARCHITECTURE.md); a network/server failure shows an error state
 // with a retry button instead of the plan.
 export default function ZonesPreviewPage() {
   const router = useRouter();

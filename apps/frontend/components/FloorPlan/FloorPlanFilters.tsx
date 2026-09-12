@@ -6,8 +6,11 @@ import {
   MIN_SEATS_OPTIONS,
   PLUG_BUCKETS,
   TIME_SLOTS,
+  timeToMinutes,
+  toOffsetDateTime,
   type FloorPlanFilter,
 } from '@/lib/floorPlan';
+import { useBookingLimits } from '@/lib/systemConfig';
 import { CloseIcon } from './icons';
 
 interface FloorPlanFiltersProps {
@@ -33,6 +36,21 @@ function parts(local: string | null): { date: string; time: string } {
   return { date, time: time.slice(0, 5) };
 }
 
+/** A "To" slot is unusable once a "From" is picked: earlier/equal slots, or
+ *  ones that would make the window longer than the backend allows. */
+function isToTimeDisabled(candidate: string, fromTime: string, maxWindowMinutes: number): boolean {
+  if (!fromTime) return false;
+  if (candidate <= fromTime) return true;
+  return timeToMinutes(candidate) - timeToMinutes(fromTime) > maxWindowMinutes;
+}
+
+/** Latest date (local, "YYYY-MM-DD") a booking window can start on. */
+function computeMaxDate(maxAdvanceBookingDays: number): string {
+  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000);
+  d.setUTCDate(d.getUTCDate() + maxAdvanceBookingDays);
+  return d.toISOString().slice(0, 10);
+}
+
 // Table Filter dialog — maps the Figma panel to the GET /api/tables/layout params:
 // large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
 // minSeats, and a same-day Date + From + To (each a fixed half-hour slot) ->
@@ -42,11 +60,25 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // From the backend's SystemConfig (falls back to its own defaults, 120 min /
+  // 7 days, until the fetch resolves) — LayoutController runs every explicit
+  // window through the same reservation validation as an actual booking, so a
+  // window/date outside these limits 400s and client.ts falls back to mock data.
+  const { maxBookingWindowMinutes, maxAdvanceBookingDays } = useBookingLimits();
+
   // Today (local), the earliest date the window can start on — the backend 400s
   // a past window. Computed once when the dialog mounts.
   const [today] = useState(() =>
     new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
   );
+  // Latest date the window can start on — mirrors maxAdvanceBookingDays; a
+  // later date 400s the same way an over-long window does. Computed once at
+  // mount, same as `today` above: this dialog only mounts while open
+  // (FloorPlanView renders it conditionally), so re-opening it always re-runs
+  // this against whatever useBookingLimits() has resolved to by then — SWR's
+  // shared cache means that's the real config after the first successful
+  // fetch anywhere in the app, not just the default.
+  const [maxDate] = useState(() => computeMaxDate(maxAdvanceBookingDays));
 
   // The booking window is a same-day Date + From + To, each held on its own so a
   // half-picked window (e.g. a time chosen before a date) still shows what you
@@ -59,13 +91,35 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
 
   const anyTimeField = Boolean(bookDate || fromTime || toTime);
   const allTimeFields = Boolean(bookDate && fromTime && toTime);
-  const timeInvalid = (anyTimeField && !allTimeFields) || (allTimeFields && toTime <= fromTime);
+  const tooLong =
+    allTimeFields && timeToMinutes(toTime) - timeToMinutes(fromTime) > maxBookingWindowMinutes;
+  // `max={maxDate}` below stops most of these, but a date typed directly still
+  // needs catching.
+  const dateTooFar = Boolean(bookDate) && bookDate > maxDate;
+
+  // One message, most-specific reason first, so a half-picked window says
+  // exactly what's missing (e.g. "Pick a start time.") instead of a generic
+  // catch-all that doesn't distinguish From from Date from To.
+  const timeErrorMessage = dateTooFar
+    ? `Bookings can only be made up to ${maxAdvanceBookingDays} days in advance.`
+    : tooLong
+      ? `Booking windows can be at most ${maxBookingWindowMinutes / 60} hours.`
+      : anyTimeField && !bookDate
+        ? 'Pick a date.'
+        : anyTimeField && !fromTime
+          ? 'Pick a start time.'
+          : anyTimeField && !toTime
+            ? 'Pick an end time.'
+            : allTimeFields && toTime <= fromTime
+              ? 'End time must be after the start time.'
+              : null;
+  const timeInvalid = timeErrorMessage !== null;
 
   const apply = () => {
     onApply({
       ...draft,
-      startDateTime: allTimeFields ? `${bookDate}T${fromTime}` : null,
-      endDateTime: allTimeFields ? `${bookDate}T${toTime}` : null,
+      startDateTime: allTimeFields ? toOffsetDateTime(bookDate, fromTime) : null,
+      endDateTime: allTimeFields ? toOffsetDateTime(bookDate, toTime) : null,
     });
     onClose();
   };
@@ -179,6 +233,7 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 className={fieldCls}
                 value={bookDate}
                 min={today}
+                max={maxDate}
                 onChange={(e) => setBookDate(e.target.value)}
               />
             </label>
@@ -209,7 +264,11 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
                 >
                   <option value="">—</option>
                   {TIME_SLOTS.map((t) => (
-                    <option key={t} value={t} disabled={Boolean(fromTime) && t <= fromTime}>
+                    <option
+                      key={t}
+                      value={t}
+                      disabled={isToTimeDisabled(t, fromTime, maxBookingWindowMinutes)}
+                    >
                       {t}
                     </option>
                   ))}
@@ -217,11 +276,12 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
               </label>
             </div>
           </div>
-          {timeInvalid ? (
-            <p className="text-xs text-red-600">Pick a date, a start time and a later end time.</p>
+          {timeErrorMessage ? (
+            <p className="text-xs text-red-600">{timeErrorMessage}</p>
           ) : (
             <p className="text-xs text-gray-500">
-              Same-day window in 30-minute slots (e.g. 10:00 – 10:30).
+              Same-day window in 30-minute slots, up to {maxBookingWindowMinutes / 60} hours (e.g.
+              10:00 – 10:30).
             </p>
           )}
         </div>
