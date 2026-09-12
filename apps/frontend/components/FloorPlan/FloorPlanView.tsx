@@ -74,8 +74,9 @@ export default function FloorPlanView({
       ? (activeZone.tables.find((t) => t.tableId === selectedTableId) ?? null)
       : null;
 
-  // Shared across the display label and the validate-booking payload so they
-  // never drift apart from two separate `new Date()` calls.
+  // Falls back to "now" only when the filter has no booking window set —
+  // otherwise the reservation modal should open pre-filled with whatever
+  // date/time the user already picked in the filter.
   const reservationDate = new Date();
 
   return (
@@ -183,6 +184,7 @@ export default function FloorPlanView({
           tableCode={reservingTable.code}
           tableZone={activeZone.label}
           initialDate={reservationDate}
+          filter={filter}
           onConfirm={() => onReserve?.(reservingTable)}
         />
       )}

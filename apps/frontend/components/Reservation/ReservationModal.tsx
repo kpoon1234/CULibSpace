@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, FormEvent } from 'react';
-import { TIME_SLOTS } from '@/lib/floorPlan'; // Assuming this is an array of time strings, e.g., ['08:00', '09:00', ...]
+import {
+  TIME_SLOTS,
+  filterTimeRange,
+  isEndTimeDisabled,
+  timeToMinutes,
+  type FloorPlanFilter,
+} from '@/lib/floorPlan'; // Assuming this is an array of time strings, e.g., ['08:00', '09:00', ...]
+import { useBookingLimits } from '@/lib/systemConfig';
 import { createBooking, lockTable, unlockTable } from '@/lib/bookings';
 
 interface ReservationModalProps {
@@ -10,8 +17,11 @@ interface ReservationModalProps {
   tableId: number;
   tableCode: string;
   tableZone: string;
-  /** Defaults the date picker; the user can move it forward from here. */
+  /** Defaults the date/time fields when the filter has no booking window set. */
   initialDate: Date;
+  /** The Table Filter's current selection — when it carries a valid booking
+   *  window, the form opens pre-filled with it (still freely editable). */
+  filter: FloorPlanFilter;
   onConfirm: (startTime: string, endTime: string) => void;
 }
 
@@ -27,6 +37,11 @@ function combineDateAndTime(date: Date, hhmm: string): Date {
   const combined = new Date(date);
   combined.setHours(hours, minutes, 0, 0);
   return combined;
+}
+
+/** Date -> the "HH:mm" nearest `TIME_SLOTS` entry it falls on. */
+function toHHMM(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /** Date -> the "YYYY-MM-DD" an <input type="date"> needs, in local time. */
@@ -47,11 +62,25 @@ export default function ReservationModal({
   tableCode,
   tableZone,
   initialDate,
+  filter,
   onConfirm,
 }: ReservationModalProps) {
-  const [selectedDate, setSelectedDate] = useState(initialDate);
-  const [startTime, setStartTime] = useState(TIME_SLOTS[0] || '');
-  const [endTime, setEndTime] = useState(TIME_SLOTS[1] || '');
+  const { maxBookingWindowMinutes } = useBookingLimits();
+
+  // Seeded once from whatever booking window is active in the Table Filter
+  // when the modal opens — still freely editable from there.
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const range = filterTimeRange(filter);
+    return range ? new Date(range.startDateTime) : initialDate;
+  });
+  const [startTime, setStartTime] = useState(() => {
+    const range = filterTimeRange(filter);
+    return range ? toHHMM(new Date(range.startDateTime)) : TIME_SLOTS[0] || '';
+  });
+  const [endTime, setEndTime] = useState(() => {
+    const range = filterTimeRange(filter);
+    return range ? toHHMM(new Date(range.endDateTime)) : TIME_SLOTS[1] || '';
+  });
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +131,8 @@ export default function ReservationModal({
 
   if (!isOpen) return null;
 
+  const tooLong = timeToMinutes(endTime) - timeToMinutes(startTime) > maxBookingWindowMinutes;
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
@@ -109,6 +140,11 @@ export default function ReservationModal({
     // Time validation check
     if (startTime >= endTime) {
       setError('End time must be after start time.');
+      return;
+    }
+
+    if (tooLong) {
+      setError(`Booking windows can be at most ${maxBookingWindowMinutes / 60} hours.`);
       return;
     }
 
@@ -152,7 +188,12 @@ export default function ReservationModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) handleClose();
+      }}
+    >
       {/* Modal Container */}
       <div className="w-full max-w-md rounded-3xl bg-white p-6 sm:p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         {step === 'success' ? (
@@ -269,13 +310,23 @@ export default function ReservationModal({
                     required
                   >
                     {TIME_SLOTS.map((time) => (
-                      <option key={`end-${time}`} value={time}>
+                      <option
+                        key={`end-${time}`}
+                        value={time}
+                        disabled={isEndTimeDisabled(time, startTime, maxBookingWindowMinutes)}
+                      >
                         {time}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
+
+              {startTime && endTime && tooLong && (
+                <p className="text-xs font-medium text-red-500 ml-1">
+                  Booking windows can be at most {maxBookingWindowMinutes / 60} hours.
+                </p>
+              )}
 
               {/* Error Message */}
               {error && <p className="text-xs font-medium text-red-500 ml-1">{error}</p>}
@@ -291,7 +342,7 @@ export default function ReservationModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || locking}
+                  disabled={submitting || locking || tooLong}
                   className="rounded-full bg-chula-pink px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-chula-pink-hover focus:outline-none focus:ring-2 focus:ring-chula-pink focus:ring-offset-2 disabled:opacity-60"
                 >
                   {submitting ? 'Checking…' : locking ? 'Holding table…' : 'Confirm Reservation'}
