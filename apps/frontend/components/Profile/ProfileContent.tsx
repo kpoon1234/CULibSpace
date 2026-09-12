@@ -139,7 +139,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       onSubmit={handleSave}
       className="w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow"
     >
-      <div className="relative bg-pink-400 py-6 text-center">
+      <div className="relative bg-chula-pink py-6 text-center">
         <h1 className="text-2xl font-semibold text-white">My Profile</h1>
         {onClose && (
           <button
@@ -264,14 +264,12 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       <div className="px-8 pb-8">
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         {notice && <p className="mb-3 text-sm text-amber-600">{notice}</p>}
-        {hasChanges && (
-          <button
-            disabled={isSaving}
-            className="w-full rounded-md bg-rose-500 px-4 py-2 font-semibold text-white disabled:opacity-60"
-          >
-            {isSaving ? 'Saving…' : 'Confirm Update'}
-          </button>
-        )}
+        <button
+          disabled={!hasChanges || isSaving}
+          className="w-full rounded-md bg-chula-pink px-4 py-2 font-semibold text-white transition-colors hover:bg-chula-pink-hover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-chula-pink"
+        >
+          {isSaving ? 'Saving…' : 'Confirm Update'}
+        </button>
       </div>
     </form>
   );

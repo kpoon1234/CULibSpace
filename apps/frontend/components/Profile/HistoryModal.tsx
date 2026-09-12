@@ -62,7 +62,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
       {/* Modal Container */}
       <div className="relative w-full max-w-4xl flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         {/* Header Bar */}
-        <div className="bg-chula-400 py-4 text-center relative">
+        <div className="bg-chula-pink py-4 text-center relative">
           <h1 className="text-lg font-semibold text-white">Behavior Score History</h1>
 
           {/* Close Button */}
@@ -153,7 +153,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
               <button
                 type="button"
                 onClick={handleSeeMore}
-                className="text-sm font-medium text-gray-400 transition-colors hover:text-rose-600 focus:outline-none"
+                className="text-sm font-medium text-gray-400 transition-colors hover:text-chula-pink focus:outline-none"
               >
                 [ see more ]
               </button>

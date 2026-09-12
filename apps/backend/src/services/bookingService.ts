@@ -288,4 +288,39 @@ export class BookingService {
       };
     }, timeoutMs);
   }
+
+  /**
+   * Validate then persist a real Booking row (status PENDING). Reuses every rule
+   * in validateBookingRules — a booking is only ever created once the same
+   * checks a /validate call would run have already passed.
+   *
+   * Note: like validateBookingRules, this reads then writes in two separate
+   * queries rather than one serializable transaction, so two requests racing
+   * for the same table/slot in the same instant could theoretically both pass
+   * validation before either insert lands. The existing overlap indexes make
+   * that window narrow, not zero — tightening it further wasn't asked for here.
+   */
+  static async createBooking(
+    input: BookingValidationInput,
+    prisma: any = defaultPrisma,
+    timeoutMs: number = 5000
+  ): Promise<BookingValidationResult & { booking: { bookingId: number; status: BookingStatus } }> {
+    const validation = await this.validateBookingRules(input, prisma, timeoutMs);
+
+    const booking = await this.withTimeout<{ bookingId: number; status: BookingStatus }>(
+      () =>
+        prisma.booking.create({
+          data: {
+            uid: input.userId,
+            tableId: input.tableId,
+            startDateTime: input.startDateTime,
+            endDateTime: input.endDateTime,
+            status: BookingStatus.PENDING,
+          },
+        }),
+      timeoutMs
+    );
+
+    return { ...validation, booking: { bookingId: booking.bookingId, status: booking.status } };
+  }
 }
