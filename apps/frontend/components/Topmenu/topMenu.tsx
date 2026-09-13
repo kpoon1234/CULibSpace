@@ -11,7 +11,7 @@ import { useProfileModal } from '@/lib/profileModalContext';
 export default function TopMenu() {
   const router = useRouter();
   const pathname = usePathname();
-  const { openProfile, openHistory } = useProfileModal();
+  const { openProfile, openHistory, openBookingHistory } = useProfileModal();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
@@ -125,6 +125,17 @@ export default function TopMenu() {
                         className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
                       >
                         Profile
+                      </button>
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          openBookingHistory();
+                          setIsDropdownOpen(false);
+                        }}
+                        className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
+                      >
+                        Reservation History
                       </button>
                       <button
                         role="menuitem"
