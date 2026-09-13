@@ -3,15 +3,14 @@
 import { useState, useEffect } from 'react';
 import { API_URL, getAuthToken } from '@/lib/auth';
 
-type BookingStatus = 'Active' | 'Cancelled' | 'Past';
-
 type HistoryRecord = {
   id: string;
   date: string;
   start: string;
   end: string;
   tableDetails: string;
-  status: BookingStatus;
+  status: string;
+  statusClassName: string;
   timestamp: number; // Used for sorting
 };
 
@@ -45,102 +44,93 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
           return;
         }
 
-        const headers = { Authorization: `Bearer ${token}` };
+        const res = await fetch(`${API_URL}/api/bookings/my-history`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-        // Fetch both Active and History bookings concurrently
-        const [activeRes, historyRes] = await Promise.all([
-          fetch(`${API_URL}/api/bookings/my-active`, { headers }),
-          fetch(`${API_URL}/api/bookings/my-history`, { headers }),
-        ]);
-
-        if (!activeRes.ok || !historyRes.ok) {
+        if (!res.ok) {
           throw new Error('Failed to load reservation records');
         }
 
-        const activeJson = await activeRes.json();
-        const historyJson = await historyRes.json();
-        const activeData = activeJson?.data ?? activeJson;
-        const historyDataRaw = historyJson?.data ?? historyJson;
+        const json = await res.json();
+        const dataList = json?.data ?? json;
 
-        const combinedRecords: HistoryRecord[] = [];
+        if (Array.isArray(dataList)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const formatted: HistoryRecord[] = dataList.map((booking: any) => {
+            const startDt = new Date(booking.startDateTime);
+            const endDt = new Date(booking.endDateTime);
 
-        // Helper function to format raw booking data
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const formatBooking = (booking: any, forcedStatus?: BookingStatus): HistoryRecord => {
-          const startDt = new Date(booking.startDateTime);
-          const endDt = new Date(booking.endDateTime);
+            const dateStr = !isNaN(startDt.getTime())
+              ? startDt.toLocaleDateString('en-GB', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                })
+              : '—';
 
-          const dateStr = !isNaN(startDt.getTime())
-            ? startDt.toLocaleDateString('en-GB', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-              })
-            : '—';
+            const startStr = !isNaN(startDt.getTime())
+              ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '—';
 
-          const startStr = !isNaN(startDt.getTime())
-            ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : '—';
+            const endStr = !isNaN(endDt.getTime())
+              ? endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '—';
 
-          const endStr = !isNaN(endDt.getTime())
-            ? endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : '—';
+            const tableId = booking.table?.tableId || booking.tableId || 'Unknown Table';
+            const rawZone = booking.table?.zone?.zoneType || booking.table?.zone?.type;
+            const zone =
+              rawZone === 'SILENT'
+                ? 'Silent Zone'
+                : rawZone === 'GROUP'
+                  ? 'Group Study'
+                  : rawZone === 'COMMON'
+                    ? 'Common Area'
+                    : rawZone || 'Library';
 
-          const tableId = booking.table?.tableId || booking.tableId || 'Unknown Table';
-          const rawZone = booking.table?.zone?.zoneType || booking.table?.zone?.type;
-          const zone =
-            rawZone === 'SILENT'
-              ? 'Silent Zone'
-              : rawZone === 'GROUP'
-                ? 'Group Study'
-                : rawZone === 'COMMON'
-                  ? 'Common Area'
-                  : rawZone || 'Library';
+            const rawStatus = String(booking.status || '').toUpperCase();
+            let statusLabel = 'Past';
+            let statusClassName = 'bg-gray-100 text-gray-600';
 
-          // Determine status if not forced
-          let status: BookingStatus = 'Past';
-          if (forcedStatus) {
-            status = forcedStatus;
-          } else if (booking.status === 'CANCELLED' || booking.status === 'Cancelled') {
-            status = 'Cancelled';
-          } else if (booking.status === 'ACTIVE' || booking.status === 'PENDING') {
-            status = 'Active';
-          }
+            if (rawStatus === 'ACTIVE') {
+              statusLabel = 'Active';
+              statusClassName = 'bg-emerald-100 text-emerald-700';
+            } else if (rawStatus === 'PENDING') {
+              statusLabel = 'Pending';
+              statusClassName = 'bg-amber-100 text-amber-700';
+            } else if (rawStatus === 'CANCELLED') {
+              statusLabel = 'Cancelled';
+              statusClassName = 'bg-rose-100 text-rose-700';
+            } else if (rawStatus === 'NO_SHOW') {
+              statusLabel = 'No Show';
+              statusClassName = 'bg-red-100 text-red-700';
+            } else if (rawStatus === 'COMPLETED') {
+              statusLabel = 'Completed';
+              statusClassName = 'bg-slate-100 text-slate-700';
+            }
 
-          return {
-            id: String(
-              booking.bookingId || booking.id || `${booking.startDateTime}-${Math.random()}`
-            ),
-            date: dateStr,
-            start: startStr,
-            end: endStr,
-            tableDetails: `Table #${tableId} · ${zone}`,
-            status,
-            timestamp: startDt.getTime(),
-          };
-        };
-
-        // Add Active Booking if it exists
-        if (
-          activeData &&
-          typeof activeData === 'object' &&
-          Object.keys(activeData).length > 0 &&
-          activeData.bookingId
-        ) {
-          combinedRecords.push(formatBooking(activeData, 'Active'));
-        }
-
-        // Add History Bookings
-        if (Array.isArray(historyDataRaw)) {
-          historyDataRaw.forEach((booking) => {
-            combinedRecords.push(formatBooking(booking));
+            return {
+              id: String(
+                booking.bookingId || booking.id || `${booking.startDateTime}-${Math.random()}`
+              ),
+              date: dateStr,
+              start: startStr,
+              end: endStr,
+              tableDetails: `Table #${tableId} · ${zone}`,
+              status: statusLabel,
+              statusClassName,
+              timestamp: startDt.getTime(),
+            };
           });
+
+          // Sort by startDateTime descending (latest on top)
+          formatted.sort((a, b) => b.timestamp - a.timestamp);
+          setHistoryData(formatted);
+        } else {
+          setHistoryData([]);
         }
-
-        // Sort by startDateTime descending (latest on top)
-        combinedRecords.sort((a, b) => b.timestamp - a.timestamp);
-
-        setHistoryData(combinedRecords);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
@@ -161,12 +151,12 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="Reservation History"
+      aria-label="Booking History"
     >
       <div className="relative flex w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         {/* Header Bar */}
         <div className="relative bg-chula-pink py-4 text-center">
-          <h1 className="text-lg font-semibold text-white">Reservation History</h1>
+          <h1 className="text-lg font-semibold text-white">Booking History</h1>
           <button
             type="button"
             onClick={onClose}
@@ -225,13 +215,7 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
                     <div className="col-span-4 pl-4 text-gray-600">{record.tableDetails}</div>
                     <div className="col-span-2 flex justify-center">
                       <span
-                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          record.status === 'Active'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : record.status === 'Cancelled'
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-gray-100 text-gray-600'
-                        }`}
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${record.statusClassName}`}
                       >
                         {record.status}
                       </span>
@@ -240,7 +224,7 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
                 ))
               ) : (
                 <div className="p-8 text-center text-sm text-gray-400">
-                  No reservation history found.
+                  No Booking history found.
                 </div>
               )}
             </div>

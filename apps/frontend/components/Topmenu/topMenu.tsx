@@ -135,7 +135,7 @@ export default function TopMenu() {
                         }}
                         className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
                       >
-                        Reservation History
+                        Booking History
                       </button>
                       <button
                         role="menuitem"
