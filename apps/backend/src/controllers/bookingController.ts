@@ -169,13 +169,17 @@ export class BookingController {
       const parsedStart = startDateTime ? new Date(startDateTime) : undefined;
       const parsedEnd = endDateTime ? new Date(endDateTime) : undefined;
 
-      if (isNaN(parsedTableId) || !parsedStart || !parsedEnd) {
-        res
-          .status(400)
-          .json({
-            success: false,
-            error: 'Missing or invalid required fields: tableId, startDateTime, endDateTime',
-          });
+      if (
+        isNaN(parsedTableId) ||
+        !parsedStart ||
+        !parsedEnd ||
+        isNaN(parsedStart.getTime()) ||
+        isNaN(parsedEnd.getTime())
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing or invalid required fields: tableId, startDateTime, endDateTime',
+        });
         return;
       }
 
