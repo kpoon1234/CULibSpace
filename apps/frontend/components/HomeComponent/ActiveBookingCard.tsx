@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import useSWR from 'swr';
 import { getAuthToken } from '@/lib/auth';
 import { fetchActiveBooking, checkInBooking, type ActiveBookingData } from '@/lib/bookings';
@@ -65,6 +65,21 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
     null
   );
 
+  // Ref to track the auto-close timeout so it can be cancelled if the modal is
+  // closed early (e.g. user taps outside before 1500ms), preventing a setState
+  // call on an already-hidden modal that would cause stale state or React warnings.
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Stable callback-based close — clears any pending auto-close timer first
+  const closeQrModal = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setIsQrModalOpen(false);
+    setCheckInStatus(null);
+  }, []);
+
   const token = typeof window !== 'undefined' ? getAuthToken() : null;
 
   const { data: booking, mutate } = useSWR(
@@ -93,9 +108,11 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
       if (res.ok) {
         setCheckInStatus({ ok: true, message: 'Check-in successful! Your seat is now active.' });
         mutate();
-        setTimeout(() => {
-          setIsQrModalOpen(false);
-          setCheckInStatus(null);
+        // Store timer ref so it can be cancelled if the user closes the modal
+        // before 1500ms elapses — prevents setState on an already-hidden modal.
+        closeTimerRef.current = setTimeout(() => {
+          closeTimerRef.current = null;
+          closeQrModal();
         }, 1500);
       } else {
         setCheckInStatus({
@@ -160,36 +177,38 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
               </div>
             </div>
 
-            {/* Amenities Pills */}
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span
-                title={`${table?.numberOfSeat} Seats`}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
-              >
-                <SeatIcon className="h-3.5 w-3.5 text-stone-500" />
-                <span>{table?.numberOfSeat} Seats</span>
-              </span>
-
-              {table?.plugCap !== null && table?.plugCap !== undefined && table.plugCap > 0 && (
+            {/* Amenities Pills — only rendered when API returns a table object */}
+            {table && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 <span
-                  title={`${table.plugCap} Outlets`}
+                  title={`${table.numberOfSeat} Seats`}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
                 >
-                  <PlugIcon className="h-3.5 w-3.5 text-stone-500" />
-                  <span>{table.plugCap} Plugs</span>
+                  <SeatIcon className="h-3.5 w-3.5 text-stone-500" />
+                  <span>{table.numberOfSeat ?? '—'} Seats</span>
                 </span>
-              )}
 
-              {table?.hasTvScreen && (
-                <span
-                  title="TV Screen Available"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
-                >
-                  <ScreenIcon className="h-3.5 w-3.5 text-stone-500" />
-                  <span>TV Screen</span>
-                </span>
-              )}
-            </div>
+                {table.plugCap !== null && table.plugCap !== undefined && table.plugCap > 0 && (
+                  <span
+                    title={`${table.plugCap} Outlets`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
+                  >
+                    <PlugIcon className="h-3.5 w-3.5 text-stone-500" />
+                    <span>{table.plugCap} Plugs</span>
+                  </span>
+                )}
+
+                {table.hasTvScreen && (
+                  <span
+                    title="TV Screen Available"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
+                  >
+                    <ScreenIcon className="h-3.5 w-3.5 text-stone-500" />
+                    <span>TV Screen</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Ticket Divider (Dashed on Desktop, Solid on Mobile) */}
@@ -236,7 +255,7 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setIsQrModalOpen(false);
+            if (e.target === e.currentTarget) closeQrModal();
           }}
           role="dialog"
           aria-modal="true"
@@ -244,7 +263,7 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
           <div className="relative flex w-full max-w-sm flex-col items-center overflow-hidden rounded-2xl bg-white p-6 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <button
               type="button"
-              onClick={() => setIsQrModalOpen(false)}
+              onClick={closeQrModal}
               className="absolute right-4 top-4 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               aria-label="Close modal"
             >

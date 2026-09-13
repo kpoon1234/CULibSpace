@@ -31,16 +31,23 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
   };
 
   useEffect(() => {
+    // Guard: only fetch when modal is actually open
     if (!isOpen) return;
 
+    // Mounted guard: prevents state updates after component unmounts
+    // (avoids React "Can't perform a state update on an unmounted component" race)
+    let isMounted = true;
+
     const fetchHistory = async () => {
+      if (!isMounted) return;
+      setIsLoading(true);
+      setError(null);
+
       try {
-        setIsLoading(true);
-        setError(null);
         const token = getAuthToken();
 
         if (!token) {
-          setError('Please log in to view booking history.');
+          if (isMounted) setError('Please log in to view booking history.');
           return;
         }
 
@@ -56,6 +63,8 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
 
         const json = await res.json();
         const dataList = json?.data ?? json;
+
+        if (!isMounted) return; // Component may have unmounted while fetch was in-flight
 
         if (Array.isArray(dataList)) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,18 +140,23 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
 
           // Sort by startDateTime descending (latest on top)
           formatted.sort((a, b) => b.timestamp - a.timestamp);
-          setHistoryData(formatted);
+          if (isMounted) setHistoryData(formatted);
         } else {
-          setHistoryData([]);
+          if (isMounted) setHistoryData([]);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred');
+        if (isMounted) setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
 
     fetchHistory();
+
+    // Cleanup: mark as unmounted so in-flight fetch doesn't update stale state
+    return () => {
+      isMounted = false;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
