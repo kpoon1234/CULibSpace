@@ -12,7 +12,7 @@ export default function SplitHero() {
 
   return (
     <section className="grid grid-cols-1 min-[860px]:min-h-[480px] min-[860px]:grid-cols-[1.4fr_1fr]">
-      <div className="flex flex-col justify-center gap-5 px-6 py-12 sm:px-10 sm:py-16 lg:pl-16 lg:pr-[1.5cm] xl:pl-24 xl:pr-[1.5cm]">
+      <div className="flex flex-col justify-center gap-4 px-6 pt-10 pb-4 sm:px-10 sm:pt-14 sm:pb-6 lg:pl-16 lg:pr-[1.5cm] lg:pt-16 lg:pb-6 xl:pl-24 xl:pr-[1.5cm]">
         <h1 className="text-5xl leading-[1.05] font-bold tracking-tight text-balance text-gray-900 sm:text-6xl md:text-7xl">
           Book a table, in real time.
         </h1>
