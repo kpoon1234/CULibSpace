@@ -58,40 +58,16 @@ function getZoneLabel(zoneType?: string) {
   }
 }
 
-const SAMPLE_BOOKING: ActiveBookingData = {
-  bookingId: 101,
-  uid: 1,
-  tableId: 101,
-  startDateTime: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  endDateTime: new Date(Date.now() + 130 * 60 * 1000).toISOString(),
-  arriveTime: null,
-  status: 'PENDING',
-  createdAt: new Date().toISOString(),
-  table: {
-    tableId: 101,
-    zoneId: 1,
-    status: 'RESERVED',
-    numberOfSeat: 1,
-    plugCap: 2,
-    hasTvScreen: false,
-    zone: {
-      zoneId: 1,
-      zoneType: 'SILENT',
-    },
-  },
-};
-
 export default function ActiveBookingCard({ initialData }: ActiveBookingCardProps) {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [checkInStatus, setCheckInStatus] = useState<{ ok?: boolean; message?: string } | null>(
     null
   );
-  const [mockCheckedIn, setMockCheckedIn] = useState(false);
 
   const token = typeof window !== 'undefined' ? getAuthToken() : null;
 
-  const { data: bookingData, mutate } = useSWR(
+  const { data: booking, mutate } = useSWR(
     token ? ['activeBooking', token] : null,
     () => fetchActiveBooking(),
     {
@@ -101,38 +77,33 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
     }
   );
 
-  // If real API data exists, use it. Otherwise use sample booking so the UI is visible.
-  const booking = bookingData ?? initialData ?? SAMPLE_BOOKING;
+  // If no token or no active booking returned from /api/bookings/my-active, return null
+  if (!token || !booking) {
+    return null;
+  }
 
   const { table, startDateTime, endDateTime, status, bookingId } = booking;
-  const isCheckedIn = mockCheckedIn || status === 'ACTIVE';
+  const isCheckedIn = status === 'ACTIVE';
 
   async function handleCheckIn() {
     setIsCheckingIn(true);
     setCheckInStatus(null);
     try {
-      if (token && bookingData) {
-        const res = await checkInBooking(bookingId);
-        if (res.ok) {
-          setCheckInStatus({ ok: true, message: 'Check-in successful! Your seat is now active.' });
-          mutate();
-          setTimeout(() => {
-            setIsQrModalOpen(false);
-            setCheckInStatus(null);
-          }, 1500);
-          return;
-        }
-      }
-
-      // Fallback / simulated check-in
-      setTimeout(() => {
-        setMockCheckedIn(true);
-        setCheckInStatus({ ok: true, message: 'Check-in verified! Table #101 is now active.' });
+      const res = await checkInBooking(bookingId);
+      if (res.ok) {
+        setCheckInStatus({ ok: true, message: 'Check-in successful! Your seat is now active.' });
+        mutate();
         setTimeout(() => {
           setIsQrModalOpen(false);
           setCheckInStatus(null);
         }, 1500);
-      }, 800);
+      } else {
+        setCheckInStatus({
+          ok: false,
+          message:
+            res.reason || 'Check-in failed. Please ensure you are within the check-in window.',
+        });
+      }
     } catch {
       setCheckInStatus({ ok: false, message: 'Unable to connect to check-in server.' });
     } finally {
