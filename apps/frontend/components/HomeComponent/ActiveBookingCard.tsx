@@ -113,58 +113,62 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
 
   return (
     <>
-      <div className="mt-3 w-full max-w-[500px] overflow-hidden rounded-xl border border-hairline bg-white/95 p-4 shadow-sm backdrop-blur-sm transition-all hover:shadow-md sm:p-5">
+      <div className="mt-4 w-full max-w-full overflow-hidden rounded-2xl border border-hairline bg-white/95 p-6 shadow-md backdrop-blur-sm transition-all hover:shadow-lg sm:p-7">
         {/* Top bar: Status & Zone */}
-        <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-4">
+          <div className="flex items-center gap-3">
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-semibold ${
                 isCheckedIn
                   ? 'bg-spruce/10 text-spruce'
                   : 'bg-amber-50 text-amber-700 ring-1 ring-amber-600/20'
               }`}
             >
               <span
-                className={`h-1.5 w-1.5 rounded-full ${
+                className={`h-2 w-2 rounded-full ${
                   isCheckedIn ? 'bg-spruce' : 'animate-pulse bg-amber-500'
                 }`}
               />
               {isCheckedIn ? 'Checked In' : 'Pending Check-in'}
             </span>
-            <span className="text-xs font-medium text-gray-500">
+            <span className="text-xs font-medium text-gray-500 sm:text-sm">
               {getZoneLabel(table?.zone?.zoneType)}
             </span>
           </div>
 
-          <span className="text-xs font-semibold text-gray-400">Booking #{bookingId}</span>
+          <span className="text-xs font-semibold text-gray-400 sm:text-sm">
+            Booking #{bookingId}
+          </span>
         </div>
 
         {/* Middle row: Table Name & Timeslot */}
-        <div className="my-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="my-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 sm:text-xl">Table #{table?.tableId}</h3>
-            <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-gray-600">
-              <ClockIcon className="h-3.5 w-3.5 text-cta-primary" />
+            <h3 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
+              Table #{table?.tableId}
+            </h3>
+            <div className="mt-1.5 flex items-center gap-2 text-sm font-medium text-gray-600">
+              <ClockIcon className="h-4.5 w-4.5 text-cta-primary" />
               <span>{formatTimeslot(startDateTime, endDateTime)}</span>
             </div>
           </div>
 
           {/* Amenities Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             <span
               title={`${table?.numberOfSeat} Seats`}
-              className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-1 text-[11px] font-medium text-stone-700"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-stone-100 px-3.5 py-1.5 text-xs font-medium text-stone-700"
             >
-              <SeatIcon className="h-3 w-3 text-stone-500" />
+              <SeatIcon className="h-4 w-4 text-stone-500" />
               <span>{table?.numberOfSeat} Seats</span>
             </span>
 
             {table?.plugCap !== null && table?.plugCap !== undefined && table.plugCap > 0 && (
               <span
                 title={`${table.plugCap} Outlets`}
-                className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-1 text-[11px] font-medium text-stone-700"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-stone-100 px-3.5 py-1.5 text-xs font-medium text-stone-700"
               >
-                <PlugIcon className="h-3 w-3 text-stone-500" />
+                <PlugIcon className="h-4 w-4 text-stone-500" />
                 <span>{table.plugCap} Plugs</span>
               </span>
             )}
@@ -172,9 +176,9 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
             {table?.hasTvScreen && (
               <span
                 title="TV Screen Available"
-                className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-1 text-[11px] font-medium text-stone-700"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-stone-100 px-3.5 py-1.5 text-xs font-medium text-stone-700"
               >
-                <ScreenIcon className="h-3 w-3 text-stone-500" />
+                <ScreenIcon className="h-4 w-4 text-stone-500" />
                 <span>Screen</span>
               </span>
             )}
@@ -182,19 +186,19 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
         </div>
 
         {/* Action Button */}
-        <div className="mt-3 pt-2">
+        <div className="mt-4 pt-1">
           {isCheckedIn ? (
-            <div className="flex items-center justify-center gap-2 rounded-lg bg-spruce/10 py-2.5 text-xs font-medium text-spruce">
-              <CheckIcon className="h-4 w-4" />
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-spruce/10 py-3.5 text-sm font-medium text-spruce">
+              <CheckIcon className="h-5 w-5" />
               <span>Currently in use — Enjoy your study session!</span>
             </div>
           ) : (
             <button
               type="button"
               onClick={() => setIsQrModalOpen(true)}
-              className="group flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-cta-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-cta-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2"
+              className="group flex w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-cta-primary px-5 py-3.5 text-base font-semibold text-white shadow-sm transition-all hover:bg-cta-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2"
             >
-              <QrCodeIcon className="h-4 w-4 transition-transform group-hover:scale-110" />
+              <QrCodeIcon className="h-5 w-5 transition-transform group-hover:scale-110" />
               <span>Scan Table QR to Check-in</span>
             </button>
           )}
