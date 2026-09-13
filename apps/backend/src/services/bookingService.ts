@@ -5,9 +5,35 @@ import {
   BookingStatus,
   TicketStatus,
   SystemConfig,
+  Table,
+  Zone,
+  ZoneType,
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
-import crypto from 'crypto';
+import { randomUUID } from 'crypto';
+
+export interface BookingWithTableAndZone {
+  bookingId: number;
+  uid: number;
+  tableId: number;
+  startDateTime: Date;
+  endDateTime: Date;
+  arriveTime: Date | null;
+  status: BookingStatus;
+  timestamp: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  table: {
+    tableId: number;
+    numberOfSeat: number;
+    plugCap: number | null;
+    hasTvScreen: boolean;
+    zone: {
+      zoneId: number;
+      zoneType: ZoneType;
+    };
+  };
+}
 
 const defaultPrisma = new PrismaClient();
 
@@ -342,7 +368,7 @@ export class BookingService {
         },
       });
 
-      const lockToken = crypto.randomUUID();
+      const lockToken = randomUUID();
       const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
 
       const updated = await prisma.table.updateMany({
@@ -459,3 +485,73 @@ export class BookingService {
     });
   }
 }
+
+/**
+ * Fetch booking history for a user (excluding active bookings)
+ * @param uid User ID
+ * @returns Array of bookings with table and zone information, ordered by startDateTime descending
+ */
+export async function getBookingHistory(uid: number): Promise<BookingWithTableAndZone[]> {
+  // History: bookings that are
+  const now = new Date();
+
+  // History: bookings that are NOT active
+  // Active booking = status in [PENDING, ACTIVE] AND endDateTime > now()
+  // So history = NOT (status in [PENDING, ACTIVE] AND endDateTime > now())
+  // Which is: (status not in [PENDING, ACTIVE]) OR (endDateTime <= now())
+  const bookings = await defaultPrisma.booking.findMany({
+    where: {
+      uid,
+      OR: [
+        { status: { notIn: [BookingStatus.PENDING, BookingStatus.ACTIVE] } },
+        { endDateTime: { lte: now } },
+      ],
+    },
+    include: {
+      table: {
+        include: {
+          zone: true,
+        },
+      },
+    },
+    orderBy: {
+      startDateTime: 'desc',
+    },
+  });
+
+  // Map to our desired shape (though include already gives us nested objects)
+  // We'll just return as is, but we need to cast to our interface.
+  // Prisma's findMany with include returns the nested objects already.
+  return bookings as unknown as BookingWithTableAndZone[];
+}
+
+/**
+ * Fetch the current active booking for a user
+ * @param uid User ID
+ * @returns The active booking with table and zone information, or null if none
+ */
+export async function getActiveBooking(uid: number): Promise<BookingWithTableAndZone | null> {
+  const now = new Date();
+  const booking = await defaultPrisma.booking.findFirst({
+    where: {
+      uid,
+      status: {
+        in: [BookingStatus.PENDING, BookingStatus.ACTIVE],
+      },
+      endDateTime: {
+        gt: now,
+      },
+    },
+    include: {
+      table: {
+        include: {
+          zone: true,
+        },
+      },
+    },
+  });
+
+  return booking as unknown as BookingWithTableAndZone | null;
+}
+
+export default BookingService;
