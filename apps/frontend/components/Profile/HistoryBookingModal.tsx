@@ -90,25 +90,29 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
                     ? 'Common Area'
                     : rawZone || 'Library';
 
-            const rawStatus = String(booking.status || '').toUpperCase();
-            let statusLabel = 'Past';
-            let statusClassName = 'bg-gray-100 text-gray-600';
+            const normalizedStatus = String(booking.status || '')
+              .trim()
+              .toUpperCase()
+              .replace(/[\s_-]/g, '');
 
-            if (rawStatus === 'ACTIVE') {
+            let statusLabel = 'Past';
+            let statusClassName = 'bg-gray-100 text-gray-600 border border-gray-200';
+
+            if (normalizedStatus === 'ACTIVE') {
               statusLabel = 'Active';
-              statusClassName = 'bg-emerald-100 text-emerald-700';
-            } else if (rawStatus === 'PENDING') {
+              statusClassName = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+            } else if (normalizedStatus === 'PENDING') {
               statusLabel = 'Pending';
-              statusClassName = 'bg-amber-100 text-amber-700';
-            } else if (rawStatus === 'CANCELLED') {
-              statusLabel = 'Cancelled';
-              statusClassName = 'bg-rose-100 text-rose-700';
-            } else if (rawStatus === 'NO_SHOW') {
-              statusLabel = 'No Show';
-              statusClassName = 'bg-red-100 text-red-700';
-            } else if (rawStatus === 'COMPLETED') {
+              statusClassName = 'bg-amber-100 text-amber-800 border border-amber-200';
+            } else if (normalizedStatus === 'COMPLETED') {
               statusLabel = 'Completed';
-              statusClassName = 'bg-slate-100 text-slate-700';
+              statusClassName = 'bg-blue-100 text-blue-700 border border-blue-200';
+            } else if (normalizedStatus === 'CANCELLED' || normalizedStatus === 'CANCELED') {
+              statusLabel = 'Cancelled';
+              statusClassName = 'bg-gray-100 text-gray-700 border border-gray-300';
+            } else if (normalizedStatus === 'NOSHOW' || normalizedStatus.includes('SHOW')) {
+              statusLabel = 'No-show';
+              statusClassName = 'bg-red-100 text-red-700 border border-red-200';
             }
 
             return {
