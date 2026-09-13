@@ -40,7 +40,7 @@ export default function Home() {
 
       <section
         aria-labelledby="capabilities-heading"
-        className="px-6 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-24"
+        className="px-6 pt-4 pb-12 sm:px-10 sm:pt-6 sm:pb-16 lg:px-16 lg:pt-6 xl:px-24"
       >
         <SectionHeading
           headingId="capabilities-heading"
