@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import HeroCarousel from './HeroCarousel';
+import ActiveBookingCard from './ActiveBookingCard';
 import { useSyncExternalStore } from 'react';
 import { getAuthSnapshot, subscribeToAuth } from '@/lib/auth';
 
@@ -27,6 +28,9 @@ export default function SplitHero() {
         >
           {storedUser ? 'Browse available zones' : 'Reserve a table now'}
         </Link>
+
+        {/* Active Booking Card (US4-1 / Live Dashboard) */}
+        <ActiveBookingCard />
       </div>
 
       <HeroCarousel />

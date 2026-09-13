@@ -109,3 +109,66 @@ export async function unlockTable(input: UnlockTableInput): Promise<void> {
     // best-effort
   }
 }
+
+export interface ActiveBookingData {
+  bookingId: number;
+  uid: number;
+  tableId: number;
+  startDateTime: string;
+  endDateTime: string;
+  arriveTime: string | null;
+  status: 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+  createdAt: string;
+  table: {
+    tableId: number;
+    zoneId: number;
+    status: string;
+    numberOfSeat: number;
+    plugCap: number | null;
+    hasTvScreen: boolean;
+    zone: {
+      zoneId: number;
+      zoneType: 'SILENT' | 'GROUP' | 'COMMON';
+    };
+  };
+}
+
+/** GET /api/bookings/my-active — retrieves current active/pending reservation for the user. */
+export async function fetchActiveBooking(): Promise<ActiveBookingData | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch(`${API_URL}/api/bookings/my-active`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body?.data as ActiveBookingData) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** POST /api/bookings/:id/check-in — check-in on-site (US4-1). */
+export async function checkInBooking(bookingId: number): Promise<{ ok: boolean; reason?: string }> {
+  const token = getAuthToken();
+  try {
+    const res = await fetch(`${API_URL}/api/bookings/${bookingId}/check-in`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.success) return { ok: true };
+    return { ok: false, reason: body?.error || `Check-in failed (${res.status})` };
+  } catch {
+    return { ok: false, reason: 'Unable to connect to server' };
+  }
+}
