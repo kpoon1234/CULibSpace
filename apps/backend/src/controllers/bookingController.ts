@@ -1,89 +1,52 @@
-import { Request, Response } from 'express';
-import { BookingService } from '../services/bookingService.js';
+import { Request, Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
+import { getBookingHistory, getActiveBooking } from '../services/bookingService.js';
+import BookingService from '../services/bookingService.js';
 
 export class BookingController {
   /**
-   * POST /api/bookings/validate
-   * Pre-validates booking parameters against all US3-1 library rules:
-   * 1. Operating schedule & max duration
-   * 2. User behavior credit score (>= minScoreToBook)
-   * 3. 1-Booking-per-user policy (no overlapping active bookings)
-   * 4. Table availability, maintenance status, and hold-lock
-   * 5. Outside visitor active paid ticket check
+   * GET /api/bookings/my-history
+   * Fetch booking history for the logged-in user
    */
-  static async validate(req: Request, res: Response): Promise<void> {
+  static async getBookingHistory(req: Request, res: Response): Promise<void> {
     try {
       const authReq = req as AuthenticatedRequest;
-      // Extract userId from authenticated session or allow body.userId if provided
-      const userId =
-        authReq.user?.uid ?? (req.body.userId ? parseInt(String(req.body.userId), 10) : undefined);
+      const uid = authReq.user?.uid;
 
-      if (!userId || isNaN(userId)) {
-        res.status(401).json({
-          success: false,
-          error: 'Unauthorized: Valid user session or userId is required',
-        });
+      if (!uid) {
+        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
         return;
       }
 
-      const { tableId, startDateTime, endDateTime, lockToken } = req.body;
-
-      if (!tableId) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing required field: tableId',
-        });
-        return;
-      }
-
-      if (!startDateTime || !endDateTime) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing required fields: startDateTime and endDateTime',
-        });
-        return;
-      }
-
-      const parsedTableId = parseInt(String(tableId), 10);
-      const parsedStart = new Date(startDateTime);
-      const parsedEnd = new Date(endDateTime);
-
-      if (isNaN(parsedTableId)) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid tableId: must be a valid integer',
-        });
-        return;
-      }
-
-      if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid startDateTime or endDateTime format',
-        });
-        return;
-      }
-
-      const result = await BookingService.validateBookingRules({
-        userId,
-        tableId: parsedTableId,
-        startDateTime: parsedStart,
-        endDateTime: parsedEnd,
-        lockToken: lockToken ? String(lockToken) : undefined,
-      });
-
-      res.status(200).json({
-        success: true,
-        data: result,
-      });
+      const history = await getBookingHistory(uid);
+      res.status(200).json({ success: true, data: history });
     } catch (err: any) {
+      console.error('Error fetching booking history:', err);
       const status = err.status || 500;
-      res.status(status).json({
-        success: false,
-        error: err.message || 'Failed to validate booking rules',
-        code: err.code,
-      });
+      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  }
+
+  /**
+   * GET /api/bookings/my-active
+   * Fetch current active booking for the logged-in user
+   */
+  static async getActiveBooking(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const uid = authReq.user?.uid;
+
+      if (!uid) {
+        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
+        return;
+      }
+
+      const activeBooking = await getActiveBooking(uid);
+      res.status(200).json({ success: true, data: activeBooking }); // data can be null
+    } catch (err: any) {
+      console.error('Error fetching active booking:', err);
+      const status = err.status || 500;
+      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
     }
   }
 
@@ -181,4 +144,65 @@ export class BookingController {
       res.status(err.status || 500).json({ success: false, error: err.message, code: err.code });
     }
   }
+
+  /**
+   * Validate booking request using BookingService
+   * POST /api/bookings/validate
+   */
+  static async validate(req: Request, res: Response): Promise<void> {
+    try {
+      // Extract userId from authenticated request or fallback to body (for testing flexibility)
+      const authReq = req as AuthenticatedRequest;
+      const userIdFromAuth = authReq.user?.uid;
+      const userIdFromBody = req.body.userId;
+      const userId = userIdFromAuth ?? userIdFromBody;
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
+        return;
+      }
+
+      const { tableId, startDateTime, endDateTime, lockToken } = req.body;
+
+      // Parse and validate required fields
+      const parsedTableId = parseInt(String(tableId), 10);
+      const parsedStart = startDateTime ? new Date(startDateTime) : undefined;
+      const parsedEnd = endDateTime ? new Date(endDateTime) : undefined;
+
+      if (
+        isNaN(parsedTableId) ||
+        !parsedStart ||
+        !parsedEnd ||
+        isNaN(parsedStart.getTime()) ||
+        isNaN(parsedEnd.getTime())
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing or invalid required fields: tableId, startDateTime, endDateTime',
+        });
+        return;
+      }
+
+      // Call the service validation method
+      const validationResult = await BookingService.validateBookingRules({
+        userId: userId,
+        tableId: parsedTableId,
+        startDateTime: parsedStart,
+        endDateTime: parsedEnd,
+        lockToken: lockToken ?? undefined, // lockToken is optional in the service
+      });
+
+      // Return success response with validation data
+      res.status(200).json({ success: true, data: validationResult });
+    } catch (err: any) {
+      // Handle validation errors from the service
+      res.status(err.status || 500).json({
+        success: false,
+        error: err.message || 'Internal server error',
+        code: err.code || 'VALIDATION_ERROR',
+      });
+    }
+  }
 }
+
+export default BookingController;
