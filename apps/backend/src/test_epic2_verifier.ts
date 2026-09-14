@@ -214,10 +214,10 @@ async function runEpic2Verification() {
   console.log('\n📋 US2-3: Filter Tables by Zone & Amenities');
 
   {
-    let receivedFilters: LayoutFilters | null = null;
+    const filterContext: { receivedFilters: LayoutFilters | null } = { receivedFilters: null };
     const originalGet = LayoutService.getLayoutWithStatus;
     LayoutService.getLayoutWithStatus = async (filters: LayoutFilters) => {
-      receivedFilters = filters;
+      filterContext.receivedFilters = filters;
       return [];
     };
 
@@ -234,12 +234,18 @@ async function runEpic2Verification() {
     await LayoutController.getLayout(req, res as any);
 
     assert(
-      receivedFilters?.zoneType === ZoneType.SILENT,
+      filterContext.receivedFilters?.zoneType === ZoneType.SILENT,
       'US2-3.1: zoneType filter mapped to ZoneType.SILENT'
     );
-    assert(receivedFilters?.plugCap === 2, 'US2-3.1: plugCap filter parsed as number');
-    assert(receivedFilters?.hasTvScreen === true, 'US2-3.1: hasTvScreen parsed as boolean');
-    assert(receivedFilters?.minSeats === 4, 'US2-3.1: minSeats parsed as number');
+    assert(
+      filterContext.receivedFilters?.plugCap === 2,
+      'US2-3.1: plugCap filter parsed as number'
+    );
+    assert(
+      filterContext.receivedFilters?.hasTvScreen === true,
+      'US2-3.1: hasTvScreen parsed as boolean'
+    );
+    assert(filterContext.receivedFilters?.minSeats === 4, 'US2-3.1: minSeats parsed as number');
 
     // Case 2: No tables match filter criteria -> returns empty array with 200 OK (not error)
     assert(res.statusCode === 200, 'US2-3.2: Empty match query returns HTTP 200 OK');
@@ -253,9 +259,18 @@ async function runEpic2Verification() {
     const resetRes = createMockRes();
     await LayoutController.getLayout(resetReq, resetRes as any);
 
-    assert(receivedFilters?.zoneType === undefined, 'US2-3.3: Reset filters clears zoneType');
-    assert(receivedFilters?.plugCap === undefined, 'US2-3.3: Reset filters clears plugCap');
-    assert(receivedFilters?.hasTvScreen === undefined, 'US2-3.3: Reset filters clears hasTvScreen');
+    assert(
+      filterContext.receivedFilters?.zoneType === undefined,
+      'US2-3.3: Reset filters clears zoneType'
+    );
+    assert(
+      filterContext.receivedFilters?.plugCap === undefined,
+      'US2-3.3: Reset filters clears plugCap'
+    );
+    assert(
+      filterContext.receivedFilters?.hasTvScreen === undefined,
+      'US2-3.3: Reset filters clears hasTvScreen'
+    );
 
     LayoutService.getLayoutWithStatus = originalGet;
   }
