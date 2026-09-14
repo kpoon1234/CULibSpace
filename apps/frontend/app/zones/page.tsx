@@ -24,7 +24,7 @@ export default function ZonesPreviewPage() {
   }, [token, router]);
 
   if (!token) return null;
-  const user = getStoredUser();
+  const user = typeof window !== 'undefined' ? getStoredUser() : null;
   if (user && user.role !== 'ADMIN' && user.isProfileComplete === false) return null;
 
   return (

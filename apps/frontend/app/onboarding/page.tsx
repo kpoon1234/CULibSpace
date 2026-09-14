@@ -11,10 +11,21 @@ export default function OnboardingPage() {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
 
-  const storedUser = getStoredUser();
-  const [firstname, setFirstname] = useState(storedUser?.firstname || '');
-  const [lastname, setLastname] = useState(storedUser?.lastname || '');
-  const [phone, setPhone] = useState(storedUser?.phone || '');
+  const [firstname, setFirstname] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const su = getStoredUser();
+    return su?.firstname || '';
+  });
+  const [lastname, setLastname] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const su = getStoredUser();
+    return su?.lastname || '';
+  });
+  const [phone, setPhone] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const su = getStoredUser();
+    return su?.phone || '';
+  });
   const [identityType, setIdentityType] = useState<IdentityType>('THAI');
   const [identityValue, setIdentityValue] = useState('');
   const [hasSubmitted, setHasSubmitted] = useState(false);
