@@ -72,6 +72,12 @@ export class LayoutService {
           }
         }
 
+        const bookedIntervals = table.bookings.map((b) => ({
+          startDateTime: b.startDateTime.toISOString(),
+          endDateTime: b.endDateTime.toISOString(),
+          status: b.status,
+        }));
+
         // ถอด bookings และ lockedUntil ออกเพื่อไม่ให้ข้อมูลล้นกลับไปที่ Frontend
         const { bookings, lockedUntil, status, ...tableData } = table;
 
@@ -79,6 +85,7 @@ export class LayoutService {
           ...tableData,
           status: dynamicStatus, // แทนที่ด้วยสถานะไดนามิก
           isLocked: isHoldLocked,
+          bookedIntervals, // US2-4 / AC 2.4.3: ข้อมูลช่วงเวลาสำหรับ Timetable preview
         };
       }),
     }));

@@ -108,6 +108,8 @@ export interface SeatStatusTable {
   status: TableStatus;
   /** True while a temporary booking hold-lock is active on the table. */
   isLocked: boolean;
+  /** Time intervals booked for this table during the browsing window (AC 2.4.3). */
+  bookedIntervals?: Array<{ startDateTime: string; endDateTime: string; status: string }>;
 }
 
 export interface SeatStatusZone {
@@ -126,6 +128,7 @@ export interface RawLayoutTable {
   hasTvScreen: boolean;
   status: TableStatus;
   isLocked?: boolean;
+  bookedIntervals?: Array<{ startDateTime: string; endDateTime: string; status: string }>;
   // optional geometry — filled by ./autoLayout when absent
   code?: string;
   shape?: TableShapeKind;
@@ -180,6 +183,8 @@ export interface FloorPlanTable extends TableLayout {
    *  on the plan — drawn dimmed and non-interactive — so the space still reads
    *  as occupied by a table you simply can't pick right now. */
   matchesFilter: boolean;
+  /** Time intervals booked for this table during the browsing window (AC 2.4.3). */
+  bookedIntervals?: Array<{ startDateTime: string; endDateTime: string; status: string }>;
 }
 
 export interface FloorPlanZone {
