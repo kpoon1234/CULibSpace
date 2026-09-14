@@ -56,7 +56,7 @@ export const STATUS_STYLE: Record<TableStatus, StatusStyle> = {
     stroke: 'var(--stone-900)',
     label: 'var(--stone-100)',
     text: 'Closed',
-    disabled: true,
+    disabled: false,
   },
 };
 
