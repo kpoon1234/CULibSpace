@@ -10,7 +10,9 @@ type AdminTab = 'seats' | 'scores' | 'issues' | 'schedules';
 export default function AdminDashboardPage() {
   const router = useRouter();
   const token = useSyncExternalStore(subscribeToAuth, getAuthToken, () => null);
-  const [adminUser, setAdminUser] = useState<AuthUser | null>(null);
+  const [adminUser] = useState<AuthUser | null>(() =>
+    typeof window !== 'undefined' ? getStoredUser() : null
+  );
   const [activeTab, setActiveTab] = useState<AdminTab>('seats');
 
   // Interactive mock state for admin seat management demonstration
@@ -39,7 +41,6 @@ export default function AdminDashboardPage() {
       router.replace('/login');
       return;
     }
-    setAdminUser(user);
   }, [token, router]);
 
   if (!token || !adminUser || adminUser.role !== 'ADMIN') {
