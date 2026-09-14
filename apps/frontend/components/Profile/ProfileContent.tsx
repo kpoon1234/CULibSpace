@@ -13,7 +13,7 @@ type ProfileContentProps = {
 
 export default function ProfileContent({ onClose }: ProfileContentProps) {
   const router = useRouter();
-  const { openHistory, closeProfile } = useProfileModal();
+  const { openBookingHistory, closeProfile } = useProfileModal();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [firstname, setFirstname] = useState('');
@@ -252,7 +252,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
                 type="button"
                 onClick={() => {
                   closeProfile();
-                  openHistory();
+                  openBookingHistory();
                 }}
                 className="cursor-pointer text-xs text-gray-400 hover:text-rose-600 hover:underline focus:outline-none"
               >
