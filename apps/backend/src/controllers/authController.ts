@@ -148,9 +148,28 @@ export class AuthController {
       res.status(200).json({ success: true, message: 'Profile completed successfully', ...result });
     } catch (err: any) {
       if (err.code === 'P2002') {
+        const target = Array.isArray(err.meta?.target)
+          ? err.meta.target.join(' ')
+          : String(err.meta?.target || '');
+        if (target.includes('citizenId') || target.includes('passportId')) {
+          res.status(409).json({
+            success: false,
+            field: 'identity',
+            error: 'An account with this ID already exists.',
+          });
+          return;
+        }
+        if (target.includes('phone')) {
+          res.status(409).json({
+            success: false,
+            field: 'phone',
+            error: 'This phone number is already registered to another account.',
+          });
+          return;
+        }
         res.status(409).json({
           success: false,
-          error: 'This phone number or identity document is already in use',
+          error: 'An account with this ID already exists.',
         });
         return;
       }

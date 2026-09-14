@@ -23,7 +23,11 @@ export class ProfileController {
       res.status(200).json({ success: true, message: 'Profile updated successfully', ...result });
     } catch (err: any) {
       const status = err.status || 500;
-      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
+      res.status(status).json({
+        success: false,
+        status,
+        error: err.message || 'Internal server error',
+      });
     }
   }
 

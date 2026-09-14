@@ -89,6 +89,10 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
               : '—';
 
             const tableId = booking.table?.tableId || booking.tableId || 'Unknown Table';
+            const seatCount = booking.table?.numberOfSeat;
+            const seatInfo = seatCount
+              ? ` · Seat #${tableId} (${seatCount} seats)`
+              : ` · Seat #${tableId}`;
             const rawZone = booking.table?.zone?.zoneType || booking.table?.zone?.type;
             const zone =
               rawZone === 'SILENT'
@@ -131,7 +135,7 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
               date: dateStr,
               start: startStr,
               end: endStr,
-              tableDetails: `Table #${tableId} · ${zone}`,
+              tableDetails: `Table #${tableId}${seatInfo} · ${zone}`,
               status: statusLabel,
               statusClassName,
               timestamp: startDt.getTime(),

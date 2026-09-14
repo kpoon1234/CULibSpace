@@ -57,7 +57,8 @@ export class LayoutService {
       ...zone,
       tables: zone.tables.map((table) => {
         let dynamicStatus: TableStatus = table.status;
-        const isHoldLocked = table.lockedUntil ? table.lockedUntil > targetStart : false; // เช็ก Hold-Lock
+        const now = new Date();
+        const isHoldLocked = table.lockedUntil ? table.lockedUntil > now : false; // เช็ก 5-min Hold-Lock ปัจจุบัน (AC 3.2.1 / AC 3.2.2)
 
         // คำนวณสถานะใหม่ หากโต๊ะไม่ได้ปิดซ่อมบำรุง
         if (table.status !== TableStatus.CLOSED) {
@@ -72,6 +73,12 @@ export class LayoutService {
           }
         }
 
+        const bookedIntervals = table.bookings.map((b) => ({
+          startDateTime: b.startDateTime.toISOString(),
+          endDateTime: b.endDateTime.toISOString(),
+          status: b.status,
+        }));
+
         // ถอด bookings และ lockedUntil ออกเพื่อไม่ให้ข้อมูลล้นกลับไปที่ Frontend
         const { bookings, lockedUntil, status, ...tableData } = table;
 
@@ -79,6 +86,7 @@ export class LayoutService {
           ...tableData,
           status: dynamicStatus, // แทนที่ด้วยสถานะไดนามิก
           isLocked: isHoldLocked,
+          bookedIntervals, // US2-4 / AC 2.4.3: ข้อมูลช่วงเวลาสำหรับ Timetable preview
         };
       }),
     }));

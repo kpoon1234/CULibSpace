@@ -13,15 +13,13 @@ type ProfileContentProps = {
 
 export default function ProfileContent({ onClose }: ProfileContentProps) {
   const router = useRouter();
-  const { openHistory, closeProfile } = useProfileModal();
+  const { openHistory, openBookingHistory, closeProfile } = useProfileModal();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [firstname, setFirstname] = useState('');
-  const [lastname, setLastname] = useState('');
   const [phone, setPhone] = useState('');
-  // Tracks the last-saved values so the submit button only shows up once
-  // something actually differs from them.
-  const [savedValues, setSavedValues] = useState({ firstname: '', lastname: '', phone: '' });
+  // Tracks the last-saved phone value so the submit button only shows up once
+  // something actually differs from it.
+  const [savedPhone, setSavedPhone] = useState('');
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -35,9 +33,12 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
     }
 
     async function loadUser() {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/auth/me`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (!res.ok) {
         router.replace('/login');
@@ -46,23 +47,14 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
       const data = (await res.json()) as { user: AuthUser };
       setUser(data.user);
-      setFirstname(data.user.firstname);
-      setLastname(data.user.lastname);
       setPhone(data.user.phone || '');
-      setSavedValues({
-        firstname: data.user.firstname,
-        lastname: data.user.lastname,
-        phone: data.user.phone || '',
-      });
+      setSavedPhone(data.user.phone || '');
     }
 
     loadUser().catch(() => router.replace('/login'));
   }, [router]);
 
-  const hasChanges =
-    firstname !== savedValues.firstname ||
-    lastname !== savedValues.lastname ||
-    phone !== savedValues.phone;
+  const hasChanges = phone !== savedPhone;
 
   function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -77,12 +69,8 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
     setError('');
     setNotice('');
-    if (!firstname.trim() || !lastname.trim()) {
-      setError('First name and last name cannot be empty.');
-      return;
-    }
     if (!/^\d{10}$/.test(phone)) {
-      setError('Please enter a 10-digit phone number.');
+      setError('Please enter a valid 10-digit phone number.');
       return;
     }
 
@@ -91,14 +79,17 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       // Photo upload is still UI-only: the API can set an imageUrl string,
       // but there's no file-storage endpoint yet to turn the local file the
       // user picked into a hosted URL, so it can't be sent along here.
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/profile`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ firstname, lastname, phone }),
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/profile`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ phone }),
+        }
+      );
 
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -109,11 +100,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       // Update stored auth user to reflect profile changes
       saveAuth(token, data.user);
       setUser(data.user);
-      setSavedValues({
-        firstname: data.user.firstname,
-        lastname: data.user.lastname,
-        phone: data.user.phone || '',
-      });
+      setSavedPhone(data.user.phone || '');
       setNotice('Profile updated.');
     } catch {
       setError('Unable to connect to the server. Please try again.');
@@ -187,24 +174,18 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="block text-sm font-medium text-gray-700">
+            <div className="block text-sm font-medium text-gray-700">
               First name
-              <input
-                value={firstname}
-                onChange={(event) => setFirstname(event.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black"
-                required
-              />
-            </label>
-            <label className="block text-sm font-medium text-gray-700">
+              <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700">
+                {user.firstname}
+              </p>
+            </div>
+            <div className="block text-sm font-medium text-gray-700">
               Last name
-              <input
-                value={lastname}
-                onChange={(event) => setLastname(event.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black"
-                required
-              />
-            </label>
+              <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700">
+                {user.lastname}
+              </p>
+            </div>
             <div className="block text-sm font-medium text-gray-700">
               User Type
               <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">
@@ -212,13 +193,13 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               </p>
             </div>
             <label className="block text-sm font-medium text-gray-700">
-              Phone
+              Contact Phone Number
               <input
                 value={phone}
                 onChange={(event) => setPhone(event.target.value.replace(/\D/g, ''))}
                 inputMode="numeric"
                 maxLength={10}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
                 placeholder="0812345678"
                 required
               />
@@ -267,6 +248,20 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               <span className="absolute inset-0 flex items-center justify-end pr-2 text-xs font-semibold text-white">
                 {score}
               </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between text-sm font-medium text-gray-700">
+              <span>Reservation History</span>
+              <button
+                type="button"
+                onClick={() => {
+                  closeProfile();
+                  openBookingHistory();
+                }}
+                className="cursor-pointer text-xs text-gray-400 hover:text-rose-600 hover:underline focus:outline-none"
+              >
+                [ view all bookings ]
+              </button>
             </div>
           </div>
         </div>
