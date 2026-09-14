@@ -120,6 +120,21 @@ function TableShapeBase({ table, selected, filteredOut, onSelect }: TableShapePr
         {table.code}
       </text>
 
+      {/* Facility indicator: Power Plug (FR-2.1 / AC 2.1.1) */}
+      {Boolean(table.plugCap && table.plugCap > 0) && (
+        <g transform={`translate(${x + 6}, ${y + 6}) scale(0.6)`} style={{ pointerEvents: 'none' }}>
+          <title>{`${table.plugCap} power ${table.plugCap === 1 ? 'outlet' : 'outlets'}`}</title>
+          <path
+            d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4"
+            fill="none"
+            stroke={table.status === 'Closed' ? 'var(--stone-300)' : 'var(--stone-600)'}
+            strokeWidth={2.2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+      )}
+
       {table.isLocked && table.status === 'Reserved' && (
         <circle
           cx={x + width - 8}
