@@ -57,7 +57,8 @@ export class LayoutService {
       ...zone,
       tables: zone.tables.map((table) => {
         let dynamicStatus: TableStatus = table.status;
-        const isHoldLocked = table.lockedUntil ? table.lockedUntil > targetStart : false; // เช็ก Hold-Lock
+        const now = new Date();
+        const isHoldLocked = table.lockedUntil ? table.lockedUntil > now : false; // เช็ก 5-min Hold-Lock ปัจจุบัน (AC 3.2.1 / AC 3.2.2)
 
         // คำนวณสถานะใหม่ หากโต๊ะไม่ได้ปิดซ่อมบำรุง
         if (table.status !== TableStatus.CLOSED) {
