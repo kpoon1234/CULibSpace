@@ -232,6 +232,7 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
               <button
                 type="button"
                 onClick={() => setIsQrModalOpen(true)}
+                aria-label="Scan Table QR to Check-in"
                 className="group relative flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-cta-primary to-cta-primary-hover p-4 text-center text-white shadow-md transition-all hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 active:scale-95 sm:w-auto sm:min-w-[140px]"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/20 shadow-inner transition-transform group-hover:scale-110">
@@ -242,7 +243,7 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
                   <span className="text-xs font-extrabold tracking-wide uppercase">
                     Scan Table QR
                   </span>
-                  <span className="mt-0.5 text-[10px] text-white/80 font-medium">to Check in</span>
+                  <span className="mt-0.5 text-[10px] text-white/80 font-medium">to Check-in</span>
                 </div>
               </button>
             )}

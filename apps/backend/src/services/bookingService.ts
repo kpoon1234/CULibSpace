@@ -508,25 +508,14 @@ export class BookingService {
 }
 
 /**
- * Fetch booking history for a user (excluding active bookings)
+ * Fetch booking history for a user (including active, completed, cancelled, no-show) - AC 3.3.1 / FR-3.5
  * @param uid User ID
  * @returns Array of bookings with table and zone information, ordered by startDateTime descending
  */
 export async function getBookingHistory(uid: number): Promise<BookingWithTableAndZone[]> {
-  // History: bookings that are
-  const now = new Date();
-
-  // History: bookings that are NOT active
-  // Active booking = status in [PENDING, ACTIVE] AND endDateTime > now()
-  // So history = NOT (status in [PENDING, ACTIVE] AND endDateTime > now())
-  // Which is: (status not in [PENDING, ACTIVE]) OR (endDateTime <= now())
   const bookings = await defaultPrisma.booking.findMany({
     where: {
       uid,
-      OR: [
-        { status: { notIn: [BookingStatus.PENDING, BookingStatus.ACTIVE] } },
-        { endDateTime: { lte: now } },
-      ],
     },
     include: {
       table: {

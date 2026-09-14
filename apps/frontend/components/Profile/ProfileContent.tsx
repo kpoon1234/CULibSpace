@@ -13,7 +13,7 @@ type ProfileContentProps = {
 
 export default function ProfileContent({ onClose }: ProfileContentProps) {
   const router = useRouter();
-  const { openHistory, closeProfile } = useProfileModal();
+  const { openHistory, openBookingHistory, closeProfile } = useProfileModal();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [phone, setPhone] = useState('');
@@ -248,6 +248,20 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               <span className="absolute inset-0 flex items-center justify-end pr-2 text-xs font-semibold text-white">
                 {score}
               </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between text-sm font-medium text-gray-700">
+              <span>Reservation History</span>
+              <button
+                type="button"
+                onClick={() => {
+                  closeProfile();
+                  openBookingHistory();
+                }}
+                className="cursor-pointer text-xs text-gray-400 hover:text-rose-600 hover:underline focus:outline-none"
+              >
+                [ view all bookings ]
+              </button>
             </div>
           </div>
         </div>
