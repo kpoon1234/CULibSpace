@@ -10,14 +10,13 @@ export type ProfileField = {
 };
 
 /**
- * Main profile grid (per Figma "Profile2"): First name/Last name/Phone are
- * editable, User Type/Email stay locked. Matches the team decision that
- * expanded editability beyond phone-only (US1-4 follow-up).
+ * Main profile grid (US1-4 / FR-1.4): Name, Student/Staff ID, User Type, and
+ * Email are displayed as read-only. Only Contact Phone Number can be edited.
  */
 export function getProfileFields(user: AuthUser): ProfileField[] {
   return [
-    { key: 'firstname', label: 'First name', value: user.firstname, editable: true },
-    { key: 'lastname', label: 'Last name', value: user.lastname, editable: true },
+    { key: 'firstname', label: 'First name', value: user.firstname, editable: false },
+    { key: 'lastname', label: 'Last name', value: user.lastname, editable: false },
     { key: 'userType', label: 'User Type', value: user.userType || '', editable: false },
     { key: 'phone', label: 'Phone', value: user.phone || '', editable: true },
     { key: 'email', label: 'Email', value: user.email, editable: false },
