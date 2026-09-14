@@ -162,6 +162,7 @@ export class BookingService {
           lastname: true,
           behaviourScore: true,
           userType: true,
+          isProfileComplete: true,
           outsideUser: {
             include: {
               tickets: {
@@ -181,6 +182,14 @@ export class BookingService {
           status: 404,
           code: 'USER_NOT_FOUND',
           message: `User with ID ${userId} not found`,
+        } as BookingValidationError;
+      }
+
+      if (!user.isProfileComplete) {
+        throw {
+          status: 403,
+          code: 'PROFILE_INCOMPLETE',
+          message: 'Please complete your profile onboarding before making a reservation',
         } as BookingValidationError;
       }
 
@@ -333,6 +342,18 @@ export class BookingService {
     prisma: any = defaultPrisma
   ) {
     return await this.withTimeout(async () => {
+      const user = await prisma.user.findUnique({
+        where: { uid: userId },
+        select: { isProfileComplete: true },
+      });
+      if (user && !user.isProfileComplete) {
+        throw {
+          status: 403,
+          code: 'PROFILE_INCOMPLETE',
+          message: 'Please complete your profile onboarding before making a reservation',
+        };
+      }
+
       const now = new Date();
 
       if (startDateTime && endDateTime) {

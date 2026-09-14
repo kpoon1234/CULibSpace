@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuthToken, subscribeToAuth } from '@/lib/auth';
+import { getAuthToken, getStoredUser, subscribeToAuth } from '@/lib/auth';
 import { FloorPlanView } from '@/components/FloorPlan';
 
 // Route for the 2D floor-plan UI (FR-2). Data comes from GET /api/tables/layout
@@ -15,10 +15,17 @@ export default function ZonesPreviewPage() {
   useEffect(() => {
     if (!token) {
       router.replace('/login');
+      return;
+    }
+    const user = getStoredUser();
+    if (user && user.role !== 'ADMIN' && user.isProfileComplete === false) {
+      router.replace('/onboarding');
     }
   }, [token, router]);
 
   if (!token) return null;
+  const user = getStoredUser();
+  if (user && user.role !== 'ADMIN' && user.isProfileComplete === false) return null;
 
   return (
     <div className="px-6 py-10 sm:px-10 lg:px-16 xl:px-24">

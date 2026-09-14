@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
 import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
@@ -22,6 +22,14 @@ export default function TopMenu() {
       return null;
     }
   }, [storedUser]);
+
+  useEffect(() => {
+    if (user && user.role !== 'ADMIN' && user.isProfileComplete === false) {
+      if (pathname !== '/onboarding' && pathname !== '/login' && !pathname.startsWith('/auth')) {
+        router.replace('/onboarding');
+      }
+    }
+  }, [user, pathname, router]);
 
   async function logout() {
     try {
