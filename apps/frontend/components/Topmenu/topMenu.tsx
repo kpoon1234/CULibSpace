@@ -65,112 +65,135 @@ export default function TopMenu() {
 
           <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4">
             {user ? (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsDropdownOpen((open) => !open)}
-                  aria-haspopup="menu"
-                  aria-expanded={isDropdownOpen}
-                  aria-label={`Open menu for ${user.firstname}`}
-                  className={`flex min-w-0 items-center gap-2.5 rounded-full py-1 pl-1.5 pr-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
-                    isDropdownOpen ? 'bg-chula-pink-hover' : 'hover:bg-chula-pink-hover'
-                  } cursor-pointer`}
-                >
-                  <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full ring-2 ring-hairline">
-                    {user.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={user.imageUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="flex h-full w-full items-center justify-center bg-chula-pink-hover text-sm font-semibold text-ink">
-                        {user.firstname.charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                  </span>
-
-                  <span className="flex min-w-0 flex-col justify-center text-left">
-                    <span className="truncate text-sm font-semibold text-ink">
-                      {user.firstname}
-                    </span>
-                    <span className="hidden text-[11px] font-medium uppercase tracking-wide text-ink/70 sm:block">
-                      {user.role}
-                    </span>
-                  </span>
-                  <svg
-                    className={`ml-1 h-4 w-4 shrink-0 text-ink transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    aria-hidden="true"
+              <div className="flex items-center gap-2 sm:gap-3">
+                {user.role === 'ADMIN' && (
+                  <Link
+                    href="/admin"
+                    className="hidden rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-1.5 text-xs font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white sm:block"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </button>
-
-                {isDropdownOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setIsDropdownOpen(false)}
-                      aria-hidden="true"
-                    />
-
-                    <div
-                      role="menu"
-                      className="absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-md border border-hairline bg-white py-1 shadow-lg"
-                    >
-                      <button
-                        role="menuitem"
-                        type="button"
-                        onClick={() => {
-                          openProfile();
-                          setIsDropdownOpen(false);
-                        }}
-                        className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
-                      >
-                        Profile
-                      </button>
-                      <button
-                        role="menuitem"
-                        type="button"
-                        onClick={() => {
-                          openBookingHistory();
-                          setIsDropdownOpen(false);
-                        }}
-                        className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
-                      >
-                        Booking History
-                      </button>
-                      <button
-                        role="menuitem"
-                        type="button"
-                        onClick={() => {
-                          openHistory();
-                          setIsDropdownOpen(false);
-                        }}
-                        className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
-                      >
-                        History Log
-                      </button>
-                      <hr className="my-1 border-hairline" />
-                      <button
-                        role="menuitem"
-                        type="button"
-                        onClick={() => {
-                          logout();
-                          setIsDropdownOpen(false);
-                        }}
-                        className="block w-full px-4 py-2 text-left text-sm font-medium text-chula-pink hover:bg-chula-pink/10"
-                      >
-                        Log Out
-                      </button>
-                    </div>
-                  </>
+                    Admin Portal
+                  </Link>
                 )}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsDropdownOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={isDropdownOpen}
+                    aria-label={`Open menu for ${user.firstname}`}
+                    className={`flex min-w-0 items-center gap-2.5 rounded-full py-1 pl-1.5 pr-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
+                      isDropdownOpen ? 'bg-chula-pink-hover' : 'hover:bg-chula-pink-hover'
+                    } cursor-pointer`}
+                  >
+                    <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full ring-2 ring-hairline">
+                      {user.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={user.imageUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center bg-chula-pink-hover text-sm font-semibold text-ink">
+                          {user.firstname.charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </span>
+
+                    <span className="flex min-w-0 flex-col justify-center text-left">
+                      <span className="truncate text-sm font-semibold text-ink">
+                        {user.firstname}
+                      </span>
+                      <span className="hidden text-[11px] font-medium uppercase tracking-wide text-ink/70 sm:block">
+                        {user.role}
+                      </span>
+                    </span>
+                    <svg
+                      className={`ml-1 h-4 w-4 shrink-0 text-ink transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </button>
+
+                  {isDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setIsDropdownOpen(false)}
+                        aria-hidden="true"
+                      />
+
+                      <div
+                        role="menu"
+                        className="absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-md border border-hairline bg-white py-1 shadow-lg"
+                      >
+                        {user.role === 'ADMIN' && (
+                          <button
+                            role="menuitem"
+                            type="button"
+                            onClick={() => {
+                              router.push('/admin');
+                              setIsDropdownOpen(false);
+                            }}
+                            className="block w-full px-4 py-2 text-left text-sm font-semibold text-chula-pink hover:bg-chula-pink/10"
+                          >
+                            Admin Dashboard
+                          </button>
+                        )}
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            openProfile();
+                            setIsDropdownOpen(false);
+                          }}
+                          className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
+                        >
+                          Profile
+                        </button>
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            openBookingHistory();
+                            setIsDropdownOpen(false);
+                          }}
+                          className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
+                        >
+                          Booking History
+                        </button>
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            openHistory();
+                            setIsDropdownOpen(false);
+                          }}
+                          className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
+                        >
+                          History Log
+                        </button>
+                        <hr className="my-1 border-hairline" />
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            logout();
+                            setIsDropdownOpen(false);
+                          }}
+                          className="block w-full px-4 py-2 text-left text-sm font-medium text-chula-pink hover:bg-chula-pink/10"
+                        >
+                          Log Out
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             ) : (
               <TopMenuItem label="Log In" href="/login" isActive={pathname === '/login'} />

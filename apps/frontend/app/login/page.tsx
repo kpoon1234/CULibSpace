@@ -24,7 +24,11 @@ function LoginPageContent() {
     const token = getAuthToken();
     const user = getStoredUser();
     if (token && user) {
-      router.replace(user.isProfileComplete ? '/' : '/onboarding');
+      if (user.role === 'ADMIN') {
+        router.replace('/admin');
+      } else {
+        router.replace(user.isProfileComplete ? '/' : '/onboarding');
+      }
     }
   }, [router]);
 
@@ -90,7 +94,7 @@ function LoginPageContent() {
         return;
       }
       saveAuth(result.token, result.user);
-      router.replace('/');
+      router.replace('/admin');
     } catch {
       setPasswordError(true);
       setPasswordErrorMessage('Unable to connect to the server.');
