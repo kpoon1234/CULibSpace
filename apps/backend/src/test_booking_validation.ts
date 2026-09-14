@@ -71,6 +71,7 @@ async function runTests() {
     lastname: 'Deejai',
     behaviourScore: 100.0,
     userType: UserType.UNIVERSITY,
+    isProfileComplete: true,
     outsideUser: null,
   };
 
@@ -265,6 +266,7 @@ async function runTests() {
       ...defaultTable,
       lockedUntil: new Date(Date.now() + 4 * 60 * 1000),
       lockToken,
+      lockedByUid: 101,
     };
     const mockPrisma = createMockPrisma({ user: defaultUser, table: lockedTable });
     const res = await BookingService.validateBookingRules(
@@ -280,6 +282,34 @@ async function runTests() {
     assert(res.valid === true, 'Case 9: Matching lock token passes successfully');
   } catch (err: any) {
     assert(false, `Case 9: Matching lock token should PASS, failed: ${err.message}`);
+  }
+
+  // Case 9b: Table hold-locked with matching token but different lockedByUid -> FAILS 403
+  try {
+    const lockToken = 'my-valid-token-123';
+    const lockedTable = {
+      ...defaultTable,
+      lockedUntil: new Date(Date.now() + 4 * 60 * 1000),
+      lockToken,
+      lockedByUid: 999, // Another user
+    };
+    const mockPrisma = createMockPrisma({ user: defaultUser, table: lockedTable });
+    await BookingService.validateBookingRules(
+      {
+        userId: 101,
+        tableId: 1,
+        startDateTime: validStart,
+        endDateTime: validEnd,
+        lockToken,
+      },
+      mockPrisma
+    );
+    assert(false, 'Case 9b: Stolen lock token should fail');
+  } catch (err: any) {
+    assert(
+      err.status === 403 && err.code === 'UNAUTHORIZED_LOCK_OWNER',
+      'Case 9b: Mismatched lock owner throws 403 UNAUTHORIZED_LOCK_OWNER'
+    );
   }
 
   // ==========================================

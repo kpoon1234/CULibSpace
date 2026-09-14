@@ -203,28 +203,7 @@ export class BookingService {
       }
 
       // ==========================================
-      // 3. 1-Booking-Per-User Policy (US3-1 / FR-3.2)
-      // ==========================================
-      const userOverlap = await prisma.booking.findFirst({
-        where: {
-          uid: userId,
-          status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
-          startDateTime: { lt: endDateTime },
-          endDateTime: { gt: startDateTime },
-        },
-      });
-
-      if (userOverlap) {
-        throw {
-          status: 409,
-          code: 'USER_BOOKING_OVERLAP',
-          message:
-            'You already have an active or pending reservation during this time window (1-booking-per-user policy)',
-        } as BookingValidationError;
-      }
-
-      // ==========================================
-      // 4. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
+      // 3. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
       // ==========================================
       const table = await prisma.table.findUnique({
         where: { tableId },
@@ -246,7 +225,7 @@ export class BookingService {
         } as BookingValidationError;
       }
 
-      // Check if table is currently locked by another user (5-min Hold Lock)
+      // Check if table is currently locked by another user (5-min Hold Lock - AC 3.2.1)
       const now = new Date();
       const isHoldLocked = table.lockedUntil && new Date(table.lockedUntil) > now;
       if (isHoldLocked) {
@@ -260,8 +239,8 @@ export class BookingService {
           } as BookingValidationError;
         }
 
-        // Check sneaky token
-        if (table.lockedByUid !== userId) {
+        // Check sneaky token (only if lockedByUid is recorded)
+        if (table.lockedByUid != null && table.lockedByUid !== userId) {
           throw {
             status: 403,
             code: 'UNAUTHORIZED_LOCK_OWNER',
@@ -286,6 +265,27 @@ export class BookingService {
           code: 'TABLE_ALREADY_BOOKED',
           message:
             'This table is already reserved by another user during the requested time window',
+        } as BookingValidationError;
+      }
+
+      // ==========================================
+      // 4. 1-Booking-Per-User Policy (US3-1 / FR-3.2, AC 3.1.3)
+      // ==========================================
+      const userOverlap = await prisma.booking.findFirst({
+        where: {
+          uid: userId,
+          status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+          startDateTime: { lt: endDateTime },
+          endDateTime: { gt: startDateTime },
+        },
+      });
+
+      if (userOverlap) {
+        throw {
+          status: 409,
+          code: 'USER_BOOKING_OVERLAP',
+          message:
+            'You already have an active or pending reservation during this time window (1-booking-per-user policy)',
         } as BookingValidationError;
       }
 
