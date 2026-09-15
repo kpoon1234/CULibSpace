@@ -24,6 +24,9 @@ async function runConcurrencyTests() {
   const userB = 2; // UID 2: Bobby
 
   // 0. Ensure clean state before testing
+  await prisma.booking.deleteMany({
+    where: { uid: { in: [userA, userB] } },
+  });
   await prisma.table.update({
     where: { tableId },
     data: { lockToken: null, lockedUntil: null, lockedByUid: null, status: 'AVAILABLE' },
