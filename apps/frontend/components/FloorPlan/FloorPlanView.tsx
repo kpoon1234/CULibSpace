@@ -179,13 +179,19 @@ export default function FloorPlanView({
       {reservingTable && (
         <ReservationModal
           isOpen
-          onClose={() => setReservingTable(null)}
+          onClose={() => {
+            setReservingTable(null);
+            refresh();
+          }}
           tableId={reservingTable.tableId}
           tableCode={reservingTable.code}
           tableZone={activeZone.label}
           initialDate={reservationDate}
           filter={filter}
-          onConfirm={() => onReserve?.(reservingTable)}
+          onConfirm={() => {
+            onReserve?.(reservingTable);
+            refresh();
+          }}
         />
       )}
     </section>

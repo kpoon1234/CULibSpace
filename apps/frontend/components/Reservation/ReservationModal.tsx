@@ -107,7 +107,12 @@ export default function ReservationModal({
     const acquireLock = async () => {
       setLocking(true);
       const result = await lockTable({ tableId });
-      if (cancelled) return;
+      if (cancelled) {
+        if (result.ok && result.lockToken) {
+          unlockTable({ tableId, lockToken: result.lockToken });
+        }
+        return;
+      }
       setLocking(false);
       if (result.ok && result.lockToken) {
         lockTokenRef.current = result.lockToken;

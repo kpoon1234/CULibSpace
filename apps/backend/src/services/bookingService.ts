@@ -203,28 +203,7 @@ export class BookingService {
       }
 
       // ==========================================
-      // 3. 1-Booking-Per-User Policy (US3-1 / FR-3.2)
-      // ==========================================
-      const now = new Date();
-      const userOverlap = await prisma.booking.findFirst({
-        where: {
-          uid: userId,
-          status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
-          endDateTime: { gt: now },
-        },
-      });
-
-      if (userOverlap) {
-        throw {
-          status: 409,
-          code: 'USER_BOOKING_OVERLAP',
-          message:
-            'You already have an active or pending reservation (1-booking-per-user policy). You cannot make another booking until your existing reservation concludes.',
-        } as BookingValidationError;
-      }
-
-      // ==========================================
-      // 4. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
+      // 3. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
       // ==========================================
       const table = await prisma.table.findUnique({
         where: { tableId },
@@ -246,7 +225,8 @@ export class BookingService {
         } as BookingValidationError;
       }
 
-      // Check if table is currently locked by another user (5-min Hold Lock)
+      // Check if table is currently locked by another user (5-min Hold Lock - AC 3.2.1)
+      const now = new Date();
       const isHoldLocked = table.lockedUntil && new Date(table.lockedUntil) > now;
       if (isHoldLocked) {
         // If user does not provide the token or token does not match
@@ -259,8 +239,8 @@ export class BookingService {
           } as BookingValidationError;
         }
 
-        // Check sneaky token
-        if (table.lockedByUid && table.lockedByUid !== userId) {
+        // Check sneaky token (only if lockedByUid is recorded)
+        if (table.lockedByUid != null && table.lockedByUid !== userId) {
           throw {
             status: 403,
             code: 'UNAUTHORIZED_LOCK_OWNER',
@@ -285,6 +265,27 @@ export class BookingService {
           code: 'TABLE_ALREADY_BOOKED',
           message:
             'This table is already reserved by another user during the requested time window',
+        } as BookingValidationError;
+      }
+
+      // ==========================================
+      // 4. 1-Booking-Per-User Policy (US3-1 / FR-3.2, AC 3.1.3)
+      // ==========================================
+      const userOverlap = await prisma.booking.findFirst({
+        where: {
+          uid: userId,
+          status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+          startDateTime: { lt: endDateTime },
+          endDateTime: { gt: startDateTime },
+        },
+      });
+
+      if (userOverlap) {
+        throw {
+          status: 409,
+          code: 'USER_BOOKING_OVERLAP',
+          message:
+            'You already have an active or pending reservation during this time window (1-booking-per-user policy)',
         } as BookingValidationError;
       }
 
@@ -507,25 +508,18 @@ export class BookingService {
 }
 
 /**
- * Fetch booking history for a user (excluding active bookings)
+ * Fetch booking history for a user (Completed, Cancelled, and No-show bookings) - AC 3.3.1
+ * Active and Pending bookings are excluded as they are displayed on the Home dashboard card.
  * @param uid User ID
  * @returns Array of bookings with table and zone information, ordered by startDateTime descending
  */
 export async function getBookingHistory(uid: number): Promise<BookingWithTableAndZone[]> {
-  // History: bookings that are
-  const now = new Date();
-
-  // History: bookings that are NOT active
-  // Active booking = status in [PENDING, ACTIVE] AND endDateTime > now()
-  // So history = NOT (status in [PENDING, ACTIVE] AND endDateTime > now())
-  // Which is: (status not in [PENDING, ACTIVE]) OR (endDateTime <= now())
   const bookings = await defaultPrisma.booking.findMany({
     where: {
       uid,
-      OR: [
-        { status: { notIn: [BookingStatus.PENDING, BookingStatus.ACTIVE] } },
-        { endDateTime: { lte: now } },
-      ],
+      status: {
+        in: [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW],
+      },
     },
     include: {
       table: {

@@ -96,6 +96,7 @@ function toStatusFeed(zones: RawLayoutZone[]): SeatStatusZone[] {
       hasTvScreen: Boolean(t.hasTvScreen),
       status: t.status as TableStatus,
       isLocked: Boolean(t.isLocked),
+      lockedByUid: t.lockedByUid ?? null,
       bookedIntervals: t.bookedIntervals ?? [],
     })),
   }));
@@ -195,6 +196,7 @@ export function buildFloorPlan({
         zoneType: zone.zoneType,
         status: tableStatus,
         isLocked: live?.isLocked ?? false,
+        lockedByUid: live?.lockedByUid ?? null,
         matchesFilter,
         bookedIntervals: live?.bookedIntervals ?? [],
       };

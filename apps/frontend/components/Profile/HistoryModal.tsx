@@ -6,8 +6,7 @@ import { API_URL, getAuthToken } from '@/lib/auth';
 type HistoryRecord = {
   id: string;
   date: string;
-  start: string;
-  end: string;
+  time: string;
   score: string | number;
   reason: string;
 };
@@ -80,8 +79,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
               return {
                 id: `${entry.timestamp}-${idx}`,
                 date: dateStr,
-                start: timeStr,
-                end: '—',
+                time: timeStr,
                 score: scoreStr,
                 reason: entry.adminName ? `Adjusted by ${entry.adminName}` : 'Score Adjustment',
               };
@@ -113,13 +111,13 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="Behavior Score History"
+      aria-label="Behavior History"
     >
       {/* Modal Container */}
       <div className="relative flex w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         {/* Header Bar */}
-        <div className="relative bg-pink-400 py-4 text-center">
-          <h1 className="text-lg font-semibold text-white">Behavior Score History</h1>
+        <div className="relative bg-chula-pink py-4 text-center">
+          <h1 className="text-lg font-semibold text-white">Behavior History</h1>
 
           {/* Close Button */}
           <button
@@ -151,9 +149,8 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
             <div className="grid grid-cols-12 bg-gray-200 p-3 text-sm font-semibold text-gray-700">
               <div className="col-span-2 text-center">Date</div>
               <div className="col-span-2 text-center">Time</div>
-              <div className="col-span-2 text-center">End time</div>
               <div className="col-span-2 text-center">Score</div>
-              <div className="col-span-4 pl-4">Reason</div>
+              <div className="col-span-6 pl-4">Reason</div>
             </div>
 
             {/* Table Body (Scrollable container) */}
@@ -176,10 +173,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
                         {record.date}
                       </div>
                       <div className="col-span-2 text-center font-medium text-gray-800">
-                        {record.start}
-                      </div>
-                      <div className="col-span-2 text-center font-medium text-gray-800">
-                        {record.end}
+                        {record.time}
                       </div>
                       <div
                         className={`col-span-2 text-center font-bold ${
@@ -192,13 +186,13 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
                       >
                         {record.score}
                       </div>
-                      <div className="col-span-4 pl-4 text-gray-600">{record.reason}</div>
+                      <div className="col-span-6 pl-4 text-gray-600">{record.reason}</div>
                     </div>
                   );
                 })
               ) : (
                 <div className="p-8 text-center text-sm text-gray-400">
-                  No history records found.
+                  No behavior history found.
                 </div>
               )}
             </div>

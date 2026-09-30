@@ -176,7 +176,7 @@ export default function TopMenu() {
                           }}
                           className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
                         >
-                          History Log
+                          Behavior History
                         </button>
                         <hr className="my-1 border-hairline" />
                         <button

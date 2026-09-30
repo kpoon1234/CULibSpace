@@ -67,8 +67,24 @@ export default function HistoryBookingModal({ isOpen, onClose }: HistoryBookingM
         if (!isMounted) return; // Component may have unmounted while fetch was in-flight
 
         if (Array.isArray(dataList)) {
+          // Filter to only Completed, Cancelled, and No-show bookings (AC 3.3.1)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const formatted: HistoryRecord[] = dataList.map((booking: any) => {
+          const filtered = dataList.filter((booking: any) => {
+            const s = String(booking?.status || '')
+              .trim()
+              .toUpperCase()
+              .replace(/[\s_-]/g, '');
+            return (
+              s === 'COMPLETED' ||
+              s === 'CANCELLED' ||
+              s === 'CANCELED' ||
+              s === 'NOSHOW' ||
+              s.includes('SHOW')
+            );
+          });
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const formatted: HistoryRecord[] = filtered.map((booking: any) => {
             const startDt = new Date(booking.startDateTime);
             const endDt = new Date(booking.endDateTime);
 

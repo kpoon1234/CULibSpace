@@ -108,6 +108,8 @@ export interface SeatStatusTable {
   status: TableStatus;
   /** True while a temporary booking hold-lock is active on the table. */
   isLocked: boolean;
+  /** User ID holding the current hold-lock, if known. */
+  lockedByUid?: number | null;
   /** Time intervals booked for this table during the browsing window (AC 2.4.3). */
   bookedIntervals?: Array<{ startDateTime: string; endDateTime: string; status: string }>;
 }
@@ -128,6 +130,7 @@ export interface RawLayoutTable {
   hasTvScreen: boolean;
   status: TableStatus;
   isLocked?: boolean;
+  lockedByUid?: number | null;
   bookedIntervals?: Array<{ startDateTime: string; endDateTime: string; status: string }>;
   // optional geometry — filled by ./autoLayout when absent
   code?: string;
@@ -179,6 +182,8 @@ export interface FloorPlanTable extends TableLayout {
   /** From the live feed; falls back to 'Available' if the feed omits the table. */
   status: TableStatus;
   isLocked: boolean;
+  /** User ID holding the current hold-lock, if known. */
+  lockedByUid?: number | null;
   /** False when the active amenity filter excludes this table. Such tables stay
    *  on the plan — drawn dimmed and non-interactive — so the space still reads
    *  as occupied by a table you simply can't pick right now. */
