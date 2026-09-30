@@ -87,18 +87,16 @@ export default function TableDetailPanel({
         <Row icon={<TvIcon />}>{table.hasTvScreen ? 'TV / large screen' : 'No screen'}</Row>
       </ul>
 
-      {/* Timetable Preview (US2-4 / AC 2.4.3: Booked vs Open intervals) */}
-      <div className="mt-4 border-t border-gray-100 pt-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-          Timetable Preview
-        </p>
-        {table.status === 'Closed' ? (
-          <p className="mt-1 text-xs text-stone-500">This table is closed for maintenance.</p>
-        ) : table.bookedIntervals && table.bookedIntervals.length > 0 ? (
+      {/* Timetable Preview (US2-4 / AC 2.4.3): Only shown when table has active/pending reservations */}
+      {table.status !== 'Closed' && table.bookedIntervals && table.bookedIntervals.length > 0 && (
+        <div className="mt-4 border-t border-gray-100 pt-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Timetable Preview
+          </p>
           <div className="mt-2 space-y-2">
             <div className="flex items-center justify-between text-xs text-gray-500">
-              <span>Time intervals</span>
-              <span className="font-medium text-rose-700">Partially booked</span>
+              <span>Reserved intervals</span>
+              <span className="font-medium text-rose-700">Reserved / Occupied</span>
             </div>
             <div className="flex flex-col gap-1.5">
               {table.bookedIntervals.map((interval, idx) => {
@@ -125,14 +123,12 @@ export default function TableDetailPanel({
                 );
               })}
             </div>
+            <p className="text-[11px] text-gray-500">
+              Please adjust your filter to book outside these reserved intervals.
+            </p>
           </div>
-        ) : (
-          <div className="mt-2 flex items-center justify-between rounded-md bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-800">
-            <span>Time intervals</span>
-            <span className="font-medium text-emerald-700">Open &amp; Available</span>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="mt-5 space-y-2">
         <button

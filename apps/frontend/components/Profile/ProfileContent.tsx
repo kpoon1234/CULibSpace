@@ -16,10 +16,12 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
   const { openHistory, openBookingHistory, closeProfile } = useProfileModal();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [firstname, setFirstname] = useState('');
+  const [lastname, setLastname] = useState('');
   const [phone, setPhone] = useState('');
-  // Tracks the last-saved phone value so the submit button only shows up once
-  // something actually differs from it.
-  const [savedPhone, setSavedPhone] = useState('');
+  // Tracks the last-saved values so the submit button only shows up once
+  // something actually differs from them.
+  const [savedValues, setSavedValues] = useState({ firstname: '', lastname: '', phone: '' });
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -47,14 +49,23 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
       const data = (await res.json()) as { user: AuthUser };
       setUser(data.user);
+      setFirstname(data.user.firstname);
+      setLastname(data.user.lastname);
       setPhone(data.user.phone || '');
-      setSavedPhone(data.user.phone || '');
+      setSavedValues({
+        firstname: data.user.firstname,
+        lastname: data.user.lastname,
+        phone: data.user.phone || '',
+      });
     }
 
     loadUser().catch(() => router.replace('/login'));
   }, [router]);
 
-  const hasChanges = phone !== savedPhone;
+  const hasChanges =
+    firstname !== savedValues.firstname ||
+    lastname !== savedValues.lastname ||
+    phone !== savedValues.phone;
 
   function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -69,6 +80,10 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
     setError('');
     setNotice('');
+    if (!firstname.trim() || !lastname.trim()) {
+      setError('First name and last name cannot be empty.');
+      return;
+    }
     if (!/^\d{10}$/.test(phone)) {
       setError('Please enter a valid 10-digit phone number.');
       return;
@@ -87,7 +102,11 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ phone }),
+          body: JSON.stringify({
+            firstname: firstname.trim(),
+            lastname: lastname.trim(),
+            phone,
+          }),
         }
       );
 
@@ -100,7 +119,11 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       // Update stored auth user to reflect profile changes
       saveAuth(token, data.user);
       setUser(data.user);
-      setSavedPhone(data.user.phone || '');
+      setSavedValues({
+        firstname: data.user.firstname,
+        lastname: data.user.lastname,
+        phone: data.user.phone || '',
+      });
       setNotice('Profile updated.');
     } catch {
       setError('Unable to connect to the server. Please try again.');
@@ -174,18 +197,24 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-gray-700">
               First name
-              <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700">
-                {user.firstname}
-              </p>
-            </div>
-            <div className="block text-sm font-medium text-gray-700">
+              <input
+                value={firstname}
+                onChange={(event) => setFirstname(event.target.value)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
+                required
+              />
+            </label>
+            <label className="block text-sm font-medium text-gray-700">
               Last name
-              <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700">
-                {user.lastname}
-              </p>
-            </div>
+              <input
+                value={lastname}
+                onChange={(event) => setLastname(event.target.value)}
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
+                required
+              />
+            </label>
             <div className="block text-sm font-medium text-gray-700">
               User Type
               <p className="mt-1 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-gray-500">

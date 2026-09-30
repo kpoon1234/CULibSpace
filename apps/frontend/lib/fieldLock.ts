@@ -10,13 +10,14 @@ export type ProfileField = {
 };
 
 /**
- * Main profile grid (US1-4 / FR-1.4): Name, Student/Staff ID, User Type, and
- * Email are displayed as read-only. Only Contact Phone Number can be edited.
+ * Main profile grid (US1-4 / FR-1.4): First name, Last name, and Contact Phone
+ * Number are editable. Identity/Role fields (Student ID, Citizen ID, Passport ID,
+ * User Type, Email) stay locked as read-only.
  */
 export function getProfileFields(user: AuthUser): ProfileField[] {
   return [
-    { key: 'firstname', label: 'First name', value: user.firstname, editable: false },
-    { key: 'lastname', label: 'Last name', value: user.lastname, editable: false },
+    { key: 'firstname', label: 'First name', value: user.firstname, editable: true },
+    { key: 'lastname', label: 'Last name', value: user.lastname, editable: true },
     { key: 'userType', label: 'User Type', value: user.userType || '', editable: false },
     { key: 'phone', label: 'Phone', value: user.phone || '', editable: true },
     { key: 'email', label: 'Email', value: user.email, editable: false },
@@ -38,11 +39,11 @@ export function getExtraIdFields(user: AuthUser): ExtraIdField[] {
     fields.push({ key: 'studentId', label: 'Student ID', value: user.studentId });
   }
 
-  if (user.role === 'OUTSIDER' && user.userType === 'THAI' && user.citizenId) {
+  if (user.userType === 'THAI' && user.citizenId) {
     fields.push({ key: 'citizenId', label: 'Citizen ID', value: user.citizenId });
   }
 
-  if (user.role === 'OUTSIDER' && user.userType === 'FOREIGN' && user.passportId) {
+  if (user.userType === 'FOREIGN' && user.passportId) {
     fields.push({ key: 'passportId', label: 'Passport ID', value: user.passportId });
   }
 
