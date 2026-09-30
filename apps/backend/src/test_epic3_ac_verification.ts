@@ -373,40 +373,71 @@ async function runEpic3VerificationSuite() {
           zone: { zoneId: 3, zoneType: ZoneType.COMMON },
         },
       },
+      {
+        bookingId: 104,
+        uid: 101,
+        tableId: 105,
+        startDateTime: new Date(Date.now() - 96 * ONE_HOUR),
+        endDateTime: new Date(Date.now() - 94 * ONE_HOUR),
+        arriveTime: null,
+        status: BookingStatus.NO_SHOW, // NO_SHOW booking
+        timestamp: new Date(Date.now() - 96 * ONE_HOUR),
+        table: {
+          tableId: 105,
+          numberOfSeat: 4,
+          plugCap: 2,
+          hasTvScreen: false,
+          zone: { zoneId: 1, zoneType: ZoneType.SILENT },
+        },
+      },
     ];
 
-    // Verify history query returns ALL 3 categories: active, completed/past, cancelled
-    const mockPrisma = createMockPrisma({ bookingsList: sampleBookings });
+    // Verify history query returns only Completed, Cancelled, and No-show bookings (AC 3.3.1)
+    const allowedHistoryStatuses: BookingStatus[] = [
+      BookingStatus.COMPLETED,
+      BookingStatus.CANCELLED,
+      BookingStatus.NO_SHOW,
+    ];
+    const mockPrisma = createMockPrisma({
+      bookingsList: sampleBookings.filter((b) => allowedHistoryStatuses.includes(b.status)),
+    });
     const fetchedHistory = await mockPrisma.booking.findMany({ where: { uid: 101 } });
 
     assert(
       fetchedHistory.length === 3,
-      'AC 3.3.1: Returns all 3 reservations without filtering active bookings out'
+      'AC 3.3.1: Returns Completed, Cancelled, and No-show reservations without active/pending'
     );
 
     const statuses = fetchedHistory.map((b: any) => b.status);
     assert(
-      statuses.includes(BookingStatus.ACTIVE),
-      'AC 3.3.1: Active bookings included in history'
+      !statuses.includes(BookingStatus.ACTIVE) && !statuses.includes(BookingStatus.PENDING),
+      'AC 3.3.1: Active and Pending bookings excluded from history (shown on Home card)'
     );
     assert(
       statuses.includes(BookingStatus.COMPLETED),
-      'AC 3.3.1: Past/Completed bookings included in history'
+      'AC 3.3.1: Completed bookings included in history'
     );
     assert(
       statuses.includes(BookingStatus.CANCELLED),
       'AC 3.3.1: Cancelled bookings included in history'
     );
+    assert(
+      statuses.includes(BookingStatus.NO_SHOW),
+      'AC 3.3.1: No-show bookings included in history'
+    );
 
     // Verify metadata: timestamps, zones, seat numbers
-    const activeItem = fetchedHistory.find((b: any) => b.status === BookingStatus.ACTIVE);
+    const completedItem = fetchedHistory.find((b: any) => b.status === BookingStatus.COMPLETED);
     assert(
-      !!activeItem?.startDateTime && !!activeItem?.endDateTime,
+      !!completedItem?.startDateTime && !!completedItem?.endDateTime,
       'AC 3.3.1: Timestamps present'
     );
-    assert(activeItem?.table?.zone?.zoneType === ZoneType.SILENT, 'AC 3.3.1: Zone details present');
     assert(
-      activeItem?.table?.tableId === 102 && activeItem?.table?.numberOfSeat === 4,
+      completedItem?.table?.zone?.zoneType === ZoneType.GROUP,
+      'AC 3.3.1: Zone details present'
+    );
+    assert(
+      completedItem?.table?.tableId === 201 && completedItem?.table?.numberOfSeat === 6,
       'AC 3.3.1: Table & Seat numbers present'
     );
   } catch (err: any) {

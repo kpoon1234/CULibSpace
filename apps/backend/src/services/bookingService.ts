@@ -508,7 +508,8 @@ export class BookingService {
 }
 
 /**
- * Fetch booking history for a user (including active, completed, cancelled, no-show) - AC 3.3.1 / FR-3.5
+ * Fetch booking history for a user (Completed, Cancelled, and No-show bookings) - AC 3.3.1
+ * Active and Pending bookings are excluded as they are displayed on the Home dashboard card.
  * @param uid User ID
  * @returns Array of bookings with table and zone information, ordered by startDateTime descending
  */
@@ -516,6 +517,9 @@ export async function getBookingHistory(uid: number): Promise<BookingWithTableAn
   const bookings = await defaultPrisma.booking.findMany({
     where: {
       uid,
+      status: {
+        in: [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW],
+      },
     },
     include: {
       table: {
