@@ -80,15 +80,24 @@ export function usePanZoom(content: Rect, deps: unknown[] = []): PanZoomApi {
     [clampScale]
   );
 
-  const onWheel = useCallback(
-    (e: ReactWheelEvent) => {
-      const el = containerRef.current;
-      if (!el) return;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Prevent the page from scrolling when wheeling inside the map area
+      e.preventDefault();
       const rect = el.getBoundingClientRect();
       zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top);
-    },
-    [zoomAt]
-  );
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+    };
+  }, [zoomAt]);
+
+  const onWheel = useCallback(() => {}, []);
 
   const onPointerDown = useCallback((e: ReactPointerEvent) => {
     if (e.button !== 0) return;
