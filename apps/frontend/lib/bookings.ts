@@ -104,6 +104,7 @@ export async function unlockTable(input: UnlockTableInput): Promise<void> {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(input),
+      keepalive: true,
     });
   } catch {
     // best-effort

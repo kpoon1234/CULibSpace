@@ -22,8 +22,12 @@ export function availabilityLine(counts: Record<TableStatus, number>, total: num
   return `${counts.Available} of ${total} ${total === 1 ? 'table' : 'tables'} open`;
 }
 
-export function statusVerb(status: TableStatus, isLocked: boolean): string {
-  if (status === 'Reserved' && isLocked) return 'On hold — someone is booking this now';
+export function statusVerb(status: TableStatus, isLocked: boolean, isHeldByMe?: boolean): string {
+  if (status === 'Reserved' && isLocked) {
+    return isHeldByMe
+      ? 'On hold by you — continue your reservation'
+      : 'On hold — someone is booking this now';
+  }
   switch (status) {
     case 'Available':
       return 'Open — you can reserve this table';

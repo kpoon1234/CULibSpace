@@ -38,6 +38,7 @@ export class LayoutService {
             plugCap: true,
             hasTvScreen: true,
             lockedUntil: true,
+            lockedByUid: true,
             // ค้นหาการจองที่ทับซ้อนและมีสถานะ PENDING หรือ ACTIVE
             bookings: {
               where: {
@@ -86,6 +87,7 @@ export class LayoutService {
           ...tableData,
           status: dynamicStatus, // แทนที่ด้วยสถานะไดนามิก
           isLocked: isHoldLocked,
+          lockedByUid: isHoldLocked ? table.lockedByUid : null,
           bookedIntervals, // US2-4 / AC 2.4.3: ข้อมูลช่วงเวลาสำหรับ Timetable preview
         };
       }),

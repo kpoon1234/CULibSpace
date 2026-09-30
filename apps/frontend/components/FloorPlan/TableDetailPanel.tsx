@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { STATUS_STYLE, seatsLabel, statusVerb, type FloorPlanTable } from '@/lib/floorPlan';
+import { getStoredUser } from '@/lib/auth';
 import { CloseIcon, LockIcon, PlugIcon, SeatIcon, TvIcon } from './icons';
 
 interface TableDetailPanelProps {
@@ -40,8 +41,12 @@ export default function TableDetailPanel({
     );
   }
 
+  const currentUser = getStoredUser();
+  const isHeldByMe = Boolean(
+    table.isLocked && currentUser?.uid != null && table.lockedByUid === currentUser.uid
+  );
   const style = STATUS_STYLE[table.status];
-  const canReserve = table.status === 'Available' && !table.isLocked;
+  const canReserve = (table.status === 'Available' && !table.isLocked) || isHeldByMe;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-paper p-5 shadow-sm">
@@ -70,12 +75,18 @@ export default function TableDetailPanel({
         />
         <span className="text-sm font-medium text-gray-900">{style.text}</span>
         {table.isLocked && table.status === 'Reserved' && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
-            <LockIcon width={12} height={12} /> On hold
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+              isHeldByMe ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            <LockIcon width={12} height={12} /> {isHeldByMe ? 'Held by you' : 'On hold'}
           </span>
         )}
       </div>
-      <p className="mt-1 text-sm text-gray-600">{statusVerb(table.status, table.isLocked)}</p>
+      <p className="mt-1 text-sm text-gray-600">
+        {statusVerb(table.status, table.isLocked, isHeldByMe)}
+      </p>
 
       <ul className="mt-4 space-y-2 border-t border-gray-100 pt-4">
         <Row icon={<SeatIcon />}>{seatsLabel(table.seats)}</Row>
@@ -137,12 +148,14 @@ export default function TableDetailPanel({
           onClick={() => onReserve?.(table)}
           className="w-full rounded-md bg-chula-pink px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-chula-pink-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Reserve this table
+          {isHeldByMe ? 'Continue reservation' : 'Reserve this table'}
         </button>
         <p className="text-center text-xs text-gray-500">
-          {canReserve
-            ? 'Opens the booking step (time slot & confirmation).'
-            : 'Only open tables can be reserved.'}
+          {isHeldByMe
+            ? 'You currently hold this table (expires in 5 min).'
+            : canReserve
+              ? 'Opens the booking step (time slot & confirmation).'
+              : 'Only open tables can be reserved.'}
         </p>
         <button
           type="button"
