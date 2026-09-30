@@ -62,29 +62,39 @@ export class ProfileService {
       }
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { uid },
-      data: updateData,
-      include: { universityUser: true },
-    });
+    try {
+      const updatedUser = await prisma.user.update({
+        where: { uid },
+        data: updateData,
+        include: { universityUser: true },
+      });
 
-    const classification = classifyEmail(updatedUser.email);
+      const classification = classifyEmail(updatedUser.email);
 
-    return {
-      user: {
-        uid: updatedUser.uid,
-        email: updatedUser.email,
-        firstname: updatedUser.firstname,
-        lastname: updatedUser.lastname,
-        phone: updatedUser.phone,
-        imageUrl: updatedUser.imageUrl,
-        isProfileComplete: updatedUser.isProfileComplete,
-        behaviourScore: Number(updatedUser.behaviourScore),
-        role: classification.role,
-        userType: updatedUser.userType,
-        studentId: updatedUser.universityUser?.studentId,
-      },
-    };
+      return {
+        user: {
+          uid: updatedUser.uid,
+          email: updatedUser.email,
+          firstname: updatedUser.firstname,
+          lastname: updatedUser.lastname,
+          phone: updatedUser.phone,
+          imageUrl: updatedUser.imageUrl,
+          isProfileComplete: updatedUser.isProfileComplete,
+          behaviourScore: Number(updatedUser.behaviourScore),
+          role: classification.role,
+          userType: updatedUser.userType,
+          studentId: updatedUser.universityUser?.studentId,
+        },
+      };
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        throw {
+          status: 409,
+          message: 'This phone number is already registered to another account.',
+        };
+      }
+      throw err;
+    }
   }
 
   static async updateProfileImage(uid: number, imageUrl: string): Promise<ProfileResult> {

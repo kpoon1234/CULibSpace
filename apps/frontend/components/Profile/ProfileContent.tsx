@@ -35,9 +35,12 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
     }
 
     async function loadUser() {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/auth/me`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (!res.ok) {
         router.replace('/login');
@@ -82,7 +85,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       return;
     }
     if (!/^\d{10}$/.test(phone)) {
-      setError('Please enter a 10-digit phone number.');
+      setError('Please enter a valid 10-digit phone number.');
       return;
     }
 
@@ -91,14 +94,21 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       // Photo upload is still UI-only: the API can set an imageUrl string,
       // but there's no file-storage endpoint yet to turn the local file the
       // user picked into a hosted URL, so it can't be sent along here.
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/profile`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ firstname, lastname, phone }),
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/profile`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            firstname: firstname.trim(),
+            lastname: lastname.trim(),
+            phone,
+          }),
+        }
+      );
 
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -192,7 +202,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               <input
                 value={firstname}
                 onChange={(event) => setFirstname(event.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
                 required
               />
             </label>
@@ -201,7 +211,7 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               <input
                 value={lastname}
                 onChange={(event) => setLastname(event.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
                 required
               />
             </label>
@@ -212,13 +222,13 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
               </p>
             </div>
             <label className="block text-sm font-medium text-gray-700">
-              Phone
+              Contact Phone Number
               <input
                 value={phone}
                 onChange={(event) => setPhone(event.target.value.replace(/\D/g, ''))}
                 inputMode="numeric"
                 maxLength={10}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
                 placeholder="0812345678"
                 required
               />
