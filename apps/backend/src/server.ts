@@ -10,6 +10,7 @@ import layoutRoutes from './routes/layoutRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import { LockService } from './services/lockService.js';
+import { NoShowService } from './services/noShowService.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -59,6 +60,9 @@ app.get('/api/hello', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on ${BASE_URL}`);
 
-  // 2. สั่งเริ่มการทำงานของ Worker
+  // 2. สั่งเริ่มการทำงานของ Lock Expiration Worker
   LockService.startExpirationWorker();
+
+  // 3. สั่งเริ่มการทำงานของ No-show Detection Cron Worker (ทุก 1 นาที)
+  NoShowService.startNoShowWorker();
 });
