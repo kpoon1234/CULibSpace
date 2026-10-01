@@ -203,6 +203,37 @@ export class BookingController {
       });
     }
   }
+
+  static async checkIn(req: Request, res: Response) {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.user?.uid; // เพิ่ม ? ป้องกัน undefined
+      const bookingId = parseInt(req.params.bookingId as string, 10);
+
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+
+      if (isNaN(bookingId)) {
+        return res.status(400).json({ success: false, error: 'Invalid booking ID' });
+      }
+
+      // เรียกใช้โดยไม่ต้องส่ง prisma เข้าไป
+      const result = await BookingService.checkIn(userId, bookingId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Check-in successful',
+        data: result,
+      });
+    } catch (error: any) {
+      const status = error.status || 500;
+      const code = error.code || 'INTERNAL_SERVER_ERROR';
+      const message = error.message || 'An unexpected error occurred';
+
+      return res.status(status).json({ success: false, code, error: message });
+    }
+  }
 }
 
 export default BookingController;

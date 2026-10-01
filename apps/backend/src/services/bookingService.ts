@@ -36,6 +36,7 @@ export interface BookingWithTableAndZone {
 }
 
 const defaultPrisma = new PrismaClient();
+const prisma = new PrismaClient();
 
 export interface BookingValidationInput {
   userId: number;
@@ -504,6 +505,79 @@ export class BookingService {
 
       return newBooking;
     });
+  }
+
+  static async checkIn(userId: number, bookingId: number) {
+    const now = new Date();
+
+    // 1. ดึงการตั้งค่าระบบ
+    const config = await prisma.systemConfig.findFirst();
+    if (!config) {
+      throw { status: 500, code: 'CONFIG_NOT_FOUND', message: 'System configuration not found' };
+    }
+
+    // 2. ดึงข้อมูลการจอง
+    const booking = await prisma.booking.findUnique({
+      where: { bookingId },
+      include: { table: true },
+    });
+
+    if (!booking) {
+      throw { status: 404, code: 'BOOKING_NOT_FOUND', message: 'Booking not found' };
+    }
+
+    if (booking.uid !== userId) {
+      throw {
+        status: 403,
+        code: 'UNAUTHORIZED_CHECKIN',
+        message: 'Not allowed to check in for this booking',
+      };
+    }
+
+    if (booking.status !== BookingStatus.PENDING) {
+      throw {
+        status: 400,
+        code: 'INVALID_BOOKING_STATUS',
+        message: `Cannot check in. Current status: ${booking.status}`,
+      };
+    }
+
+    // 3. คำนวณ Check-in Window
+    const earlyCheckInMs = config.earlyCheckInMinutes * 60 * 1000;
+    const lateThresholdMs = config.lateThresholdMinutes * 60 * 1000;
+
+    const startWindow = new Date(booking.startDateTime.getTime() - earlyCheckInMs);
+    const endWindow = new Date(booking.startDateTime.getTime() + lateThresholdMs);
+
+    if (now < startWindow) {
+      throw { status: 400, code: 'CHECK_IN_TOO_EARLY', message: 'It is too early to check in' };
+    }
+
+    if (now > endWindow) {
+      throw { status: 400, code: 'CHECK_IN_TOO_LATE', message: 'Check-in window has expired' };
+    }
+
+    // 4. Update สถานะ
+    const updatedBooking = await prisma.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { bookingId },
+        data: {
+          status: BookingStatus.ACTIVE,
+          arriveTime: now,
+        },
+      });
+
+      await tx.table.update({
+        where: { tableId: booking.tableId },
+        data: {
+          status: TableStatus.OCCUPIED,
+        },
+      });
+
+      return b;
+    });
+
+    return updatedBooking;
   }
 }
 
