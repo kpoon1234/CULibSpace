@@ -231,7 +231,12 @@ export class BookingController {
       const code = error.code || 'INTERNAL_SERVER_ERROR';
       const message = error.message || 'An unexpected error occurred';
 
-      return res.status(status).json({ success: false, code, error: message });
+      return res.status(status).json({
+        success: false,
+        code,
+        error: message,
+        ...(error.checkInAvailableAt ? { checkInAvailableAt: error.checkInAvailableAt } : {}),
+      });
     }
   }
 }
