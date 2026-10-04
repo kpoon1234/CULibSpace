@@ -1,5 +1,5 @@
 // apps/backend/src/services/noShowService.ts
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, BookingStatus, TableStatus } from '@prisma/client';
 
 const defaultPrisma = new PrismaClient();
 
@@ -20,9 +20,73 @@ export class NoShowService {
    * [Subtask 3 - Hill, Kaopoon]: ประมวลผลคืนโต๊ะ ปรับสถานะเป็น NO_SHOW และตัดคะแนนพฤติกรรม
    * ฟังก์ชัน Transaction สำหรับปรับปรุงสถานะและตัดคะแนน
    */
-  static async processNoShowBooking(booking: any, prisma: any = defaultPrisma): Promise<boolean> {
-    // TODO (Subtask 3 - Hill, Kaopoon): Update booking status to NO_SHOW, release table to AVAILABLE, deduct behavior score
-    return true;
+  static async processNoShowBooking(
+    booking: { bookingId: number; uid: number; tableId: number },
+    prisma: any = defaultPrisma
+  ): Promise<boolean> {
+    const executeInTx = async (tx: any) => {
+      // 1. อัปเดตสถานะ Booking เป็น NO_SHOW
+      await tx.booking.update({
+        where: { bookingId: booking.bookingId },
+        data: { status: BookingStatus.NO_SHOW },
+      });
+
+      // 2. ปล่อยสถานะโต๊ะคืนเป็น AVAILABLE (ยกเว้นกรณีที่โต๊ะถูกปิดซ่อมบำรุง CLOSED)
+      const table = await tx.table.findUnique({
+        where: { tableId: booking.tableId },
+        select: { status: true },
+      });
+
+      if (table && table.status !== TableStatus.CLOSED) {
+        await tx.table.update({
+          where: { tableId: booking.tableId },
+          data: {
+            status: TableStatus.AVAILABLE,
+            lockToken: null,
+            lockedUntil: null,
+            lockedByUid: null,
+          },
+        });
+      }
+
+      // 3. ตัดคะแนนพฤติกรรมผู้ใช้ (-10 คะแนน) และบันทึกลง ManageScore
+      const user = await tx.user.findUnique({
+        where: { uid: booking.uid },
+        select: { behaviourScore: true },
+      });
+
+      if (user) {
+        const currentScore = Number(user.behaviourScore);
+        const penaltyAmount = 10;
+        const newScore = Math.max(0, currentScore - penaltyAmount);
+
+        await tx.user.update({
+          where: { uid: booking.uid },
+          data: { behaviourScore: newScore },
+        });
+
+        // ค้นหา System Admin สำหรับบันทึก Audit log ใน ManageScore
+        const admin = await tx.admin.findFirst({ select: { adminId: true } });
+        const adminId = admin?.adminId ?? 1;
+
+        await tx.manageScore.create({
+          data: {
+            uid: booking.uid,
+            adminId,
+            scoreChange: -penaltyAmount,
+            timestamp: new Date(),
+          },
+        });
+      }
+
+      return true;
+    };
+
+    if (prisma.$transaction) {
+      return await prisma.$transaction(executeInTx);
+    } else {
+      return await executeInTx(prisma);
+    }
   }
 
   /**
