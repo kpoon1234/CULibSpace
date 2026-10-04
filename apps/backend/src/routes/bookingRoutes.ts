@@ -23,4 +23,6 @@ router.post('/validate', authenticateToken, BookingController.validate);
 // Submits and finalizes a booking reservation
 router.post('/', authenticateToken, BookingController.create);
 
+router.post('/:bookingId/check-in', authenticateToken, BookingController.checkIn);
+
 export default router;
