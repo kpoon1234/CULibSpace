@@ -1,5 +1,5 @@
 // apps/backend/src/test_noshow_worker.ts
-import { NoShowService } from './services/noShowService.js';
+import { NoShowService } from '../services/noShowService.js';
 import { BookingStatus, TableStatus } from '@prisma/client';
 
 console.log('===============================================================');

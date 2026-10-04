@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { BookingService } from './services/bookingService.js';
+import { BookingService } from '../services/bookingService.js';
 
 const prisma = new PrismaClient();
 

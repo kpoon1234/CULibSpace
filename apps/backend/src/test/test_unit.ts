@@ -1,6 +1,6 @@
-import { classifyEmail } from './utils/roleMapper.js';
-import { signJwt, verifyJwt, AuthTokenPayload } from './utils/jwt.js';
-import { BookingService } from './services/bookingService.js';
+import { classifyEmail } from '../utils/roleMapper.js';
+import { signJwt, verifyJwt, AuthTokenPayload } from '../utils/jwt.js';
+import { BookingService } from '../services/bookingService.js';
 
 console.log('🧪 Starting Role Mapping & JWT Unit Tests...\n');
 
