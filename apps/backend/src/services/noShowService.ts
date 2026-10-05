@@ -39,7 +39,8 @@ export class NoShowService {
     prisma: any = defaultPrisma
   ): Promise<boolean> {
     const executeInTx = async (tx: any) => {
-      // 1. อัปเดตสถานะ Booking เป็น NO_SHOW (ACID Guard - Optimistic Concurrency)
+      // 1. Guard: Atomic conditional update เป็น NO_SHOW เฉพาะเมื่อสถานะยังเป็น PENDING
+      // ป้องกัน Race Condition กรณีที่ user เพิ่ง check-in (ACTIVE) หรือ cancel ก่อน Worker ประมวลผล
       const updatedBooking = await tx.booking.updateMany({
         where: {
           bookingId: booking.bookingId,
@@ -48,8 +49,12 @@ export class NoShowService {
         data: { status: BookingStatus.NO_SHOW },
       });
 
-      // If count is 0, the user checked-in at the exact same millisecond. Abort penalty safely.
+      // หาก count === 0 แสดงว่า booking ถูก check-in หรือ cancel ไปก่อนแล้ว
+      // Abort penalty ทั้งหมดอย่างปลอดภัย ไม่ตัดคะแนน ไม่คืนโต๊ะ
       if (updatedBooking.count === 0) {
+        console.log(
+          `[NoShowWorker] Booking #${booking.bookingId} already transitioned (checked-in or cancelled). Skipping penalty.`
+        );
         return false;
       }
 
@@ -71,7 +76,7 @@ export class NoShowService {
         });
       }
 
-      // 3. ตัดคะแนนพฤติกรรมผู้ใช้ (-10 คะแนน) และบันทึกลง ManageScore
+      // 3. ตัดคะแนนพฤติกรรมผู้ใช้ (-10 คะแนน)
       const user = await tx.user.findUnique({
         where: { uid: booking.uid },
         select: { behaviourScore: true },
@@ -87,18 +92,24 @@ export class NoShowService {
           data: { behaviourScore: newScore },
         });
 
-        // ค้นหา System Admin สำหรับบันทึก Audit log ใน ManageScore
+        // 4. บันทึก Audit log ลงใน ManageScore (FK Safety: ต้องพบ Admin ก่อนจึงจะ insert)
         const admin = await tx.admin.findFirst({ select: { adminId: true } });
-        const adminId = admin?.adminId ?? 1;
 
-        await tx.manageScore.create({
-          data: {
-            uid: booking.uid,
-            adminId,
-            scoreChange: -penaltyAmount,
-            timestamp: new Date(),
-          },
-        });
+        if (admin) {
+          await tx.manageScore.create({
+            data: {
+              uid: booking.uid,
+              adminId: admin.adminId,
+              scoreChange: -penaltyAmount,
+              timestamp: new Date(),
+            },
+          });
+        } else {
+          // Graceful fallback: ตัดคะแนนสำเร็จแต่ไม่มี Admin ใน DB -> ข้าม ManageScore insert
+          console.warn(
+            `[NoShowWorker] No admin found in DB. Skipping ManageScore record for uid=${booking.uid}. Score deducted successfully.`
+          );
+        }
       }
 
       return true;
