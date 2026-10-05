@@ -12,8 +12,22 @@ export class NoShowService {
     now: Date = new Date(),
     prisma: any = defaultPrisma
   ): Promise<any[]> {
-    // TODO (Subtask 2 - Poom, Punt): Query late PENDING bookings based on lateThresholdMinutes
-    return [];
+    let config = null;
+    try {
+      config = await prisma.systemConfig.findFirst();
+    } catch {
+      // Fallback defaults if SystemConfig query fails
+    }
+    const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
+    const cutoffTime = new Date(now.getTime() - lateThresholdMinutes * 60 * 1000);
+
+    return await prisma.booking.findMany({
+      where: {
+        status: BookingStatus.PENDING,
+        startDateTime: { lt: cutoffTime },
+      },
+      include: { table: true },
+    });
   }
 
   /**
@@ -25,11 +39,19 @@ export class NoShowService {
     prisma: any = defaultPrisma
   ): Promise<boolean> {
     const executeInTx = async (tx: any) => {
-      // 1. อัปเดตสถานะ Booking เป็น NO_SHOW
-      await tx.booking.update({
-        where: { bookingId: booking.bookingId },
+      // 1. อัปเดตสถานะ Booking เป็น NO_SHOW (ACID Guard - Optimistic Concurrency)
+      const updatedBooking = await tx.booking.updateMany({
+        where: {
+          bookingId: booking.bookingId,
+          status: BookingStatus.PENDING, // <-- CRITICAL: Blocks the check-in race condition
+        },
         data: { status: BookingStatus.NO_SHOW },
       });
+
+      // If count is 0, the user checked-in at the exact same millisecond. Abort penalty safely.
+      if (updatedBooking.count === 0) {
+        return false;
+      }
 
       // 2. ปล่อยสถานะโต๊ะคืนเป็น AVAILABLE (ยกเว้นกรณีที่โต๊ะถูกปิดซ่อมบำรุง CLOSED)
       const table = await tx.table.findUnique({
