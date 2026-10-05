@@ -1,4 +1,4 @@
-// apps/backend/src/test_noshow_worker.ts
+// apps/backend/src/test/test_noshow_worker.ts
 import { NoShowService } from '../services/noShowService.js';
 import { BookingStatus, TableStatus } from '@prisma/client';
 
@@ -42,6 +42,11 @@ async function runTests() {
     const failingPrisma = {
       systemConfig: {
         findFirst: async () => {
+          throw new Error('Simulated Database Connection Failure');
+        },
+      },
+      booking: {
+        findMany: async () => {
           throw new Error('Simulated Database Connection Failure');
         },
       },
@@ -94,6 +99,10 @@ async function runTests() {
         update: async ({ where, data }: any) => {
           updatedBooking = { where, data };
           return { bookingId: where.bookingId, status: data.status };
+        },
+        updateMany: async ({ where, data }: any) => {
+          updatedBooking = { where, data };
+          return { count: 1 };
         },
       },
       table: {
@@ -160,6 +169,7 @@ async function runTests() {
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
         update: async () => ({}),
+        updateMany: async () => ({ count: 1 }),
       },
       table: {
         findUnique: async () => ({ status: TableStatus.CLOSED }), // Closed for maintenance
@@ -197,6 +207,7 @@ async function runTests() {
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
         update: async () => ({}),
+        updateMany: async () => ({ count: 1 }),
       },
       table: {
         findUnique: async () => ({ status: TableStatus.AVAILABLE }),
