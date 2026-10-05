@@ -33,6 +33,11 @@ export interface BookingWithTableAndZone {
       zoneType: ZoneType;
     };
   };
+  cancellation?: {
+    allowed: boolean;
+    deadline?: string;
+    reason?: string;
+  };
 }
 
 const defaultPrisma = new PrismaClient();
@@ -626,6 +631,120 @@ export class BookingService {
 
     return updatedBooking;
   }
+
+  /**
+   * Cancel an upcoming reservation before the cutoff deadline with zero score penalty (US5-1 / FR-5.1)
+   *
+   * Verifies:
+   * 1. Booking existence & ownership (uid matches) -> 404 / 403 UNAUTHORIZED_CANCELLATION
+   * 2. Booking status is PENDING:
+   *    - ACTIVE (already checked in) -> 400 BOOKING_ALREADY_CHECKED_IN
+   *    - CANCELLED -> 400 BOOKING_ALREADY_CANCELLED
+   *    - COMPLETED / NO_SHOW -> 400 BOOKING_NOT_PENDING
+   * 3. Cutoff deadline check:
+   *    - Cancellation must occur before startDateTime (cutoff time).
+   *    - If now >= startDateTime -> 400 CANCELLATION_DEADLINE_PASSED
+   * 4. Atomic Transaction:
+   *    - Updates booking status to CANCELLED
+   *    - Releases table status back to AVAILABLE
+   *    - Clears any temporary hold locks on the table
+   *    - ZERO PENALTY: User behavior score is untouched, no record inserted into ManageScore
+   */
+  static async cancelBooking(
+    userId: number,
+    bookingId: number,
+    now: Date = new Date(),
+    prisma: any = defaultPrisma
+  ) {
+    const booking = await prisma.booking.findUnique({
+      where: { bookingId },
+      include: { table: true },
+    });
+
+    if (!booking) {
+      throw { status: 404, code: 'BOOKING_NOT_FOUND', message: 'Booking not found' };
+    }
+
+    if (booking.uid !== userId) {
+      throw {
+        status: 403,
+        code: 'UNAUTHORIZED_CANCELLATION',
+        message: 'You do not have permission to cancel this reservation.',
+      };
+    }
+
+    if (booking.status === BookingStatus.ACTIVE) {
+      throw {
+        status: 400,
+        code: 'BOOKING_ALREADY_CHECKED_IN',
+        message: 'You’ve already checked in. This reservation can no longer be cancelled.',
+      };
+    }
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw {
+        status: 400,
+        code: 'BOOKING_ALREADY_CANCELLED',
+        message: 'This reservation is already cancelled.',
+      };
+    }
+
+    if (booking.status !== BookingStatus.PENDING) {
+      throw {
+        status: 400,
+        code: 'BOOKING_NOT_PENDING',
+        message: 'This reservation is no longer pending and cannot be cancelled.',
+      };
+    }
+
+    // Cutoff deadline check: Must cancel before startDateTime (AC 5.1.1)
+    if (now >= booking.startDateTime) {
+      throw {
+        status: 400,
+        code: 'CANCELLATION_DEADLINE_PASSED',
+        message:
+          'The cancellation deadline has passed. This reservation can no longer be cancelled.',
+      };
+    }
+
+    // Atomic Transaction: Cancel booking, restore table availability, zero penalty to user score
+    const result = await prisma.$transaction(async (tx: any) => {
+      const updatedBooking = await tx.booking.update({
+        where: { bookingId },
+        data: {
+          status: BookingStatus.CANCELLED,
+        },
+        include: {
+          table: {
+            include: {
+              zone: true,
+            },
+          },
+        },
+      });
+
+      // Release table back to AVAILABLE (if table exists and is not closed for maintenance)
+      if (booking.table && booking.table.status !== TableStatus.CLOSED) {
+        await tx.table.update({
+          where: { tableId: booking.tableId },
+          data: {
+            status: TableStatus.AVAILABLE,
+            lockToken: null,
+            lockedUntil: null,
+            lockedByUid: null,
+          },
+        });
+      }
+
+      // Zero-penalty behavior score logic:
+      // Note: We deliberately do NOT call any score deduction or ManageScore entry here.
+      // Score remains completely untouched.
+
+      return updatedBooking;
+    });
+
+    return result;
+  }
 }
 
 /**
@@ -686,7 +805,30 @@ export async function getActiveBooking(uid: number): Promise<BookingWithTableAnd
     },
   });
 
-  return booking as unknown as BookingWithTableAndZone | null;
+  if (!booking) return null;
+
+  // Compute cancellation metadata for frontend ActiveBookingCard / CancelReservationModal
+  const isPending = booking.status === BookingStatus.PENDING;
+  const isBeforeDeadline = now < booking.startDateTime;
+  const allowed = isPending && isBeforeDeadline;
+
+  let reason: string | undefined;
+  if (booking.status === BookingStatus.ACTIVE) {
+    reason = 'Checked-in reservations cannot be cancelled.';
+  } else if (!isBeforeDeadline) {
+    reason = 'The cancellation deadline has passed.';
+  }
+
+  const result = {
+    ...booking,
+    cancellation: {
+      allowed,
+      deadline: booking.startDateTime.toISOString(),
+      ...(reason ? { reason } : {}),
+    },
+  };
+
+  return result as unknown as BookingWithTableAndZone;
 }
 
 export default BookingService;
