@@ -355,6 +355,131 @@ async function runTests() {
     BookingService.cancelBooking = originalCancelBooking;
   }
 
+  // =========================================================================
+  // Test Group 4: Zero-Penalty Behavior Score Preservation (Andy, Poom)
+  // =========================================================================
+  console.log('\n--- Test Group 4: Zero-Penalty Behavior Score Logic Guarantee (Andy, Poom) ---');
+
+  // Case 4.1: User starting with 100 behavior score maintains 100 score on valid cancellation
+  {
+    const mockNow = new Date('2026-10-05T15:00:00Z');
+    let userScore = 100;
+    let userScoreMutated = false;
+    let auditLogCreated = false;
+
+    const mockPrisma = {
+      booking: {
+        findUnique: async () => ({
+          bookingId: 701,
+          uid: userId,
+          tableId,
+          startDateTime: bookingStart,
+          endDateTime: bookingEnd,
+          status: BookingStatus.PENDING,
+          table: { tableId, status: TableStatus.RESERVED },
+        }),
+      },
+      user: {
+        update: async ({ data }: any) => {
+          if (data?.behaviourScore !== undefined) userScoreMutated = true;
+          return { uid: userId, behaviourScore: userScore };
+        },
+      },
+      manageScore: {
+        create: async () => {
+          auditLogCreated = true;
+          return {};
+        },
+      },
+      $transaction: async (callback: any) => {
+        const tx = {
+          booking: {
+            update: async ({ data }: any) => ({
+              bookingId: 701,
+              uid: userId,
+              status: data.status,
+            }),
+          },
+          table: {
+            update: async ({ data }: any) => ({ tableId, ...data }),
+          },
+        };
+        return await callback(tx);
+      },
+    };
+
+    const result = await BookingService.cancelBooking(userId, 701, mockNow, mockPrisma);
+    assert(
+      result.status === BookingStatus.CANCELLED,
+      'Case 4.1: Booking status transitioned to CANCELLED'
+    );
+    assert(
+      !userScoreMutated && userScore === 100,
+      'Case 4.1: Perfect score (100) preserved without deduction'
+    );
+    assert(!auditLogCreated, 'Case 4.1: No ManageScore penalty log created on valid cancellation');
+  }
+
+  // Case 4.2: User starting with lower score (80) maintains 80 score without penalty
+  {
+    const mockNow = new Date('2026-10-05T15:00:00Z');
+    let userScore = 80;
+    let userScoreMutated = false;
+    let auditLogCreated = false;
+
+    const mockPrisma = {
+      booking: {
+        findUnique: async () => ({
+          bookingId: 702,
+          uid: userId,
+          tableId,
+          startDateTime: bookingStart,
+          endDateTime: bookingEnd,
+          status: BookingStatus.PENDING,
+          table: { tableId, status: TableStatus.RESERVED },
+        }),
+      },
+      user: {
+        update: async ({ data }: any) => {
+          if (data?.behaviourScore !== undefined) userScoreMutated = true;
+          return { uid: userId, behaviourScore: userScore };
+        },
+      },
+      manageScore: {
+        create: async () => {
+          auditLogCreated = true;
+          return {};
+        },
+      },
+      $transaction: async (callback: any) => {
+        const tx = {
+          booking: {
+            update: async ({ data }: any) => ({
+              bookingId: 702,
+              uid: userId,
+              status: data.status,
+            }),
+          },
+          table: {
+            update: async ({ data }: any) => ({ tableId, ...data }),
+          },
+        };
+        return await callback(tx);
+      },
+    };
+
+    const result = await BookingService.cancelBooking(userId, 702, mockNow, mockPrisma);
+    assert(
+      result.status === BookingStatus.CANCELLED,
+      'Case 4.2: Booking status transitioned to CANCELLED'
+    );
+    assert(
+      !userScoreMutated && userScore === 80,
+      'Case 4.2: Pre-existing score (80) preserved without penalty'
+    );
+    assert(!auditLogCreated, 'Case 4.2: Zero-penalty audit log guarantee satisfied');
+  }
+
   console.log('\n===============================================================');
   console.log(`Results: ${passed} passed, ${failed} failed`);
   console.log('===============================================================');

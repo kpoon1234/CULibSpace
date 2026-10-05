@@ -736,10 +736,9 @@ export class BookingService {
         });
       }
 
-      // Zero-penalty behavior score logic:
-      // Note: We deliberately do NOT call any score deduction or ManageScore entry here.
-      // Score remains completely untouched.
-
+      // Zero-penalty behavior score logic (Andy, Poom):
+      // Upon valid cancellation before cutoff, the user's behaviourScore remains untouched.
+      // We deliberately omit score deductions and ManageScore log records to ensure a zero-penalty guarantee.
       return updatedBooking;
     });
 
