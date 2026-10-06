@@ -244,15 +244,17 @@ export class BookingController {
     try {
       const authReq = req as AuthenticatedRequest;
       const userId = authReq.user?.uid;
-      const bookingId = parseInt(req.params.bookingId as string, 10);
+      const rawBookingId = req.params.bookingId as string;
 
       if (!userId) {
         return res.status(401).json({ success: false, error: 'Unauthorized' });
       }
 
-      if (isNaN(bookingId)) {
+      if (!rawBookingId || !/^\d+$/.test(rawBookingId)) {
         return res.status(400).json({ success: false, error: 'Invalid booking ID' });
       }
+
+      const bookingId = Number(rawBookingId);
 
       const result = await BookingService.cancelBooking(userId, bookingId);
 
