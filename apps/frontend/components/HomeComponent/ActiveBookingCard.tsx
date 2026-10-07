@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import { getAuthToken } from '@/lib/auth';
 import { fetchActiveBooking, checkInBooking, type ActiveBookingData } from '@/lib/bookings';
 import { ClockIcon, SeatIcon, PlugIcon, ScreenIcon, QrCodeIcon, CheckIcon } from './icons';
+import CountdownTimer from './CountdownTimer';
 
 interface ActiveBookingCardProps {
   initialData?: ActiveBookingData | null;
@@ -91,6 +92,14 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
       revalidateOnFocus: true,
     }
   );
+
+  // Refetch the moment the check-in window closes. NoShowWorker only sweeps once
+  // a minute and SWR polls every 15s, so without this the card can sit on screen
+  // well after the seat has actually been given up. Memoised so CountdownTimer's
+  // expiry effect sees a stable identity across renders.
+  const handleTimerExpire = useCallback(() => {
+    mutate();
+  }, [mutate]);
 
   // If no token or no active booking returned from /api/bookings/my-active, return null
   if (!token || !booking) {
@@ -210,6 +219,15 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
               </div>
             )}
           </div>
+
+          {/* Centre: the check-in clock. Renders nothing outside the check-in
+              window, and the row closes back up around it when it does. */}
+          <CountdownTimer
+            startDateTime={startDateTime}
+            endDateTime={endDateTime}
+            status={status}
+            onExpire={handleTimerExpire}
+          />
 
           {/* Ticket Divider (Dashed on Desktop, Solid on Mobile) */}
           <div className="relative flex items-center justify-center sm:my-4 sm:flex-col">
