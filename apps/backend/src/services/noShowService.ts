@@ -22,7 +22,70 @@ export class NoShowService {
    */
   static async processNoShowBooking(booking: any, prisma: any = defaultPrisma): Promise<boolean> {
     // TODO (Subtask 3 - Hill, Kaopoon): Update booking status to NO_SHOW, release table to AVAILABLE, deduct behavior score
-    return true;
+    try {
+      await prisma.$transaction(async (tx: any) => {
+        // 1. ปรับสถานะการจองให้เป็น NO_SHOW
+        await tx.booking.update({
+          where: { bookingId: booking.bookingId },
+          data: { status: 'NO_SHOW' },
+        });
+
+        // 2. คืนสถานะโต๊ะกลับเป็น AVAILABLE และเคลียร์ข้อมูลการล็อก
+        // ดักจับ Edge Case: จะไม่อัปเดตสถานะโต๊ะหากโต๊ะนั้นอยู่ในสถานะปิดซ่อมบำรุง (CLOSED)
+        const currentTable = await tx.table.findUnique({
+          where: { tableId: booking.tableId },
+          select: { status: true },
+        });
+
+        if (currentTable && currentTable.status !== 'CLOSED') {
+          await tx.table.update({
+            where: { tableId: booking.tableId },
+            data: {
+              status: 'AVAILABLE',
+              lockToken: null,
+              lockedUntil: null,
+              lockedByUid: null,
+            },
+          });
+        }
+
+        // 3. หักคะแนนพฤติกรรม (Behavior Score Penalty)
+        const PENALTY_SCORE = 10;
+        const user = await tx.user.findUnique({
+          where: { uid: booking.uid },
+          select: { behaviourScore: true },
+        });
+
+        if (user) {
+          const currentScore = Number(user.behaviourScore);
+          // ป้องกันไม่ให้คะแนนติดลบโดยใช้ Math.max
+          const newScore = Math.max(0, currentScore - PENALTY_SCORE);
+
+          await tx.user.update({
+            where: { uid: booking.uid },
+            data: { behaviourScore: newScore },
+          });
+
+          // 4. บันทึกประวัติการหักคะแนนลงในระบบ Audit (ManageScore)
+          // ใช้ adminId: 1 เป็นค่า Default Fallback สำหรับระบบอัตโนมัติ (System Bot)
+          await tx.manageScore.create({
+            data: {
+              uid: booking.uid,
+              adminId: 1,
+              scoreChange: -PENALTY_SCORE,
+            },
+          });
+        }
+      });
+
+      return true;
+    } catch (error) {
+      console.error(
+        `[NoShowWorker] Failed to process no-show for booking ${booking?.bookingId}:`,
+        error
+      );
+      return false;
+    }
   }
 
   /**
