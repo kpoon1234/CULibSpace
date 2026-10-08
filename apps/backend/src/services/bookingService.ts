@@ -505,6 +505,127 @@ export class BookingService {
       return newBooking;
     });
   }
+
+  static async checkIn(
+    userId: number,
+    bookingId: number,
+    now: Date = new Date(),
+    prisma: any = defaultPrisma
+  ) {
+    // 1. ดึงการตั้งค่าระบบ (พร้อม fallback ค่าเริ่มต้น 15 นาที)
+    let config = null;
+    try {
+      config = await prisma.systemConfig.findFirst();
+    } catch {
+      // Fallback defaults if SystemConfig query fails
+    }
+    const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
+    const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
+
+    // 2. ดึงข้อมูลการจอง
+    const booking = await prisma.booking.findUnique({
+      where: { bookingId },
+      include: { table: true },
+    });
+
+    if (!booking) {
+      throw { status: 404, code: 'BOOKING_NOT_FOUND', message: 'Booking not found' };
+    }
+
+    if (booking.uid !== userId) {
+      throw {
+        status: 403,
+        code: 'UNAUTHORIZED_CHECKIN',
+        message: 'Not allowed to check in for this booking',
+      };
+    }
+
+    // Specific rejection messages based on AC 4.1.3
+    if (booking.status === BookingStatus.NO_SHOW) {
+      throw {
+        status: 400,
+        code: 'RESERVATION_CANCELLED_NO_SHOW',
+        message: 'This reservation was cancelled due to No-show.',
+      };
+    }
+
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw {
+        status: 400,
+        code: 'RESERVATION_CANCELLED',
+        message: 'This reservation has been cancelled.',
+      };
+    }
+
+    if (booking.status === BookingStatus.ACTIVE) {
+      throw {
+        status: 400,
+        code: 'ALREADY_CHECKED_IN',
+        message: 'You have already checked in for this reservation.',
+      };
+    }
+
+    if (booking.status !== BookingStatus.PENDING) {
+      throw {
+        status: 400,
+        code: 'INVALID_BOOKING_STATUS',
+        message: `Cannot check in. Current status: ${booking.status}`,
+      };
+    }
+
+    // 3. คำนวณ Check-in Window (AC 4.1.1, AC 4.1.2)
+    const earlyCheckInMs = earlyCheckInMinutes * 60 * 1000;
+    const lateThresholdMs = lateThresholdMinutes * 60 * 1000;
+
+    const startWindow = new Date(booking.startDateTime.getTime() - earlyCheckInMs);
+    const endWindow = new Date(booking.startDateTime.getTime() + lateThresholdMs);
+
+    if (now < startWindow) {
+      throw {
+        status: 400,
+        code: 'CHECK_IN_TOO_EARLY',
+        message: `It is too early to check in. Check-in opens at ${startWindow.toISOString()}`,
+        checkInAvailableAt: startWindow.toISOString(),
+      };
+    }
+
+    if (now > endWindow) {
+      throw {
+        status: 400,
+        code: 'CHECK_IN_TOO_LATE',
+        message: 'Check-in window has expired.',
+      };
+    }
+
+    // 4. Update สถานะใน Transaction
+    const updatedBooking = await prisma.$transaction(async (tx: any) => {
+      const b = await tx.booking.update({
+        where: { bookingId },
+        data: {
+          status: BookingStatus.ACTIVE,
+          arriveTime: now,
+        },
+        include: {
+          table: {
+            include: {
+              zone: true,
+            },
+          },
+        },
+      });
+
+      await tx.table.update({
+        where: { tableId: booking.tableId },
+        data: {
+          status: TableStatus.OCCUPIED,
+        },
+      });
+
+      return b;
+    });
+
+    return updatedBooking;
+  }
 }
 
 /**
