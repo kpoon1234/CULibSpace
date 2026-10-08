@@ -33,6 +33,11 @@ export interface BookingWithTableAndZone {
       zoneType: ZoneType;
     };
   };
+  cancellation?: {
+    allowed: boolean;
+    deadline?: string;
+    reason?: string;
+  };
 }
 
 const defaultPrisma = new PrismaClient();
@@ -626,6 +631,217 @@ export class BookingService {
 
     return updatedBooking;
   }
+
+  /**
+   * Cancel an upcoming reservation before the cutoff deadline with zero score penalty (US5-1 / FR-5.1)
+   *
+   * Verifies:
+   * 1. Booking existence & ownership (uid matches) -> 404 / 403 UNAUTHORIZED_CANCELLATION
+   * 2. Booking status is PENDING:
+   *    - ACTIVE (already checked in) -> 400 BOOKING_ALREADY_CHECKED_IN
+   *    - CANCELLED -> 400 BOOKING_ALREADY_CANCELLED
+   *    - COMPLETED / NO_SHOW -> 400 BOOKING_NOT_PENDING
+   * 3. Cutoff deadline check:
+   *    - Cancellation must occur before startDateTime (cutoff time).
+   *    - If now >= startDateTime -> 400 CANCELLATION_DEADLINE_PASSED
+   * 4. Atomic Transaction:
+   *    - Updates booking status to CANCELLED
+   *    - Releases table status back to AVAILABLE
+   *    - Clears any temporary hold locks on the table
+   *    - ZERO PENALTY: User behavior score is untouched, no record inserted into ManageScore
+   */
+  static async cancelBooking(
+    userId: number,
+    bookingId: number,
+    now: Date = new Date(),
+    prisma: any = defaultPrisma
+  ) {
+    return await this.withTimeout(async () => {
+      // 1. Fetch system configuration (with fallback) for check-in window & cancellation cutoff
+      let config = null;
+      try {
+        config = prisma.systemConfig?.findFirst ? await prisma.systemConfig.findFirst() : null;
+      } catch {
+        // Fallback defaults if SystemConfig query fails
+      }
+      const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
+      const cancellationCutoffMs = earlyCheckInMinutes * 60 * 1000;
+
+      const booking = await prisma.booking.findUnique({
+        where: { bookingId },
+        include: { table: true },
+      });
+
+      if (!booking) {
+        throw { status: 404, code: 'BOOKING_NOT_FOUND', message: 'Booking not found' };
+      }
+
+      if (booking.uid !== userId) {
+        throw {
+          status: 403,
+          code: 'UNAUTHORIZED_CANCELLATION',
+          message: 'You do not have permission to cancel this reservation.',
+        };
+      }
+
+      if (booking.status === BookingStatus.ACTIVE) {
+        throw {
+          status: 400,
+          code: 'BOOKING_ALREADY_CHECKED_IN',
+          message: 'You’ve already checked in. This reservation can no longer be cancelled.',
+        };
+      }
+
+      if (booking.status === BookingStatus.CANCELLED) {
+        throw {
+          status: 400,
+          code: 'BOOKING_ALREADY_CANCELLED',
+          message: 'This reservation is already cancelled.',
+        };
+      }
+
+      if (booking.status !== BookingStatus.PENDING) {
+        throw {
+          status: 400,
+          code: 'BOOKING_NOT_PENDING',
+          message: 'This reservation is no longer pending and cannot be cancelled.',
+        };
+      }
+
+      // Cutoff deadline check: Must cancel before the early check-in window opens (AC 5.1.1)
+      const cutoffTime = new Date(booking.startDateTime.getTime() - cancellationCutoffMs);
+      if (now >= cutoffTime) {
+        throw {
+          status: 400,
+          code: 'CANCELLATION_DEADLINE_PASSED',
+          message:
+            'The cancellation deadline has passed. This reservation can no longer be cancelled.',
+        };
+      }
+
+      // Atomic Transaction: Cancel booking, restore table availability, zero penalty to user score
+      const executeInTx = async (tx: any) => {
+        // Optimistic Concurrency Guard: Atomic update only if still PENDING (prevents check-in race condition)
+        const updateResult = await tx.booking.updateMany({
+          where: {
+            bookingId,
+            status: BookingStatus.PENDING,
+          },
+          data: {
+            status: BookingStatus.CANCELLED,
+          },
+        });
+
+        if (updateResult.count === 0) {
+          // If count === 0, the booking state changed concurrently (e.g. checked in or cancelled)
+          const currentBooking = tx.booking.findUnique
+            ? await tx.booking.findUnique({
+                where: { bookingId },
+                select: { status: true },
+              })
+            : null;
+
+          if (currentBooking?.status === BookingStatus.ACTIVE) {
+            throw {
+              status: 400,
+              code: 'BOOKING_ALREADY_CHECKED_IN',
+              message: 'You’ve already checked in. This reservation can no longer be cancelled.',
+            };
+          }
+          if (currentBooking?.status === BookingStatus.CANCELLED) {
+            throw {
+              status: 400,
+              code: 'BOOKING_ALREADY_CANCELLED',
+              message: 'This reservation is already cancelled.',
+            };
+          }
+          throw {
+            status: 400,
+            code: 'BOOKING_NOT_PENDING',
+            message: 'This reservation is no longer pending and cannot be cancelled.',
+          };
+        }
+
+        // Release table back to AVAILABLE (if table exists and is not closed for maintenance)
+        if (booking.table && booking.table.status !== TableStatus.CLOSED) {
+          // Check if another active or pending booking overlaps right now
+          let ongoingBooking = null;
+          if (tx.booking.findFirst) {
+            ongoingBooking = await tx.booking.findFirst({
+              where: {
+                tableId: booking.tableId,
+                bookingId: { not: bookingId },
+                status: { in: [BookingStatus.ACTIVE, BookingStatus.PENDING] },
+                startDateTime: { lte: now },
+                endDateTime: { gt: now },
+              },
+            });
+          }
+
+          const targetStatus = ongoingBooking
+            ? ongoingBooking.status === BookingStatus.ACTIVE
+              ? TableStatus.OCCUPIED
+              : TableStatus.RESERVED
+            : TableStatus.AVAILABLE;
+
+          if (tx.table.update) {
+            await tx.table.update({
+              where: { tableId: booking.tableId },
+              data: {
+                status: targetStatus,
+              },
+            });
+          }
+        }
+
+        // Clear hold lock ONLY if locked by this user (prevent clearing another user's active hold lock)
+        if (tx.table.updateMany) {
+          await tx.table.updateMany({
+            where: {
+              tableId: booking.tableId,
+              lockedByUid: userId,
+            },
+            data: {
+              lockToken: null,
+              lockedUntil: null,
+              lockedByUid: null,
+            },
+          });
+        }
+
+        // Zero-penalty behavior score logic (Andy, Poom):
+        // Upon valid cancellation before cutoff, the user's behaviourScore remains untouched.
+        // We deliberately omit score deductions and ManageScore log records to ensure a zero-penalty guarantee.
+
+        // Structured audit logging for booking cancellation
+        console.log(
+          `[BookingCancellation] Booking #${bookingId} successfully cancelled by User #${userId} at ${now.toISOString()}`
+        );
+
+        // Fetch updated booking payload
+        const updatedBooking = tx.booking.findUnique
+          ? await tx.booking.findUnique({
+              where: { bookingId },
+              include: {
+                table: {
+                  include: {
+                    zone: true,
+                  },
+                },
+              },
+            })
+          : { ...booking, status: BookingStatus.CANCELLED };
+
+        return updatedBooking;
+      };
+
+      if (prisma.$transaction) {
+        return await prisma.$transaction(executeInTx);
+      } else {
+        return await executeInTx(prisma);
+      }
+    });
+  }
 }
 
 /**
@@ -665,9 +881,12 @@ export async function getBookingHistory(uid: number): Promise<BookingWithTableAn
  * @param uid User ID
  * @returns The active booking with table and zone information, or null if none
  */
-export async function getActiveBooking(uid: number): Promise<BookingWithTableAndZone | null> {
-  const now = new Date();
-  const booking = await defaultPrisma.booking.findFirst({
+export async function getActiveBooking(
+  uid: number,
+  now: Date = new Date(),
+  prisma: any = defaultPrisma
+): Promise<BookingWithTableAndZone | null> {
+  const booking = await prisma.booking.findFirst({
     where: {
       uid,
       status: {
@@ -686,7 +905,41 @@ export async function getActiveBooking(uid: number): Promise<BookingWithTableAnd
     },
   });
 
-  return booking as unknown as BookingWithTableAndZone | null;
+  if (!booking) return null;
+
+  // Read system configuration for early check-in window / cancellation cutoff
+  let config = null;
+  try {
+    config = prisma.systemConfig?.findFirst ? await prisma.systemConfig.findFirst() : null;
+  } catch {
+    // fallback
+  }
+  const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
+  const cancellationCutoffMs = earlyCheckInMinutes * 60 * 1000;
+  const deadline = new Date(booking.startDateTime.getTime() - cancellationCutoffMs);
+
+  // Compute cancellation metadata for frontend ActiveBookingCard / CancelReservationModal
+  const isPending = booking.status === BookingStatus.PENDING;
+  const isBeforeDeadline = now < deadline;
+  const allowed = isPending && isBeforeDeadline;
+
+  let reason: string | undefined;
+  if (booking.status === BookingStatus.ACTIVE) {
+    reason = 'Checked-in reservations cannot be cancelled.';
+  } else if (!isBeforeDeadline) {
+    reason = 'The cancellation deadline has passed (check-in window is open).';
+  }
+
+  const result = {
+    ...booking,
+    cancellation: {
+      allowed,
+      deadline: deadline.toISOString(),
+      ...(reason ? { reason } : {}),
+    },
+  };
+
+  return result as unknown as BookingWithTableAndZone;
 }
 
 export default BookingService;
