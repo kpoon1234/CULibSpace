@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useSyncExternalStore } from 'react';
 import useSWR from 'swr';
-import { getAuthToken } from '@/lib/auth';
+import { getAuthToken, subscribeToAuth } from '@/lib/auth';
+import CancelReservationModal from '@/components/Reservation/CancelReservationModal';
+import type { CancellableBooking } from '@/lib/cancellation';
 import { fetchActiveBooking, checkInBooking, type ActiveBookingData } from '@/lib/bookings';
 import { ClockIcon, SeatIcon, PlugIcon, ScreenIcon, QrCodeIcon, CheckIcon } from './icons';
 
@@ -59,6 +61,9 @@ function getZoneLabel(zoneType?: string) {
 }
 
 export default function ActiveBookingCard({ initialData }: ActiveBookingCardProps) {
+  // Keep a snapshot so background polling cannot dismiss the confirmation/result.
+  const [cancellationBooking, setCancellationBooking] = useState<CancellableBooking | null>(null);
+  const [cancelledBookingId, setCancelledBookingId] = useState<number | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [checkInStatus, setCheckInStatus] = useState<{ ok?: boolean; message?: string } | null>(
@@ -80,7 +85,7 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
     setCheckInStatus(null);
   }, []);
 
-  const token = typeof window !== 'undefined' ? getAuthToken() : null;
+  const token = useSyncExternalStore(subscribeToAuth, getAuthToken, () => null);
 
   const { data: booking, mutate } = useSWR(
     token ? ['activeBooking', token] : null,
@@ -92,12 +97,16 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
     }
   );
 
-  // If no token or no active booking returned from /api/bookings/my-active, return null
-  if (!token || !booking) {
-    return null;
-  }
+  const visibleBooking = booking && booking.bookingId !== cancelledBookingId ? booking : null;
+  const currentBooking = (visibleBooking ?? cancellationBooking) as CancellableBooking | null;
+  if (!token || !currentBooking) return null;
 
-  const { table, startDateTime, endDateTime, status, bookingId } = booking;
+  const { table, startDateTime, endDateTime, status, bookingId } = currentBooking;
+  const canCancel = status === 'PENDING' && currentBooking.cancellation?.allowed !== false;
+  const cancellationReason =
+    status !== 'PENDING'
+      ? 'Checked-in reservations cannot be cancelled.'
+      : currentBooking.cancellation?.reason || 'This reservation can no longer be cancelled.';
   const isCheckedIn = status === 'ACTIVE';
 
   async function handleCheckIn() {
@@ -130,128 +139,154 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
 
   return (
     <>
-      <div className="relative mt-3 w-full max-w-full overflow-hidden rounded-2xl border border-rose-200/70 bg-gradient-to-br from-white via-white to-rose-50/40 shadow-md shadow-rose-950/5 backdrop-blur-sm transition-all hover:border-rose-300 hover:shadow-lg">
-        {/* Top Accent Gradient Bar */}
-        <div className="h-1 w-full bg-gradient-to-r from-cta-primary via-chula-pink to-rose-400" />
+      {visibleBooking && (
+        <div className="relative mt-3 w-full max-w-full overflow-hidden rounded-2xl border border-rose-200/70 bg-gradient-to-br from-white via-white to-rose-50/40 shadow-md shadow-rose-950/5 backdrop-blur-sm transition-all hover:border-rose-300 hover:shadow-lg">
+          {/* Top Accent Gradient Bar */}
+          <div className="h-1 w-full bg-gradient-to-r from-cta-primary via-chula-pink to-rose-400" />
 
-        <div className="flex flex-col sm:flex-row sm:items-stretch sm:justify-between">
-          {/* Left Area: Details & Amenities */}
-          <div className="flex flex-1 flex-col justify-between gap-4 p-5 sm:p-6">
-            {/* Top row: Status, Zone & Booking ID */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-xs font-semibold tracking-wide uppercase ${
-                    isCheckedIn
-                      ? 'bg-spruce/10 text-spruce ring-1 ring-spruce/30'
-                      : 'bg-amber-50 text-amber-800 ring-1 ring-amber-600/30'
-                  }`}
-                >
+          <div className="flex flex-col sm:flex-row sm:items-stretch sm:justify-between">
+            {/* Left Area: Details & Amenities */}
+            <div className="flex flex-1 flex-col justify-between gap-4 p-5 sm:p-6">
+              {/* Top row: Status, Zone & Booking ID */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
                   <span
-                    className={`h-2 w-2 rounded-full ${
-                      isCheckedIn ? 'bg-spruce' : 'animate-pulse bg-amber-500'
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-xs font-semibold tracking-wide uppercase ${
+                      isCheckedIn
+                        ? 'bg-spruce/10 text-spruce ring-1 ring-spruce/30'
+                        : 'bg-amber-50 text-amber-800 ring-1 ring-amber-600/30'
                     }`}
-                  />
-                  {isCheckedIn ? 'Active Session' : 'Pending Check-in'}
+                  >
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        isCheckedIn ? 'bg-spruce' : 'animate-pulse bg-amber-500'
+                      }`}
+                    />
+                    {isCheckedIn ? 'Active Session' : 'Pending Check-in'}
+                  </span>
+
+                  <span className="rounded-md bg-stone-100/90 px-2.5 py-0.5 text-xs font-medium text-stone-700">
+                    {getZoneLabel(table?.zone?.zoneType)}
+                  </span>
+                </div>
+
+                <span className="font-mono text-xs font-semibold text-gray-400">
+                  #BK-{bookingId}
                 </span>
-
-                <span className="rounded-md bg-stone-100/90 px-2.5 py-0.5 text-xs font-medium text-stone-700">
-                  {getZoneLabel(table?.zone?.zoneType)}
-                </span>
               </div>
 
-              <span className="font-mono text-xs font-semibold text-gray-400">#BK-{bookingId}</span>
-            </div>
+              {/* Table Number & Time */}
+              <div className="my-1">
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-2xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">
+                    Table #{table?.tableId}
+                  </h3>
+                </div>
 
-            {/* Table Number & Time */}
-            <div className="my-1">
-              <div className="flex items-baseline gap-2">
-                <h3 className="text-2xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">
-                  Table #{table?.tableId}
-                </h3>
+                <div className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-white/80 px-3 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200/70 sm:text-sm">
+                  <ClockIcon className="h-4 w-4 text-cta-primary" />
+                  <span>{formatTimeslot(startDateTime, endDateTime)}</span>
+                </div>
               </div>
 
-              <div className="mt-1.5 inline-flex items-center gap-2 rounded-lg bg-white/80 px-3 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200/70 sm:text-sm">
-                <ClockIcon className="h-4 w-4 text-cta-primary" />
-                <span>{formatTimeslot(startDateTime, endDateTime)}</span>
-              </div>
-            </div>
+              {/* Amenities Pills — only rendered when API returns a table object */}
+              {table && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span
+                    title={`${table.numberOfSeat} Seats`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
+                  >
+                    <SeatIcon className="h-3.5 w-3.5 text-stone-500" />
+                    <span>{table.numberOfSeat ?? '—'} Seats</span>
+                  </span>
 
-            {/* Amenities Pills — only rendered when API returns a table object */}
-            {table && (
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span
-                  title={`${table.numberOfSeat} Seats`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
+                  {table.plugCap !== null && table.plugCap !== undefined && table.plugCap > 0 && (
+                    <span
+                      title={`${table.plugCap} Outlets`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
+                    >
+                      <PlugIcon className="h-3.5 w-3.5 text-stone-500" />
+                      <span>{table.plugCap} Plugs</span>
+                    </span>
+                  )}
+
+                  {table.hasTvScreen && (
+                    <span
+                      title="TV Screen Available"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
+                    >
+                      <ScreenIcon className="h-3.5 w-3.5 text-stone-500" />
+                      <span>TV Screen</span>
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="mt-2">
+                <button
+                  type="button"
+                  disabled={!canCancel || isCheckingIn || isQrModalOpen}
+                  onClick={() => setCancellationBooking(currentBooking)}
+                  className="min-h-11 rounded-lg border border-gray-300 bg-paper px-5 py-2.5 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <SeatIcon className="h-3.5 w-3.5 text-stone-500" />
-                  <span>{table.numberOfSeat ?? '—'} Seats</span>
-                </span>
-
-                {table.plugCap !== null && table.plugCap !== undefined && table.plugCap > 0 && (
-                  <span
-                    title={`${table.plugCap} Outlets`}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
-                  >
-                    <PlugIcon className="h-3.5 w-3.5 text-stone-500" />
-                    <span>{table.plugCap} Plugs</span>
-                  </span>
-                )}
-
-                {table.hasTvScreen && (
-                  <span
-                    title="TV Screen Available"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs"
-                  >
-                    <ScreenIcon className="h-3.5 w-3.5 text-stone-500" />
-                    <span>TV Screen</span>
-                  </span>
+                  Cancel reservation
+                </button>
+                {!canCancel && <p className="mt-2 text-xs text-gray-600">{cancellationReason}</p>}
+                {canCancel && currentBooking.cancellation?.deadline && (
+                  <p className="mt-2 text-xs text-gray-600">
+                    Cancel before{' '}
+                    {new Date(currentBooking.cancellation.deadline).toLocaleString('en-GB', {
+                      timeZone: 'Asia/Bangkok',
+                    })}{' '}
+                    without penalty.
+                  </p>
                 )}
               </div>
-            )}
-          </div>
+            </div>
 
-          {/* Ticket Divider (Dashed on Desktop, Solid on Mobile) */}
-          <div className="relative flex items-center justify-center sm:my-4 sm:flex-col">
-            <div className="h-px w-full border-t border-dashed border-rose-200 sm:h-full sm:w-px sm:border-t-0 sm:border-r" />
-          </div>
+            {/* Ticket Divider (Dashed on Desktop, Solid on Mobile) */}
+            <div className="relative flex items-center justify-center sm:my-4 sm:flex-col">
+              <div className="h-px w-full border-t border-dashed border-rose-200 sm:h-full sm:w-px sm:border-t-0 sm:border-r" />
+            </div>
 
-          {/* Right Area: Action / QR Check-in */}
-          <div className="flex shrink-0 flex-col items-center justify-center p-5 sm:min-w-[160px] sm:p-6">
-            {isCheckedIn ? (
-              <div className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-spruce/20 bg-spruce/5 p-4 text-center">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-spruce text-white shadow-sm">
-                  <CheckIcon className="h-5 w-5" />
+            {/* Right Area: Action / QR Check-in */}
+            <div className="flex shrink-0 flex-col items-center justify-center p-5 sm:min-w-[160px] sm:p-6">
+              {isCheckedIn ? (
+                <div className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-spruce/20 bg-spruce/5 p-4 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-spruce text-white shadow-sm">
+                    <CheckIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-spruce">Checked In</div>
+                    <div className="text-[11px] text-spruce/70">Seat Active</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-xs font-bold text-spruce">Checked In</div>
-                  <div className="text-[11px] text-spruce/70">Seat Active</div>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsQrModalOpen(true)}
-                className="group relative flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-cta-primary to-cta-primary-hover p-4 text-center text-white shadow-md transition-all hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 active:scale-95 sm:w-auto sm:min-w-[140px]"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/20 shadow-inner transition-transform group-hover:scale-110">
-                  <QrCodeIcon className="h-5 w-5 text-white" />
-                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsQrModalOpen(true)}
+                  className="group relative flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-cta-primary to-cta-primary-hover p-4 text-center text-white shadow-md transition-all hover:scale-[1.02] hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 active:scale-95 sm:w-auto sm:min-w-[140px]"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/20 shadow-inner transition-transform group-hover:scale-110">
+                    <QrCodeIcon className="h-5 w-5 text-white" />
+                  </div>
 
-                <div className="flex flex-col items-center leading-tight">
-                  <span className="text-xs font-extrabold tracking-wide uppercase">
-                    Scan Table QR
-                  </span>
-                  <span className="mt-0.5 text-[10px] text-white/80 font-medium">to Check in</span>
-                </div>
-              </button>
-            )}
+                  <div className="flex flex-col items-center leading-tight">
+                    <span className="text-xs font-extrabold tracking-wide uppercase">
+                      Scan Table QR
+                    </span>
+                    <span className="mt-0.5 text-[10px] text-white/80 font-medium">
+                      to Check in
+                    </span>
+                  </div>
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* QR Check-in Modal */}
-      {isQrModalOpen && (
+      {visibleBooking && isQrModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           onClick={(e) => {
@@ -314,6 +349,23 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
             </button>
           </div>
         </div>
+      )}
+      {cancellationBooking && (
+        <CancelReservationModal
+          key={cancellationBooking.bookingId}
+          booking={cancellationBooking}
+          onClose={() => setCancellationBooking(null)}
+          onCancelled={(id) => {
+            setCancelledBookingId(id);
+            // Clear only this booking; another future booking may now be returned.
+            void mutate((cached) => (cached?.bookingId === id ? null : cached), {
+              revalidate: true,
+            }).catch(() => {});
+          }}
+          onRefresh={() => {
+            void mutate().catch(() => {});
+          }}
+        />
       )}
     </>
   );
