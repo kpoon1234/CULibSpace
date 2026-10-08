@@ -10,6 +10,7 @@ import {
   ZoneType,
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
+import { PenaltyService } from './penaltyService.js';
 import { randomUUID } from 'crypto';
 
 export interface BookingWithTableAndZone {
@@ -349,7 +350,7 @@ export class BookingService {
     return await this.withTimeout(async () => {
       const user = await prisma.user.findUnique({
         where: { uid: userId },
-        select: { isProfileComplete: true },
+        select: { isProfileComplete: true, behaviourScore: true },
       });
       if (user && !user.isProfileComplete) {
         throw {
@@ -358,6 +359,8 @@ export class BookingService {
           message: 'Please complete your profile onboarding before making a reservation',
         };
       }
+
+      await PenaltyService.enforceMinScore(userId, prisma, user);
 
       const now = new Date();
 
