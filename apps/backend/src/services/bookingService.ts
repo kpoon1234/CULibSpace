@@ -10,6 +10,7 @@ import {
   ZoneType,
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
+import { PenaltyService } from './penaltyService.js';
 import { randomUUID } from 'crypto';
 
 export interface BookingWithTableAndZone {
@@ -359,6 +360,8 @@ export class BookingService {
         };
       }
 
+      await PenaltyService.enforceMinScore(userId, prisma);
+
       const now = new Date();
 
       if (startDateTime && endDateTime) {
@@ -544,6 +547,8 @@ export class BookingService {
         message: 'Not allowed to check in for this booking',
       };
     }
+
+    await PenaltyService.enforceMinScore(userId, prisma);
 
     // Specific rejection messages based on AC 4.1.3
     if (booking.status === BookingStatus.NO_SHOW) {
