@@ -160,9 +160,9 @@ async function runTests() {
     assert(false, 'acquireLock allows user with sufficient score', err?.message);
   }
 
-  console.log('\n--- Test Group 3: checkIn Score Guard ---');
+  console.log('\n--- Test Group 3: checkIn (No Score Guard) ---');
 
-  // Test 7: checkIn blocks user with low score
+  // Test 7: checkIn succeeds regardless of score (score check only on hold/booking endpoints)
   try {
     const mockPrisma = {
       systemConfig: {
@@ -182,13 +182,27 @@ async function runTests() {
           table: { tableId: 1, status: TableStatus.RESERVED },
         }),
       },
+      $transaction: async (callback: any) => {
+        const tx = {
+          booking: {
+            update: async ({ data }: any) => {
+              return { bookingId: 100, status: data.status, arriveTime: data.arriveTime };
+            },
+          },
+          table: {
+            update: async ({ data }: any) => {
+              return { tableId: 1, status: data.status };
+            },
+          },
+        };
+        return await callback(tx);
+      },
     };
 
-    await BookingService.checkIn(42, 100, new Date('2026-10-01T13:50:00Z'), mockPrisma);
-    assert(false, 'checkIn should reject user with low score');
+    const result = await BookingService.checkIn(42, 100, new Date('2026-10-01T13:50:00Z'), mockPrisma);
+    assert(result.status === BookingStatus.ACTIVE, 'checkIn succeeds even with low score (no score guard on check-in)');
   } catch (err: any) {
-    assert(err.status === 403, 'checkIn returns 403');
-    assert(err.code === 'INSUFFICIENT_BEHAVIOUR_SCORE', 'Error code is INSUFFICIENT_BEHAVIOUR_SCORE');
+    assert(false, 'checkIn succeeds regardless of score', err?.message);
   }
 
   // Test 8: checkIn allows user with sufficient score

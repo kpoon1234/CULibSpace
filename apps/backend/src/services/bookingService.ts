@@ -350,7 +350,7 @@ export class BookingService {
     return await this.withTimeout(async () => {
       const user = await prisma.user.findUnique({
         where: { uid: userId },
-        select: { isProfileComplete: true },
+        select: { isProfileComplete: true, behaviourScore: true },
       });
       if (user && !user.isProfileComplete) {
         throw {
@@ -360,7 +360,7 @@ export class BookingService {
         };
       }
 
-      await PenaltyService.enforceMinScore(userId, prisma);
+      await PenaltyService.enforceMinScore(userId, prisma, user);
 
       const now = new Date();
 
@@ -547,8 +547,6 @@ export class BookingService {
         message: 'Not allowed to check in for this booking',
       };
     }
-
-    await PenaltyService.enforceMinScore(userId, prisma);
 
     // Specific rejection messages based on AC 4.1.3
     if (booking.status === BookingStatus.NO_SHOW) {
