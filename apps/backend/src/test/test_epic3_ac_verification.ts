@@ -1,6 +1,6 @@
-import { BookingService, getBookingHistory, getActiveBooking } from './services/bookingService.js';
-import { LayoutService } from './services/layoutService.js';
-import { ScheduleService } from './services/scheduleService.js';
+import { BookingService, getBookingHistory, getActiveBooking } from '../services/bookingService.js';
+import { LayoutService } from '../services/layoutService.js';
+import { ScheduleService } from '../services/scheduleService.js';
 import { UserType, TableStatus, BookingStatus, TicketStatus, ZoneType } from '@prisma/client';
 
 console.log('===============================================================');

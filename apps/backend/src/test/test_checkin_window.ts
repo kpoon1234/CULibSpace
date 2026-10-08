@@ -1,4 +1,4 @@
-import { BookingService } from './services/bookingService.js';
+import { BookingService } from '../services/bookingService.js';
 import { BookingStatus, TableStatus } from '@prisma/client';
 
 console.log('===============================================================');
@@ -233,7 +233,7 @@ async function runTests() {
       },
     } as any;
     // @ts-ignore
-    const { BookingController } = await import('./controllers/bookingController.js');
+    const { BookingController } = await import('../controllers/bookingController.js');
     await BookingController.checkIn(req, res);
     assert(
       statusCode === 401 && body?.error === 'Unauthorized',
@@ -256,7 +256,7 @@ async function runTests() {
         };
       },
     } as any;
-    const { BookingController } = await import('./controllers/bookingController.js');
+    const { BookingController } = await import('../controllers/bookingController.js');
     await BookingController.checkIn(req, res);
     assert(
       statusCode === 400 && body?.error === 'Invalid booking ID',

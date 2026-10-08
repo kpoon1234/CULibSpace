@@ -1,4 +1,4 @@
-import { ScheduleService } from './services/scheduleService.js';
+import { ScheduleService } from '../services/scheduleService.js';
 
 console.log('🧪 Starting US2-4 Target Date & Operating Schedule Validation Tests...\n');
 

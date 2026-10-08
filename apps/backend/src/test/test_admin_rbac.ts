@@ -1,5 +1,5 @@
-import { requireRoles, AuthenticatedRequest } from './middlewares/authMiddleware.js';
-import { signJwt, verifyJwt } from './utils/jwt.js';
+import { requireRoles, AuthenticatedRequest } from '../middlewares/authMiddleware.js';
+import { signJwt, verifyJwt } from '../utils/jwt.js';
 
 function runAdminRbacTests() {
   console.log('🧪 Starting US1-3 Test Suite for Admin RBAC Middleware...\n');
