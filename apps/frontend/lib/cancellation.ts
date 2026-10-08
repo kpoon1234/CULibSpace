@@ -68,6 +68,10 @@ export async function cancelReservation(bookingId: number): Promise<CancelResult
     if (response.ok && body?.success === true) return { ok: true };
 
     switch (body?.code) {
+      case 'BOOKING_ALREADY_CANCELLED':
+        // The server confirms the desired state, including cancellation in another tab.
+        // Reuse the success flow to dismiss the stale booking and refresh its data.
+        return { ok: true };
       case 'CANCELLATION_DEADLINE_PASSED':
         return {
           ok: false,
