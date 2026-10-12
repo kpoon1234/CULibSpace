@@ -349,14 +349,14 @@ export class AuthController {
 
       const { targetUid, scoreChange } = req.body;
 
-      // Strict type parsing to prevent Prisma 500 crashes
       const parsedTargetUid = parseInt(String(targetUid), 10);
       const parsedScoreChange = parseFloat(String(scoreChange));
 
-      if (isNaN(parsedTargetUid) || isNaN(parsedScoreChange)) {
+      // BUG FIX: Ensure UID is valid and greater than 0
+      if (isNaN(parsedTargetUid) || parsedTargetUid <= 0 || isNaN(parsedScoreChange)) {
         res.status(400).json({
           success: false,
-          error: 'A valid targetUid and numeric scoreChange are required',
+          error: 'A valid targetUid (> 0) and numeric scoreChange are required',
         });
         return;
       }

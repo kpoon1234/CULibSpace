@@ -347,10 +347,11 @@ export class AuthService {
       let newScore = currentScore + scoreChange;
       newScore = Math.min(100.0, Math.max(0.0, newScore));
 
-      // 4. Calculate ACTUAL effective change for accurate audit logging
+      // 4. Calculate ACTUAL effective change and round it to satisfy Prisma Int type
       const actualScoreChange = newScore - currentScore;
+      const roundedScoreChange = Math.round(actualScoreChange);
 
-      if (actualScoreChange === 0) {
+      if (roundedScoreChange === 0) {
         return {
           uid: targetUid,
           behaviourScore: newScore,
@@ -359,7 +360,6 @@ export class AuthService {
       }
 
       // 5. Update User Score (ACID Guard - Optimistic Concurrency)
-      // Enforce that the score hasn't been modified by another transaction since Step 2
       const updateResult = await tx.user.updateMany({
         where: {
           uid: targetUid,
@@ -368,7 +368,6 @@ export class AuthService {
         data: { behaviourScore: newScore },
       });
 
-      // If count is 0, a concurrent transaction (like NoShowWorker) modified the score first.
       if (updateResult.count === 0) {
         throw {
           status: 409,
@@ -377,12 +376,12 @@ export class AuthService {
         };
       }
 
-      // 6. Write audit log entry
+      // 6. Write audit log entry (Safe Int insertion)
       await tx.manageScore.create({
         data: {
           uid: targetUid,
           adminId: adminId,
-          scoreChange: actualScoreChange,
+          scoreChange: roundedScoreChange, // <-- BUG FIX: Rounds to nearest integer
           timestamp: new Date(),
         },
       });
