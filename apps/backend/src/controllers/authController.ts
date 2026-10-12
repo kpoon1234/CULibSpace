@@ -332,4 +332,40 @@ export class AuthController {
       });
     }
   }
+
+  /**
+   * POST /api/auth/admin/adjust-score
+   * Manual behavior score adjustment by Admin (US5-4)
+   */
+  static async adjustScore(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const adminId = authReq.user?.adminId;
+
+      if (!adminId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: Admin session required' });
+        return;
+      }
+
+      const { targetUid, scoreChange } = req.body;
+
+      if (!targetUid || typeof scoreChange !== 'number') {
+        res
+          .status(400)
+          .json({ success: false, error: 'targetUid and a numeric scoreChange are required' });
+        return;
+      }
+
+      const result = await AuthService.adjustUserScore(adminId, Number(targetUid), scoreChange);
+
+      res.status(200).json({
+        success: true,
+        message: 'User score adjusted successfully',
+        data: result,
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
+    }
+  }
 }

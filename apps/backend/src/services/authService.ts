@@ -318,4 +318,44 @@ export class AuthService {
       },
     };
   }
+
+  /**
+   * [US5-4]: Admin manual score adjustment with [0.0, 100.0] clamping
+   */
+  static async adjustUserScore(adminId: number, targetUid: number, scoreChange: number) {
+    return await prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { uid: targetUid },
+        select: { uid: true, behaviourScore: true },
+      });
+
+      if (!user) {
+        throw { status: 404, message: 'User not found' };
+      }
+
+      // Clamping Logic [0.0, 100.0] (US5-4 - Punt, Andy)
+      const currentScore = Number(user.behaviourScore);
+      let newScore = currentScore + scoreChange;
+      newScore = Math.min(100.0, Math.max(0.0, newScore));
+
+      // Update User Score
+      const updatedUser = await tx.user.update({
+        where: { uid: targetUid },
+        data: { behaviourScore: newScore },
+        select: { uid: true, behaviourScore: true },
+      });
+
+      // Write audit log entry (US5-4 - Hill, Kaopoon)
+      await tx.manageScore.create({
+        data: {
+          uid: targetUid,
+          adminId: adminId,
+          scoreChange: scoreChange,
+          timestamp: new Date(),
+        },
+      });
+
+      return updatedUser;
+    });
+  }
 }
