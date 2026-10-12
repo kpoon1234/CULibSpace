@@ -320,42 +320,77 @@ export class AuthService {
   }
 
   /**
-   * [US5-4]: Admin manual score adjustment with [0.0, 100.0] clamping
+   * [US5-4 - Poom, Punt, Andy]: Admin manual score adjustment with [0.0, 100.0] clamping
    */
   static async adjustUserScore(adminId: number, targetUid: number, scoreChange: number) {
-    return await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx: any) => {
+      // 1. Admin FK Safety Guard
+      const adminExists = await tx.admin.findUnique({
+        where: { adminId: adminId },
+      });
+      if (!adminExists) {
+        throw { status: 403, code: 'ADMIN_NOT_FOUND', message: 'Invalid admin account.' };
+      }
+
+      // 2. Fetch Target User
       const user = await tx.user.findUnique({
         where: { uid: targetUid },
         select: { uid: true, behaviourScore: true },
       });
 
       if (!user) {
-        throw { status: 404, message: 'User not found' };
+        throw { status: 404, code: 'USER_NOT_FOUND', message: 'Target user not found.' };
       }
 
-      // Clamping Logic [0.0, 100.0] (US5-4 - Punt, Andy)
+      // 3. Clamping Logic [0.0, 100.0]
       const currentScore = Number(user.behaviourScore);
       let newScore = currentScore + scoreChange;
       newScore = Math.min(100.0, Math.max(0.0, newScore));
 
-      // Update User Score
-      const updatedUser = await tx.user.update({
-        where: { uid: targetUid },
+      // 4. Calculate ACTUAL effective change for accurate audit logging
+      const actualScoreChange = newScore - currentScore;
+
+      if (actualScoreChange === 0) {
+        return {
+          uid: targetUid,
+          behaviourScore: newScore,
+          note: 'Score is already at maximum/minimum limits. No changes made.',
+        };
+      }
+
+      // 5. Update User Score (ACID Guard - Optimistic Concurrency)
+      // Enforce that the score hasn't been modified by another transaction since Step 2
+      const updateResult = await tx.user.updateMany({
+        where: {
+          uid: targetUid,
+          behaviourScore: user.behaviourScore, // <-- ISOLATION GUARD
+        },
         data: { behaviourScore: newScore },
-        select: { uid: true, behaviourScore: true },
       });
 
-      // Write audit log entry (US5-4 - Hill, Kaopoon)
+      // If count is 0, a concurrent transaction (like NoShowWorker) modified the score first.
+      if (updateResult.count === 0) {
+        throw {
+          status: 409,
+          code: 'CONCURRENT_MODIFICATION',
+          message: 'The user score was modified by another process. Please try again.',
+        };
+      }
+
+      // 6. Write audit log entry
       await tx.manageScore.create({
         data: {
           uid: targetUid,
           adminId: adminId,
-          scoreChange: scoreChange,
+          scoreChange: actualScoreChange,
           timestamp: new Date(),
         },
       });
 
-      return updatedUser;
+      return {
+        uid: targetUid,
+        behaviourScore: newScore,
+      };
     });
   }
 }

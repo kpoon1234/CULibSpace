@@ -349,14 +349,19 @@ export class AuthController {
 
       const { targetUid, scoreChange } = req.body;
 
-      if (!targetUid || typeof scoreChange !== 'number') {
-        res
-          .status(400)
-          .json({ success: false, error: 'targetUid and a numeric scoreChange are required' });
+      // Strict type parsing to prevent Prisma 500 crashes
+      const parsedTargetUid = parseInt(String(targetUid), 10);
+      const parsedScoreChange = parseFloat(String(scoreChange));
+
+      if (isNaN(parsedTargetUid) || isNaN(parsedScoreChange)) {
+        res.status(400).json({
+          success: false,
+          error: 'A valid targetUid and numeric scoreChange are required',
+        });
         return;
       }
 
-      const result = await AuthService.adjustUserScore(adminId, Number(targetUid), scoreChange);
+      const result = await AuthService.adjustUserScore(adminId, parsedTargetUid, parsedScoreChange);
 
       res.status(200).json({
         success: true,
@@ -365,7 +370,10 @@ export class AuthController {
       });
     } catch (err: any) {
       const status = err.status || 500;
-      res.status(status).json({ success: false, error: err.message || 'Internal server error' });
+      const code = err.code || 'INTERNAL_SERVER_ERROR';
+      res
+        .status(status)
+        .json({ success: false, code, error: err.message || 'Internal server error' });
     }
   }
 }
