@@ -335,7 +335,7 @@ model SystemConfig {
   maxBookingDurationMinutes Int      @default(120) @map("max_booking_duration_minutes")
   lateThresholdMinutes      Int      @default(15) @map("late_threshold_minutes")
   earlyCheckInMinutes       Int      @default(15) @map("early_checkin_minutes")
-  minScoreToBook            Int      @default(50) @map("behaviour_score")
+  minScoreToBook            Int      @default(50) @map("min_score_to_book")
   maxAdvanceBookingDays     Int      @default(7) @map("max_advance_booking_days")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 

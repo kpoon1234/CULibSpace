@@ -329,7 +329,7 @@ export class AuthService {
     reason: string,
     prismaClient: any = prisma
   ) {
-    return await prisma.$transaction(async (tx: any) => {
+    return await prismaClient.$transaction(async (tx: any) => {
       // 1. Admin FK Safety Guard
       const adminExists = await tx.admin.findUnique({
         where: { adminId: adminId },
@@ -348,9 +348,8 @@ export class AuthService {
         throw { status: 404, code: 'USER_NOT_FOUND', message: 'Target user not found.' };
       }
 
-      // 3. Normalize Legacy Data & Clamping Logic [0, 100]
-      // ใช้ Math.floor ทิ้งเศษทศนิยมกรณีที่ DB เก่ายังมีค่าเช่น 95.5 ค้างอยู่
-      const currentScore = Math.floor(Number(user.behaviourScore));
+      // 3. Clamping Logic [0, 100]; the migration rounds legacy decimal scores to integers.
+      const currentScore = Number(user.behaviourScore);
 
       let newScore = currentScore + scoreChange;
       newScore = Math.min(100, Math.max(0, newScore));

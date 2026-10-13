@@ -83,7 +83,7 @@ export class NoShowService {
       });
 
       if (user) {
-        const currentScore = Math.floor(Number(user.behaviourScore));
+        const currentScore = Number(user.behaviourScore);
         const penaltyAmount = 10;
         const newScore = Math.max(0, currentScore - penaltyAmount);
 
