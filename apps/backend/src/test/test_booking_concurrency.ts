@@ -39,8 +39,11 @@ async function runConcurrencyTests() {
   try {
     // Fire two lock requests at the exact same millisecond
     const results = await Promise.allSettled([
-      BookingService.acquireLock(tableId, userA, undefined, undefined, prisma),
-      BookingService.acquireLock(tableId, userB, undefined, undefined, prisma),
+      NoShowService.processNoShowBooking(
+        { bookingId: testBookingId, uid: testUserId, tableId },
+        prisma
+      ),
+      AuthService.adjustUserScore(testAdminId, testUserId, 5, 'Concurrent test adjustment'),
     ]);
 
     const successes = results.filter((r) => r.status === 'fulfilled');
