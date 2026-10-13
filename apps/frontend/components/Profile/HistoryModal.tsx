@@ -59,6 +59,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
                 timestamp: string;
                 scoreChange: number;
                 adminName?: string;
+                reason?: string;
               },
               idx: number
             ) => {
@@ -73,15 +74,30 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
               const timeStr = !isNaN(dt.getTime())
                 ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 : '—';
-              const scoreStr =
-                entry.scoreChange > 0 ? `+${entry.scoreChange}` : `${entry.scoreChange}`;
+
+              const scoreVal = Number(entry.scoreChange) || 0;
+              const scoreStr = scoreVal > 0 ? `+${scoreVal}` : `${scoreVal}`;
+
+              // Resolve display reason matching noShowService.ts behavior (-10 deduction)
+              let resolvedReason = entry.reason;
+              if (!resolvedReason) {
+                if (scoreVal === -10) {
+                  resolvedReason = 'No-Show Penalty';
+                } else if (entry.adminName) {
+                  resolvedReason = `Adjusted by ${entry.adminName}`;
+                } else if (scoreVal < 0) {
+                  resolvedReason = 'Score Deduction';
+                } else {
+                  resolvedReason = 'Score Adjustment';
+                }
+              }
 
               return {
                 id: `${entry.timestamp}-${idx}`,
                 date: dateStr,
                 time: timeStr,
                 score: scoreStr,
-                reason: entry.adminName ? `Adjusted by ${entry.adminName}` : 'Score Adjustment',
+                reason: resolvedReason,
               };
             }
           );
