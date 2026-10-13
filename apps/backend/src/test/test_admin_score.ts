@@ -100,7 +100,6 @@ async function runTests() {
     };
 
     // Attempt to add +30 (Should clamp at 100, actual change +10)
-    // @ts-ignore
     await AuthService.adjustUserScore(1, 2, 30, 'Compensation for error', mockPrisma);
 
     assert(capturedUserUpdate.behaviourScore === 100, 'Test 3.1: Score is clamped to maximum 100');
@@ -137,7 +136,6 @@ async function runTests() {
     };
 
     // Attempt to deduct -20 (Should clamp at 0, actual change -5)
-    // @ts-ignore
     await AuthService.adjustUserScore(1, 2, -20, 'Severe penalty', mockPrisma);
 
     assert(capturedUserUpdate.behaviourScore === 0, 'Test 4.1: Score is clamped to minimum 0');
@@ -164,7 +162,6 @@ async function runTests() {
     };
 
     try {
-      // @ts-ignore
       await AuthService.adjustUserScore(1, 2, 10, 'Test rollback', mockPrisma);
       assert(false, 'Test 5.1: Should throw error and abort transaction');
     } catch (err: any) {
@@ -188,7 +185,6 @@ async function runTests() {
     };
 
     try {
-      // @ts-ignore
       await AuthService.adjustUserScore(1, 2, -5, 'Manual deduct', mockPrisma);
       assert(false, 'Test 6.1: Should reject when concurrent modification detected');
     } catch (err: any) {

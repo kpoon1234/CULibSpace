@@ -326,7 +326,8 @@ export class AuthService {
     adminId: number,
     targetUid: number,
     scoreChange: number,
-    reason: string
+    reason: string,
+    prismaClient: any = prisma
   ) {
     return await prisma.$transaction(async (tx: any) => {
       // 1. Admin FK Safety Guard
@@ -384,9 +385,15 @@ export class AuthService {
       }
 
       // TODO (US5-4 - Hill, Kaopoon): Write audit log entry to ManageScore here
-      // - Use tx.manageScore.create(...)
-      // - Use actualScoreChange for the scoreChange field
-      // - Use reason for the reason field
+      await tx.manageScore.create({
+        data: {
+          uid: targetUid,
+          adminId: adminId,
+          scoreChange: actualScoreChange,
+          reason: reason,
+          timestamp: new Date(),
+        },
+      });
 
       return {
         uid: targetUid,

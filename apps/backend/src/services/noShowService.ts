@@ -76,7 +76,7 @@ export class NoShowService {
         });
       }
 
-      // 3. ตัดคะแนนพฤติกรรมผู้ใช้ (-10 คะแนน)
+      // 3. ตัดคะแนนพฤติกรรมผู้ใช้
       const user = await tx.user.findUnique({
         where: { uid: booking.uid },
         select: { behaviourScore: true },
@@ -87,24 +87,21 @@ export class NoShowService {
         const penaltyAmount = 10;
         const newScore = Math.max(0, currentScore - penaltyAmount);
 
-        // ACID Guard - Optimistic Concurrency (ป้องกัน Lost Update ชนกับฝั่ง Admin)
+        // คำนวณส่วนต่างที่แท้จริง (เช่น 5 - 10 = ติดลบแค่ 5)
+        const actualScoreChange = newScore - currentScore;
+
         const userUpdate = await tx.user.updateMany({
-          where: {
-            uid: booking.uid,
-            behaviourScore: user.behaviourScore, // <-- ISOLATION GUARD
-          },
+          where: { uid: booking.uid, behaviourScore: user.behaviourScore },
           data: { behaviourScore: newScore },
         });
 
-        // หาก updateMany คืนค่า count เป็น 0 แสดงว่า Admin ปรับแต้มแทรกกลางคัน
-        // Throw error เพื่อสั่ง Prisma Rollback การคืนโต๊ะและการตัดแต้มทั้งหมด
         if (userUpdate.count === 0) {
           throw new Error(
             'CONCURRENT_MODIFICATION: The user score was modified by another process.'
           );
         }
 
-        // 4. บันทึก Audit log ลงใน ManageScore (FK Safety: ต้องพบ Admin ก่อนจึงจะ insert)
+        // 4. บันทึก Audit log ลงใน ManageScore
         const admin = await tx.admin.findFirst({ select: { adminId: true } });
 
         if (admin) {
@@ -112,8 +109,8 @@ export class NoShowService {
             data: {
               uid: booking.uid,
               adminId: admin.adminId,
-              scoreChange: -penaltyAmount,
-              reason: `Automated penalty for No-show on Booking #${booking.bookingId}`, // <-- เพิ่มบรรทัดนี้ครับ
+              scoreChange: actualScoreChange, // <-- ใช้ค่าส่วนต่างที่คำนวณได้จริง
+              reason: `Automated penalty for No-show on Booking #${booking.bookingId}`,
               timestamp: new Date(),
             },
           });
