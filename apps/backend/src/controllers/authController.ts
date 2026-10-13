@@ -335,7 +335,6 @@ export class AuthController {
 
   /**
    * POST /api/auth/admin/adjust-score
-   * Manual behavior score adjustment by Admin (US5-4)
    */
   static async adjustScore(req: Request, res: Response): Promise<void> {
     try {
@@ -347,21 +346,41 @@ export class AuthController {
         return;
       }
 
-      const { targetUid, scoreChange } = req.body;
+      const { targetUid, scoreChange, reason } = req.body;
 
-      const parsedTargetUid = parseInt(String(targetUid), 10);
-      const parsedScoreChange = parseFloat(String(scoreChange));
+      // ใช้ Number() แทน parseInt() เพื่อบังคับ Strict Parsing
+      // (ถ้าส่ง "12abc" มา Number() จะได้ NaN ทันที)
+      const parsedTargetUid = Number(targetUid);
+      const parsedScoreChange = Number(scoreChange);
 
-      // BUG FIX: Ensure UID is valid and greater than 0
-      if (isNaN(parsedTargetUid) || parsedTargetUid <= 0 || isNaN(parsedScoreChange)) {
+      // Validate: UID ต้องเป็นจำนวนเต็มบวก (> 0) และ scoreChange ต้องเป็นจำนวนเต็มแบบ Finite
+      if (
+        !Number.isInteger(parsedTargetUid) ||
+        parsedTargetUid <= 0 ||
+        !Number.isInteger(parsedScoreChange)
+      ) {
         res.status(400).json({
           success: false,
-          error: 'A valid targetUid (> 0) and numeric scoreChange are required',
+          error:
+            'Strict validation failed: targetUid must be a positive integer and scoreChange must be an integer (no decimals or letters allowed).',
         });
         return;
       }
 
-      const result = await AuthService.adjustUserScore(adminId, parsedTargetUid, parsedScoreChange);
+      if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'A valid reason string is required for manual score adjustments',
+        });
+        return;
+      }
+
+      const result = await AuthService.adjustUserScore(
+        adminId,
+        parsedTargetUid,
+        parsedScoreChange,
+        reason.trim()
+      );
 
       res.status(200).json({
         success: true,

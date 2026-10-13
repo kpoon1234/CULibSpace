@@ -143,6 +143,64 @@ async function runConcurrencyTests() {
   } else {
     process.exit(1);
   }
+
+  // ==========================================
+  // Test 4: Admin Score API vs NoShowWorker (Lost Update Prevention)
+  // ==========================================
+  console.log('\n📋 Test 4: Concurrent NoShowWorker & Admin Score Adjustment');
+  try {
+    const testAdminId = 1;
+    const testUserId = userA;
+    const testBookingId = 8888;
+
+    // จำลองข้อมูล: User เริ่มต้นที่ 100 คะแนน และมี Booking ที่กำลังจะโดน No-show ตัดแต้ม
+    await prisma.user.update({ where: { uid: testUserId }, data: { behaviourScore: 100 } });
+    await prisma.booking.create({
+      data: {
+        bookingId: testBookingId,
+        uid: testUserId,
+        tableId,
+        startDateTime: new Date(),
+        endDateTime: new Date(),
+        status: 'PENDING',
+      },
+    });
+
+    // ยิง 2 ฟังก์ชันพร้อมกันในระดับ Millisecond:
+    // 1. Worker หัก 10 แต้ม (100 -> 90)
+    // 2. Admin ปรับเพิ่ม 5 แต้ม (100 -> 105 clamped: 100)
+    const { AuthService } = await import('../services/authService.js');
+    const { NoShowService } = await import('../services/noShowService.js');
+
+    const results = await Promise.allSettled([
+      NoShowService.processNoShowBooking(
+        { bookingId: testBookingId, uid: testUserId, tableId },
+        prisma
+      ),
+      AuthService.adjustUserScore(testAdminId, testUserId, 5),
+    ]);
+
+    const successes = results.filter((r) => r.status === 'fulfilled');
+    const rejections = results.filter((r) => r.status === 'rejected');
+
+    assert(successes.length === 1, 'Only ONE transaction succeeded (Isolation guard worked)');
+    assert(rejections.length === 1, 'The competing transaction was strictly rejected');
+
+    const rejectedReason = (rejections[0] as any).reason;
+    const isConcurrencyBlocked =
+      rejectedReason?.message?.includes('CONCURRENT_MODIFICATION') ||
+      rejectedReason?.code === 'CONCURRENT_MODIFICATION';
+
+    assert(
+      isConcurrencyBlocked,
+      'Rejected transaction threw explicitly mapped CONCURRENT_MODIFICATION error'
+    );
+
+    // Cleanup
+    await prisma.booking.delete({ where: { bookingId: testBookingId } });
+  } catch (err: any) {
+    assert(false, `Score Concurrency Test failed: ${err.message}`);
+  }
 }
 
 runConcurrencyTests().finally(() => prisma.$disconnect());

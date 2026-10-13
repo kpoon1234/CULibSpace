@@ -66,11 +66,5 @@ router.get(
   requireRoles('ADMIN'),
   AuthController.getAdminArea
 );
-router.post(
-  '/admin/adjust-score',
-  authenticateToken,
-  requireRoles('ADMIN'),
-  AuthController.adjustScore
-);
 
 export default router;

@@ -320,7 +320,7 @@ export class AuthService {
   }
 
   /**
-   * [US5-4 - Poom, Punt, Andy]: Admin manual score adjustment with [0.0, 100.0] clamping
+   * [US5-4]: Admin manual score adjustment with [0, 100] integer clamping
    */
   static async adjustUserScore(adminId: number, targetUid: number, scoreChange: number) {
     return await prisma.$transaction(async (tx: any) => {
@@ -342,16 +342,18 @@ export class AuthService {
         throw { status: 404, code: 'USER_NOT_FOUND', message: 'Target user not found.' };
       }
 
-      // 3. Clamping Logic [0.0, 100.0]
-      const currentScore = Number(user.behaviourScore);
+      // 3. Normalize Legacy Data & Clamping Logic [0, 100]
+      // ใช้ Math.floor ทิ้งเศษทศนิยมกรณีที่ DB เก่ายังมีค่าเช่น 95.5 ค้างอยู่
+      const currentScore = Math.floor(Number(user.behaviourScore));
+
       let newScore = currentScore + scoreChange;
-      newScore = Math.min(100.0, Math.max(0.0, newScore));
+      newScore = Math.min(100, Math.max(0, newScore));
 
-      // 4. Calculate ACTUAL effective change and round it to satisfy Prisma Int type
+      // 4. Calculate EXACT effective change
       const actualScoreChange = newScore - currentScore;
-      const roundedScoreChange = Math.round(actualScoreChange);
 
-      if (roundedScoreChange === 0) {
+      // ถ้าไม่มีการเปลี่ยนแปลงจริง (เช่น มี 100 แล้วแอดมินบวกเพิ่มอีก) ให้หยุดทำงานและตอบกลับทันที
+      if (actualScoreChange === 0) {
         return {
           uid: targetUid,
           behaviourScore: newScore,
@@ -363,7 +365,7 @@ export class AuthService {
       const updateResult = await tx.user.updateMany({
         where: {
           uid: targetUid,
-          behaviourScore: user.behaviourScore, // <-- ISOLATION GUARD
+          behaviourScore: user.behaviourScore, // ISOLATION GUARD: ป้องกัน NoShowWorker ตัดแต้มแทรกกลาง
         },
         data: { behaviourScore: newScore },
       });
@@ -376,15 +378,10 @@ export class AuthService {
         };
       }
 
-      // 6. Write audit log entry (Safe Int insertion)
-      await tx.manageScore.create({
-        data: {
-          uid: targetUid,
-          adminId: adminId,
-          scoreChange: roundedScoreChange, // <-- BUG FIX: Rounds to nearest integer
-          timestamp: new Date(),
-        },
-      });
+      // TODO (US5-4 - Hill, Kaopoon): Write audit log entry to ManageScore here
+      // - Use tx.manageScore.create(...)
+      // - Use actualScoreChange for the scoreChange field
+      // - Use reason for the reason field
 
       return {
         uid: targetUid,
