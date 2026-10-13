@@ -1,4 +1,4 @@
-import { BookingService } from '../services/bookingService.js';
+﻿import { BookingService } from '../services/bookingService.js';
 import { BookingStatus, TableStatus } from '@prisma/client';
 
 console.log('===============================================================');
@@ -39,7 +39,7 @@ async function runTests() {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
       user: {
-        findUnique: async () => ({ uid: userId, behaviourScore: 100.0 }),
+        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
@@ -93,7 +93,7 @@ async function runTests() {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
       user: {
-        findUnique: async () => ({ uid: userId, behaviourScore: 100.0 }),
+        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
@@ -130,7 +130,7 @@ async function runTests() {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
       user: {
-        findUnique: async () => ({ uid: userId, behaviourScore: 100.0 }),
+        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
@@ -166,7 +166,7 @@ async function runTests() {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
       user: {
-        findUnique: async () => ({ uid: userId, behaviourScore: 100.0 }),
+        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
@@ -203,7 +203,7 @@ async function runTests() {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
       user: {
-        findUnique: async () => ({ uid: userId, behaviourScore: 100.0 }),
+        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({

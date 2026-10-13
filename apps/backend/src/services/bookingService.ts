@@ -1,4 +1,4 @@
-import {
+﻿import {
   PrismaClient,
   UserType,
   TableStatus,
@@ -10,7 +10,7 @@ import {
   ZoneType,
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
-import { PenaltyService } from './penaltyService.js';
+import { ScoreGuard } from './scoreGuard.js';
 import { randomUUID } from 'crypto';
 
 export interface BookingWithTableAndZone {
@@ -199,14 +199,8 @@ export class BookingService {
         } as BookingValidationError;
       }
 
-      const userScore = Number(user.behaviourScore);
-      if (userScore < minScoreToBook) {
-        throw {
-          status: 403,
-          code: 'INSUFFICIENT_BEHAVIOUR_SCORE',
-          message: `Your behavior credit score (${userScore.toFixed(1)}) is below the minimum required (${minScoreToBook.toFixed(1)}) to make a reservation`,
-        } as BookingValidationError;
-      }
+      // Score guard - shared with acquireLock (US5-3)
+      await ScoreGuard.enforceMinScore(userId, prisma, user);
 
       // ==========================================
       // 3. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
@@ -316,7 +310,7 @@ export class BookingService {
           uid: user.uid,
           firstname: user.firstname,
           lastname: user.lastname,
-          behaviourScore: userScore,
+          behaviourScore: Number(user.behaviourScore),
           userType: user.userType,
         },
         table: {
@@ -360,7 +354,7 @@ export class BookingService {
         };
       }
 
-      await PenaltyService.enforceMinScore(userId, prisma, user);
+      await ScoreGuard.enforceMinScore(userId, prisma, user);
 
       const now = new Date();
 

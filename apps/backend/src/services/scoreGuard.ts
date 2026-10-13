@@ -2,9 +2,9 @@ import { PrismaClient } from '@prisma/client';
 
 const defaultPrisma = new PrismaClient();
 
-export class PenaltyService {
+export class ScoreGuard {
   /**
-   * [US5-3]: Enforce minimum behaviour score guard for reservation privileges.
+   * [US5-3]: Enforce minimum behaviour score guard for reservation/hold privileges.
    * Throws 403 INSUFFICIENT_BEHAVIOUR_SCORE if the user's score is below SystemConfig.minScoreToBook.
    *
    * @param uid User ID
@@ -50,4 +50,4 @@ export class PenaltyService {
   }
 }
 
-export default PenaltyService;
+export default ScoreGuard;
