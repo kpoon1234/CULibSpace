@@ -322,7 +322,12 @@ export class AuthService {
   /**
    * [US5-4]: Admin manual score adjustment with [0, 100] integer clamping
    */
-  static async adjustUserScore(adminId: number, targetUid: number, scoreChange: number) {
+  static async adjustUserScore(
+    adminId: number,
+    targetUid: number,
+    scoreChange: number,
+    reason: string
+  ) {
     return await prisma.$transaction(async (tx: any) => {
       // 1. Admin FK Safety Guard
       const adminExists = await tx.admin.findUnique({
