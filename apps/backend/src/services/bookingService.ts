@@ -1,10 +1,9 @@
-﻿import {
+import {
   PrismaClient,
   UserType,
   TableStatus,
   BookingStatus,
   TicketStatus,
-  SystemConfig,
   Table,
   Zone,
   ZoneType,
@@ -115,7 +114,7 @@ export class BookingService {
    *
    * Validates:
    * 1. Target time window, operating schedule hours, maxAdvanceBookingDays, maxBookingDuration (reusing ScheduleService)
-   * 2. User existence & minimum behavior score requirement (SystemConfig.minScoreToBook, default 50.0)
+   * 2. User existence & minimum behavior score requirement (SystemConfig.minScoreToBook, default 50)
    * 3. 1-Booking-Per-User policy (no overlapping active/pending reservations for the same user)
    * 4. Table existence, maintenance status (not CLOSED), and availability (no overlapping bookings)
    * 5. Table hold-lock concurrency (if lockedUntil > now, verifies lockToken matches)
@@ -147,16 +146,6 @@ export class BookingService {
     // Database Queries protected with Concurrency Timeout Guard
     // ==========================================
     return await this.withTimeout(async () => {
-      // Fetch SystemConfig for rules (or fallback defaults)
-      let config: SystemConfig | null = null;
-      try {
-        config = await prisma.systemConfig.findFirst();
-      } catch {
-        // Fallback if table doesn't exist yet or query fails
-      }
-
-      const minScoreToBook = Number(config?.minScoreToBook ?? 50.0);
-
       // ==========================================
       // 2. User Lookup & Behavior Credit Score Check (US3-1 / FR-5.3)
       // ==========================================

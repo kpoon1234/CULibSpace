@@ -14,15 +14,11 @@ export class ScoreGuard {
   static async enforceMinScore(
     uid: number,
     prisma: any = defaultPrisma,
-    user?: { behaviourScore: any }
+    user?: { behaviourScore: number }
   ): Promise<void> {
-    let config = null;
-    try {
-      config = await prisma.systemConfig.findFirst();
-    } catch {
-      // Fallback if query fails
-    }
-    const minScoreToBook = Number(config?.minScoreToBook ?? 50.0);
+    // Only a missing config row uses the default. A failed query must not grant booking privileges.
+    const config = await prisma.systemConfig.findFirst();
+    const minScoreToBook = Number(config?.minScoreToBook ?? 50);
 
     // Use pre-fetched user if provided, otherwise query
     let userScore: number;
@@ -44,7 +40,7 @@ export class ScoreGuard {
       throw {
         status: 403,
         code: 'INSUFFICIENT_BEHAVIOUR_SCORE',
-        message: `Your behavior credit score (${userScore.toFixed(1)}) is below the minimum required (${minScoreToBook.toFixed(1)}) to make a reservation`,
+        message: `Your behavior credit score (${userScore}) is below the minimum required (${minScoreToBook}) to make a reservation`,
       };
     }
   }

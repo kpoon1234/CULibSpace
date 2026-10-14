@@ -1,4 +1,4 @@
-﻿import { BookingService } from '../services/bookingService.js';
+import { BookingService } from '../services/bookingService.js';
 import { BookingStatus, TableStatus } from '@prisma/client';
 
 console.log('===============================================================');
@@ -37,9 +37,6 @@ async function runTests() {
     const mockPrisma = {
       systemConfig: {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
-      },
-      user: {
-        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
@@ -92,9 +89,6 @@ async function runTests() {
       systemConfig: {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
-      user: {
-        findUnique: async () => ({ uid: userId }),
-      },
       booking: {
         findUnique: async () => ({
           bookingId,
@@ -129,9 +123,6 @@ async function runTests() {
       systemConfig: {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
       },
-      user: {
-        findUnique: async () => ({ uid: userId }),
-      },
       booking: {
         findUnique: async () => ({
           bookingId,
@@ -164,9 +155,6 @@ async function runTests() {
     const mockPrisma = {
       systemConfig: {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
-      },
-      user: {
-        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
@@ -201,9 +189,6 @@ async function runTests() {
     const mockPrisma = {
       systemConfig: {
         findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
-      },
-      user: {
-        findUnique: async () => ({ uid: userId }),
       },
       booking: {
         findUnique: async () => ({
