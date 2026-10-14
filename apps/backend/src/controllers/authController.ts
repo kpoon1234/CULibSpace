@@ -6,6 +6,20 @@ import { PrismaClient } from '@prisma/client';
 import { signJwt } from '../utils/jwt.js';
 
 const prisma = new PrismaClient();
+const MAX_PRISMA_INT = 2_147_483_647;
+
+function parseDecimalInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) ? value : null;
+  }
+
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  return null;
+}
 
 export class AuthController {
   /**
@@ -330,6 +344,72 @@ export class AuthController {
         success: false,
         error: err.message || 'Internal server error',
       });
+    }
+  }
+
+  /**
+   * POST /api/auth/admin/adjust-score
+   */
+  static async adjustScore(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const adminId = authReq.user?.adminId;
+
+      if (!adminId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: Admin session required' });
+        return;
+      }
+
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        res.status(400).json({ success: false, error: 'A valid request body is required' });
+        return;
+      }
+
+      const { targetUid, scoreChange, reason } = req.body;
+      const parsedTargetUid = parseDecimalInteger(targetUid);
+      const parsedScoreChange = parseDecimalInteger(scoreChange);
+
+      if (
+        parsedTargetUid === null ||
+        parsedTargetUid <= 0 ||
+        parsedTargetUid > MAX_PRISMA_INT ||
+        parsedScoreChange === null ||
+        parsedScoreChange === 0
+      ) {
+        res.status(400).json({
+          success: false,
+          error:
+            'Invalid input: targetUid must be a positive database integer and scoreChange must be a non-zero safe integer.',
+        });
+        return;
+      }
+
+      if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'A valid reason string is required for manual score adjustments',
+        });
+        return;
+      }
+
+      const result = await AuthService.adjustUserScore(
+        adminId,
+        parsedTargetUid,
+        parsedScoreChange,
+        reason.trim()
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'User score adjusted successfully',
+        data: result,
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      const code = err.code || 'INTERNAL_SERVER_ERROR';
+      res
+        .status(status)
+        .json({ success: false, code, error: err.message || 'Internal server error' });
     }
   }
 }

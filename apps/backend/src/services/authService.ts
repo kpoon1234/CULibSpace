@@ -200,7 +200,7 @@ export class AuthService {
 
     const history = await prisma.manageScore.findMany({
       where: { uid },
-      orderBy: { timestamp: 'desc' },
+      orderBy: [{ timestamp: 'desc' }, { manageScoreId: 'desc' }],
       include: {
         admin: {
           select: {
@@ -317,5 +317,87 @@ export class AuthService {
         studentId: updatedUser.universityUser?.studentId,
       },
     };
+  }
+
+  /**
+   * [US5-4]: Admin manual score adjustment with [0, 100] integer clamping
+   */
+  static async adjustUserScore(
+    adminId: number,
+    targetUid: number,
+    scoreChange: number,
+    reason: string,
+    prismaClient: any = prisma
+  ) {
+    return await prismaClient.$transaction(async (tx: any) => {
+      // 1. Admin FK Safety Guard
+      const adminExists = await tx.admin.findUnique({
+        where: { adminId: adminId },
+      });
+      if (!adminExists) {
+        throw { status: 403, code: 'ADMIN_NOT_FOUND', message: 'Invalid admin account.' };
+      }
+
+      // 2. Fetch Target User
+      const user = await tx.user.findUnique({
+        where: { uid: targetUid },
+        select: { uid: true, behaviourScore: true },
+      });
+
+      if (!user) {
+        throw { status: 404, code: 'USER_NOT_FOUND', message: 'Target user not found.' };
+      }
+
+      // 3. Clamping Logic [0, 100]; the migration rounds legacy decimal scores to integers.
+      const currentScore = Number(user.behaviourScore);
+
+      let newScore = currentScore + scoreChange;
+      newScore = Math.min(100, Math.max(0, newScore));
+
+      // 4. Calculate EXACT effective change
+      const actualScoreChange = newScore - currentScore;
+
+      // ถ้าไม่มีการเปลี่ยนแปลงจริง (เช่น มี 100 แล้วแอดมินบวกเพิ่มอีก) ให้หยุดทำงานและตอบกลับทันที
+      if (actualScoreChange === 0) {
+        return {
+          uid: targetUid,
+          behaviourScore: newScore,
+          note: 'Score is already at maximum/minimum limits. No changes made.',
+        };
+      }
+
+      // 5. Update User Score (ACID Guard - Optimistic Concurrency)
+      const updateResult = await tx.user.updateMany({
+        where: {
+          uid: targetUid,
+          behaviourScore: user.behaviourScore, // ISOLATION GUARD: ป้องกัน NoShowWorker ตัดแต้มแทรกกลาง
+        },
+        data: { behaviourScore: newScore },
+      });
+
+      if (updateResult.count === 0) {
+        throw {
+          status: 409,
+          code: 'CONCURRENT_MODIFICATION',
+          message: 'The user score was modified by another process. Please try again.',
+        };
+      }
+
+      // TODO (US5-4 - Hill, Kaopoon): Write audit log entry to ManageScore here
+      await tx.manageScore.create({
+        data: {
+          uid: targetUid,
+          adminId: adminId,
+          scoreChange: actualScoreChange,
+          reason: reason,
+          timestamp: new Date(),
+        },
+      });
+
+      return {
+        uid: targetUid,
+        behaviourScore: newScore,
+      };
+    });
   }
 }
