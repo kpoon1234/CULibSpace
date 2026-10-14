@@ -289,19 +289,20 @@ model ManageIssue {
 }
 
 model ManageScore {
-  uid         Int      @map("uid")
-  adminId     Int      @map("adminid")
-  timestamp   DateTime @default(now()) @map("timestamp")
-  scoreChange Int      @map("score_change")
-  reason      String   @default("System Adjustment") @map("reason") @db.Text // <-- เพิ่มฟิลด์นี้
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  manageScoreId Int      @id @default(autoincrement()) @map("manage_score_id")
+  uid           Int      @map("uid")
+  adminId       Int      @map("adminid")
+  timestamp     DateTime @default(now()) @map("timestamp")
+  scoreChange   Int      @map("score_change")
+  reason        String   @default("System Adjustment") @map("reason") @db.Text // <-- เพิ่มฟิลด์นี้
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
   user        User     @relation(fields: [uid], references: [uid])
   admin       Admin    @relation(fields: [adminId], references: [adminId])
 
-  @@id([uid, adminId, timestamp])
+  @@index([uid, timestamp])
   @@map("manage_score")
 }
 

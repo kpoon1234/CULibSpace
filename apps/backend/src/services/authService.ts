@@ -200,7 +200,7 @@ export class AuthService {
 
     const history = await prisma.manageScore.findMany({
       where: { uid },
-      orderBy: { timestamp: 'desc' },
+      orderBy: [{ timestamp: 'desc' }, { manageScoreId: 'desc' }],
       include: {
         admin: {
           select: {
