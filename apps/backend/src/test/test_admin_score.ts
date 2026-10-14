@@ -143,9 +143,10 @@ async function runTests() {
       capturedAuditData.scoreChange === -5,
       'Test 4.2: Audit log records EFFECTIVE penalty (-5)'
     );
+    assert(capturedAuditData.reason === 'Severe penalty', 'Test 4.3: Audit log records reason');
   }
 
-  console.log('\n--- Suite 5: Transaction Rollback Guard ---');
+  console.log('\n--- Suite 5: Audit Failure Propagation ---');
   {
     const mockPrisma = {
       $transaction: async (callback: any) => await callback(mockPrisma),
@@ -163,11 +164,11 @@ async function runTests() {
 
     try {
       await AuthService.adjustUserScore(1, 2, 10, 'Test rollback', mockPrisma);
-      assert(false, 'Test 5.1: Should throw error and abort transaction');
+      assert(false, 'Test 5.1: Audit write failure should reject the transaction callback');
     } catch (err: any) {
       assert(
         err.message === 'DB Crash during audit log',
-        'Test 5.1: Transaction rolls back if audit log creation fails'
+        'Test 5.1: Audit write failure propagates; database rollback needs an integration test'
       );
     }
   }
