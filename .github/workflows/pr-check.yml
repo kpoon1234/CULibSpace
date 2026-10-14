@@ -2,7 +2,7 @@ name: PR Check
 
 on:
   pull_request:
-    branches: [ "main" ]
+    branches: ['main']
 
 jobs:
   build-and-test:
@@ -29,7 +29,13 @@ jobs:
         run: npx tsc --noEmit
         working-directory: ./apps/backend
 
+      - name: Test Backend
+        run: npm test --workspace=apps/backend
+        env:
+          DATABASE_URL: postgresql://invalid:invalid@127.0.0.1:1/invalid
+          JWT_SECRET: ci-test-only-secret
+
       - name: Build Frontend
         run: npm run build --workspace=apps/frontend
         env:
-          NEXT_PUBLIC_API_URL: "http://localhost:8080"
+          NEXT_PUBLIC_API_URL: 'http://localhost:8080'

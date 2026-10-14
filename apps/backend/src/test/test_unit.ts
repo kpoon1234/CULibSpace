@@ -1,36 +1,38 @@
+import assert from 'node:assert/strict';
 import { classifyEmail } from '../utils/roleMapper.js';
 import { signJwt, verifyJwt, AuthTokenPayload } from '../utils/jwt.js';
 import { BookingService } from '../services/bookingService.js';
+import { ScheduleService } from '../services/scheduleService.js';
 
 console.log('🧪 Starting Role Mapping & JWT Unit Tests...\n');
 
 // Test 1: Student Email Classification (Prefix with 10 digits)
 const student1 = classifyEmail('6731315721@student.chula.ac.th');
-console.assert(student1.role === 'STUDENT', 'Expected role: STUDENT');
-console.assert(student1.userType === 'UNIVERSITY', 'Expected userType: UNIVERSITY');
-console.assert(student1.studentId === '6731315721', 'Expected studentId: 6731315721');
-console.assert(student1.isUniversityMember === true, 'Expected isUniversityMember: true');
+assert(student1.role === 'STUDENT', 'Expected role: STUDENT');
+assert(student1.userType === 'UNIVERSITY', 'Expected userType: UNIVERSITY');
+assert(student1.studentId === '6731315721', 'Expected studentId: 6731315721');
+assert(student1.isUniversityMember === true, 'Expected isUniversityMember: true');
 console.log('✅ Student with 10-digit ID prefix mapped successfully:', student1);
 
 // Test 2: Student Email Classification (Name prefix)
 const student2 = classifyEmail('somchai.p@student.chula.ac.th');
-console.assert(student2.role === 'STUDENT', 'Expected role: STUDENT');
-console.assert(student2.userType === 'UNIVERSITY', 'Expected userType: UNIVERSITY');
-console.assert(student2.studentId === undefined, 'Expected studentId: undefined');
+assert(student2.role === 'STUDENT', 'Expected role: STUDENT');
+assert(student2.userType === 'UNIVERSITY', 'Expected userType: UNIVERSITY');
+assert(student2.studentId === undefined, 'Expected studentId: undefined');
 console.log('✅ Student with name prefix mapped successfully:', student2);
 
 // Test 3: Staff Email Classification
 const staff = classifyEmail('somchai.chula@chula.ac.th');
-console.assert(staff.role === 'STAFF', 'Expected role: STAFF');
-console.assert(staff.userType === 'UNIVERSITY', 'Expected userType: UNIVERSITY');
-console.assert(staff.isUniversityMember === true, 'Expected isUniversityMember: true');
+assert(staff.role === 'STAFF', 'Expected role: STAFF');
+assert(staff.userType === 'UNIVERSITY', 'Expected userType: UNIVERSITY');
+assert(staff.isUniversityMember === true, 'Expected isUniversityMember: true');
 console.log('✅ Chula Staff mapped successfully:', staff);
 
 // Test 4: External Visitor Email Classification
 const outsider = classifyEmail('john.doe@gmail.com');
-console.assert(outsider.role === 'OUTSIDER', 'Expected role: OUTSIDER');
-console.assert(outsider.userType === 'THAI', 'Expected default userType: THAI');
-console.assert(outsider.isUniversityMember === false, 'Expected isUniversityMember: false');
+assert(outsider.role === 'OUTSIDER', 'Expected role: OUTSIDER');
+assert(outsider.userType === 'THAI', 'Expected default userType: THAI');
+assert(outsider.isUniversityMember === false, 'Expected isUniversityMember: false');
 console.log('✅ External Visitor mapped successfully:', outsider);
 
 // Test 5: JWT Token Lifecycle
@@ -47,20 +49,20 @@ const payload: AuthTokenPayload = {
 };
 
 const token = signJwt(payload);
-console.assert(typeof token === 'string' && token.length > 20, 'Invalid token format');
+assert(typeof token === 'string' && token.length > 20, 'Invalid token format');
 
 const decoded = verifyJwt(token);
-console.assert(decoded !== null, 'Token should decode successfully');
-console.assert(decoded?.uid === 42, 'UID mismatch');
-console.assert(decoded?.email === 'alice@student.chula.ac.th', 'Email mismatch');
-console.assert(decoded?.role === 'STUDENT', 'Role mismatch');
-console.assert(decoded?.studentId === '6731315721', 'StudentID mismatch');
-console.assert(decoded?.isProfileComplete === true, 'isProfileComplete mismatch');
+assert(decoded !== null, 'Token should decode successfully');
+assert(decoded?.uid === 42, 'UID mismatch');
+assert(decoded?.email === 'alice@student.chula.ac.th', 'Email mismatch');
+assert(decoded?.role === 'STUDENT', 'Role mismatch');
+assert(decoded?.studentId === '6731315721', 'StudentID mismatch');
+assert(decoded?.isProfileComplete === true, 'isProfileComplete mismatch');
 console.log('✅ JWT Sign and Verify verified successfully:', decoded);
 
 // Test 6: Tampered / Invalid JWT
 const invalidDecoded = verifyJwt('invalid.token.here');
-console.assert(invalidDecoded === null, 'Invalid token should return null');
+assert(invalidDecoded === null, 'Invalid token should return null');
 console.log('✅ Tampered/Invalid JWT rejected safely as null');
 
 // Test 7: US1-1 - Booking validation blocks incomplete profile
@@ -78,26 +80,42 @@ const mockIncompleteUserPrisma = {
   },
 };
 
-let incompleteProfileBlocked = false;
+const originalValidateTargetTimeWindow = ScheduleService.validateTargetTimeWindow;
+ScheduleService.validateTargetTimeWindow = async (targetStart, targetEnd) => ({
+  targetStart,
+  targetEnd,
+  schedule: {
+    name: 'Test schedule',
+    openTime: '08:00',
+    closeTime: '21:00',
+    is24Hours: false,
+    isClosed: false,
+    priority: 1,
+  },
+  config: { maxAdvanceBookingDays: 7, maxBookingDurationMinutes: 120 },
+});
+
 try {
-  await BookingService.validateBookingRules(
-    {
-      userId: 99,
-      tableId: 1,
-      startDateTime: new Date(Date.now() + 3600000),
-      endDateTime: new Date(Date.now() + 7200000),
+  await assert.rejects(
+    () =>
+      BookingService.validateBookingRules(
+        {
+          userId: 99,
+          tableId: 1,
+          startDateTime: new Date('2030-01-01T10:00:00Z'),
+          endDateTime: new Date('2030-01-01T11:00:00Z'),
+        },
+        mockIncompleteUserPrisma as any
+      ),
+    (err: unknown) => {
+      const error = err as { status?: number; code?: string };
+      return error.status === 403 && error.code === 'PROFILE_INCOMPLETE';
     },
-    mockIncompleteUserPrisma as any
+    'BookingService must reject incomplete profiles with 403 PROFILE_INCOMPLETE'
   );
-} catch (err: any) {
-  if (err.status === 403 && err.code === 'PROFILE_INCOMPLETE') {
-    incompleteProfileBlocked = true;
-  }
+} finally {
+  ScheduleService.validateTargetTimeWindow = originalValidateTargetTimeWindow;
 }
-console.assert(
-  incompleteProfileBlocked,
-  'BookingService must reject incomplete profiles with 403 PROFILE_INCOMPLETE'
-);
 console.log(
   '✅ Test 7 Passed: Incomplete profile blocked from booking with 403 PROFILE_INCOMPLETE'
 );
@@ -124,10 +142,7 @@ try {
     p2002HandledProperly = true;
   }
 }
-console.assert(
-  p2002HandledProperly,
-  'P2002 duplicate phone must return 409 with user-friendly error'
-);
+assert(p2002HandledProperly, 'P2002 duplicate phone must return 409 with user-friendly error');
 console.log('✅ Test 8 Passed: Prisma P2002 duplicate phone converted to 409 friendly error');
 
 console.log('\n🎉 ALL UNIT TESTS PASSED WITH 100% SUCCESS!');

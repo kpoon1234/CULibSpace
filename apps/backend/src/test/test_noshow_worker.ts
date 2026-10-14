@@ -64,25 +64,28 @@ async function runTests() {
 
   // Test 3: startNoShowWorker creates and returns active interval timer
   let timer: NodeJS.Timeout | null = null;
+  let cycleCalls = 0;
+  const workerPrisma = {
+    systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
+    booking: {
+      findMany: async () => {
+        cycleCalls++;
+        return [];
+      },
+    },
+  };
   try {
-    timer = NoShowService.startNoShowWorker(100); // 100ms for test
+    timer = NoShowService.startNoShowWorker(100, workerPrisma); // 100ms for test
     assert(timer !== null && typeof timer === 'object', 'startNoShowWorker starts interval timer');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert(cycleCalls > 0, 'startNoShowWorker runs a cycle using the supplied mock');
   } catch (err: any) {
-    assert(false, 'startNoShowWorker starts interval timer', err?.message);
+    assert(false, 'startNoShowWorker lifecycle', err?.message);
+  } finally {
+    // Test 4: Always stop the interval, including when an assertion fails.
+    if (timer) NoShowService.stopNoShowWorker(timer);
   }
-
-  // Wait a short moment to ensure interval triggers safely
-  await new Promise((resolve) => setTimeout(resolve, 250));
-
-  // Test 4: stopNoShowWorker cleans up timer
-  try {
-    if (timer) {
-      NoShowService.stopNoShowWorker(timer);
-      assert(true, 'stopNoShowWorker stops timer cleanly without leaking intervals');
-    }
-  } catch (err: any) {
-    assert(false, 'stopNoShowWorker stops timer cleanly', err?.message);
-  }
+  assert(timer !== null, 'stopNoShowWorker cleans up the active interval');
 
   console.log('\n--- Test Group 3: Subtask 3 - processNoShowBooking Release & Penalty Logic ---');
 
@@ -114,9 +117,9 @@ async function runTests() {
       },
       user: {
         findUnique: async () => ({ behaviourScore: 100.0 }),
-        update: async ({ where, data }: any) => {
+        updateMany: async ({ where, data }: any) => {
           updatedUser = { where, data };
-          return { uid: where.uid, ...data };
+          return { count: 1 };
         },
       },
       admin: {
@@ -148,14 +151,17 @@ async function runTests() {
       'Table status released to AVAILABLE and hold locks cleared'
     );
     assert(
-      updatedUser?.data?.behaviourScore === 90,
-      'User behaviourScore deducted by 10 points (100 -> 90)'
+      updatedUser?.where?.uid === 42 &&
+        updatedUser?.where?.behaviourScore === 100 &&
+        updatedUser?.data?.behaviourScore === 90,
+      'User score conditionally updated from 100 to 90'
     );
     assert(
       createdManageScore?.uid === 42 &&
         createdManageScore?.adminId === 1 &&
-        createdManageScore?.scoreChange === -10,
-      'ManageScore audit record created with -10 scoreChange'
+        createdManageScore?.scoreChange === -10 &&
+        createdManageScore?.reason === 'Automated penalty for No-show on Booking #101',
+      'ManageScore records the effective -10 change and booking reason'
     );
   } catch (err: any) {
     assert(false, 'processNoShowBooking regular release', err?.message);
@@ -179,7 +185,7 @@ async function runTests() {
       },
       user: {
         findUnique: async () => ({ behaviourScore: 80.0 }),
-        update: async () => ({}),
+        updateMany: async () => ({ count: 1 }),
       },
       admin: {
         findFirst: async () => ({ adminId: 1 }),
@@ -202,6 +208,7 @@ async function runTests() {
   // Test 7: Score deduction never drops below 0
   try {
     let finalUserScore: number | null = null;
+    let auditData: any = null;
 
     const mockPrisma = {
       $transaction: async (fn: any) => fn(mockPrisma),
@@ -215,23 +222,63 @@ async function runTests() {
       },
       user: {
         findUnique: async () => ({ behaviourScore: 5.0 }), // User only has 5 points left
-        update: async ({ data }: any) => {
+        updateMany: async ({ data }: any) => {
           finalUserScore = data.behaviourScore;
+          return { count: 1 };
         },
       },
       admin: {
         findFirst: async () => ({ adminId: 1 }),
       },
       manageScore: {
-        create: async () => ({}),
+        create: async ({ data }: any) => {
+          auditData = data;
+          return data;
+        },
       },
     };
 
     await NoShowService.processNoShowBooking({ bookingId: 103, uid: 43, tableId: 9 }, mockPrisma);
 
     assert(finalUserScore === 0, 'User behaviourScore is capped at minimum 0 (5.0 - 10 -> 0)');
+    assert(
+      auditData?.scoreChange === -5 &&
+        auditData?.reason === 'Automated penalty for No-show on Booking #103',
+      'ManageScore records the effective -5 change and booking reason'
+    );
   } catch (err: any) {
     assert(false, 'Score deduction minimum bound', err?.message);
+  }
+
+  // Test 8: An audit write failure must be propagated from the transaction callback.
+  try {
+    const mockPrisma = {
+      $transaction: async (fn: any) => fn(mockPrisma),
+      booking: { updateMany: async () => ({ count: 1 }) },
+      table: {
+        findUnique: async () => ({ status: TableStatus.CLOSED }),
+      },
+      user: {
+        findUnique: async () => ({ behaviourScore: 80 }),
+        updateMany: async () => ({ count: 1 }),
+      },
+      admin: { findFirst: async () => ({ adminId: 1 }) },
+      manageScore: {
+        create: async () => {
+          throw new Error('Simulated audit write failure');
+        },
+      },
+    };
+
+    let auditFailurePropagated = false;
+    try {
+      await NoShowService.processNoShowBooking({ bookingId: 104, uid: 42, tableId: 8 }, mockPrisma);
+    } catch (err: any) {
+      auditFailurePropagated = err.message === 'Simulated audit write failure';
+    }
+    assert(auditFailurePropagated, 'Audit write failure is propagated to the transaction caller');
+  } catch (err: any) {
+    assert(false, 'Audit write failure propagation', err?.message);
   }
 
   console.log('\n===============================================================');
