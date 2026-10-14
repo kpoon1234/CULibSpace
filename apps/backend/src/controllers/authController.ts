@@ -6,6 +6,20 @@ import { PrismaClient } from '@prisma/client';
 import { signJwt } from '../utils/jwt.js';
 
 const prisma = new PrismaClient();
+const MAX_PRISMA_INT = 2_147_483_647;
+
+function parseDecimalInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) ? value : null;
+  }
+
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  return null;
+}
 
 export class AuthController {
   /**
@@ -346,23 +360,26 @@ export class AuthController {
         return;
       }
 
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        res.status(400).json({ success: false, error: 'A valid request body is required' });
+        return;
+      }
+
       const { targetUid, scoreChange, reason } = req.body;
+      const parsedTargetUid = parseDecimalInteger(targetUid);
+      const parsedScoreChange = parseDecimalInteger(scoreChange);
 
-      // ใช้ Number() แทน parseInt() เพื่อบังคับ Strict Parsing
-      // (ถ้าส่ง "12abc" มา Number() จะได้ NaN ทันที)
-      const parsedTargetUid = Number(targetUid);
-      const parsedScoreChange = Number(scoreChange);
-
-      // Validate: UID ต้องเป็นจำนวนเต็มบวก (> 0) และ scoreChange ต้องเป็นจำนวนเต็มแบบ Finite
       if (
-        !Number.isInteger(parsedTargetUid) ||
+        parsedTargetUid === null ||
         parsedTargetUid <= 0 ||
-        !Number.isInteger(parsedScoreChange)
+        parsedTargetUid > MAX_PRISMA_INT ||
+        parsedScoreChange === null ||
+        parsedScoreChange === 0
       ) {
         res.status(400).json({
           success: false,
           error:
-            'Strict validation failed: targetUid must be a positive integer and scoreChange must be an integer (no decimals or letters allowed).',
+            'Invalid input: targetUid must be a positive database integer and scoreChange must be a non-zero safe integer.',
         });
         return;
       }

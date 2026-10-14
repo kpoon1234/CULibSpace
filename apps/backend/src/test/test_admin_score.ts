@@ -44,37 +44,85 @@ async function runTests() {
 
   console.log('\n--- Suite 2: Strict Input Validation ---');
   {
-    const reqBase = { user: { adminId: 1, role: 'ADMIN' }, body: {} } as any;
+    const originalAdjustUserScore = AuthService.adjustUserScore;
+    const calls: Array<{
+      adminId: number;
+      targetUid: number;
+      scoreChange: number;
+      reason: string;
+    }> = [];
+    AuthService.adjustUserScore = async (adminId, targetUid, scoreChange, reason) => {
+      calls.push({ adminId, targetUid, scoreChange, reason });
+      return { uid: targetUid, behaviourScore: 50 };
+    };
 
-    // 2.1 Missing Reason
-    const res1 = createMockRes();
-    reqBase.body = { targetUid: 1, scoreChange: 10, reason: '   ' };
-    await AuthController.adjustScore(reqBase, res1 as any);
-    assert(
-      res1.statusCode === 400 && res1.body.error.includes('reason'),
-      'Test 2.1: Empty/Whitespace reason returns 400'
-    );
+    try {
+      const validBody = { targetUid: 1, scoreChange: 10, reason: 'valid' };
+      const invalidBodies: Array<{ name: string; body: unknown }> = [
+        { name: 'missing body', body: undefined },
+        { name: 'null body', body: null },
+        { name: 'array body', body: [] },
+        { name: 'string body', body: 'invalid' },
+        { name: 'blank reason', body: { ...validBody, reason: '   ' } },
+        { name: 'alphanumeric UID', body: { ...validBody, targetUid: '12abc' } },
+        { name: 'negative UID', body: { ...validBody, targetUid: -5 } },
+        { name: 'boolean UID', body: { ...validBody, targetUid: true } },
+        { name: 'empty UID', body: { ...validBody, targetUid: '' } },
+        { name: 'hexadecimal UID', body: { ...validBody, targetUid: '0x10' } },
+        { name: 'UID above Prisma Int range', body: { ...validBody, targetUid: 2_147_483_648 } },
+        { name: 'missing scoreChange', body: { targetUid: 1, reason: 'valid' } },
+        { name: 'null scoreChange', body: { ...validBody, scoreChange: null } },
+        { name: 'empty scoreChange', body: { ...validBody, scoreChange: '' } },
+        { name: 'whitespace scoreChange', body: { ...validBody, scoreChange: '  ' } },
+        { name: 'boolean scoreChange', body: { ...validBody, scoreChange: true } },
+        { name: 'array scoreChange', body: { ...validBody, scoreChange: [] } },
+        { name: 'object scoreChange', body: { ...validBody, scoreChange: {} } },
+        { name: 'decimal scoreChange', body: { ...validBody, scoreChange: 5.5 } },
+        { name: 'hexadecimal scoreChange', body: { ...validBody, scoreChange: '0x10' } },
+        { name: 'zero scoreChange', body: { ...validBody, scoreChange: 0 } },
+        { name: 'infinite scoreChange', body: { ...validBody, scoreChange: Infinity } },
+        {
+          name: 'unsafe scoreChange',
+          body: { ...validBody, scoreChange: Number.MAX_SAFE_INTEGER + 1 },
+        },
+      ];
 
-    // 2.2 Invalid UID (String)
-    const res2 = createMockRes();
-    reqBase.body = { targetUid: '12abc', scoreChange: 10, reason: 'valid' };
-    await AuthController.adjustScore(reqBase, res2 as any);
-    assert(res2.statusCode === 400, 'Test 2.2: Alphanumeric UID returns 400');
+      for (const { name, body } of invalidBodies) {
+        const res = createMockRes();
+        await AuthController.adjustScore(
+          { user: { adminId: 1, role: 'ADMIN' }, body } as any,
+          res as any
+        );
+        assert(
+          res.statusCode === 400 && calls.length === 0,
+          `${name} returns 400 before service call`
+        );
+      }
 
-    // 2.3 Negative UID
-    const res3 = createMockRes();
-    reqBase.body = { targetUid: -5, scoreChange: 10, reason: 'valid' };
-    await AuthController.adjustScore(reqBase, res3 as any);
-    assert(res3.statusCode === 400, 'Test 2.3: Negative UID returns 400');
-
-    // 2.4 Float scoreChange
-    const res4 = createMockRes();
-    reqBase.body = { targetUid: 1, scoreChange: 5.5, reason: 'valid' };
-    await AuthController.adjustScore(reqBase, res4 as any);
-    assert(
-      res4.statusCode === 400 && res4.body.error.includes('integer'),
-      'Test 2.4: Float scoreChange returns 400'
-    );
+      for (const body of [
+        { targetUid: 7, scoreChange: -5, reason: '  correction  ' },
+        { targetUid: '7', scoreChange: '+5', reason: '  appeal  ' },
+      ]) {
+        const res = createMockRes();
+        await AuthController.adjustScore(
+          { user: { adminId: 1, role: 'ADMIN' }, body } as any,
+          res as any
+        );
+        assert(res.statusCode === 200, 'valid numeric input reaches the service');
+      }
+      assert(
+        calls.length === 2 &&
+          calls[0].targetUid === 7 &&
+          calls[0].scoreChange === -5 &&
+          calls[0].reason === 'correction' &&
+          calls[1].targetUid === 7 &&
+          calls[1].scoreChange === 5 &&
+          calls[1].reason === 'appeal',
+        'number and decimal string inputs are parsed without changing their values'
+      );
+    } finally {
+      AuthService.adjustUserScore = originalAdjustUserScore;
+    }
   }
 
   console.log('\n--- Suite 3: Clamping, Effective Change, and Audit Log ---');
