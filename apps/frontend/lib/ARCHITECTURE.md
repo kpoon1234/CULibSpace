@@ -166,7 +166,8 @@ Sort by firstname, then lastname. Response:
 (filtered and paged by the same rules) and the list shows a **"Sample data"**
 badge. Like the floor plan, it is an explicit opt-in, never an error fallback.
 
-The "can't book" flag and the marker on the score bar use
-`SystemConfig.minScoreToBook`, read via `useBookingLimits()` from
-`GET /api/system-config/booking-limits`. Until that loads — or if the backend
-predates the field — it falls back to 50, the same default the backend uses.
+The "can't book" flag and the marker on the score bar read `minScoreToBook`
+via `useBookingLimits()` from `GET /api/system-config/booking-limits`. That
+endpoint doesn't send the field yet, so it falls back to 50 (the backend's
+default for `SystemConfig.minScoreToBook`). Once the backend adds
+`minScoreToBook` to that response, the UI picks it up with no frontend change.

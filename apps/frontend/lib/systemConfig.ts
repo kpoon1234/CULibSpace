@@ -16,7 +16,8 @@ export interface BookingLimits {
    *  SystemConfig.maxAdvanceBookingDays. */
   maxAdvanceBookingDays: number;
   /** Behaviour score below which a user can't reserve. Mirrors
-   *  SystemConfig.minScoreToBook. */
+   *  SystemConfig.minScoreToBook; the backend doesn't send it yet, so this is
+   *  the default (50) until it does. */
   minScoreToBook: number;
 }
 
