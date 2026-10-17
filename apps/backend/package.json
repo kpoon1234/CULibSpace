@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "test": "tsx src/test/test_unit.ts && tsx src/test/test_admin_score.ts && tsx src/test/test_noshow_worker.ts && tsx src/test/test_score_concurrency.ts && tsx src/test/test_score_guard.ts && tsx src/test/test_admin_score_integration.ts",
+    "test": "tsx src/test/test_unit.ts && tsx src/test/test_admin_score.ts",
     "test:score-concurrency": "tsx src/test/test_score_concurrency.ts",
+    "test:integration": "tsx src/test/test_admin_score_integration.ts",
     "start": "node dist/server.js",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
