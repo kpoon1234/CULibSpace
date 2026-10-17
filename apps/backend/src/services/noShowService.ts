@@ -76,7 +76,7 @@ export class NoShowService {
         });
       }
 
-      // 3. ตัดคะแนนพฤติกรรมผู้ใช้ (-10 คะแนน)
+      // 3. ตัดคะแนนพฤติกรรมผู้ใช้
       const user = await tx.user.findUnique({
         where: { uid: booking.uid },
         select: { behaviourScore: true },
@@ -87,12 +87,21 @@ export class NoShowService {
         const penaltyAmount = 10;
         const newScore = Math.max(0, currentScore - penaltyAmount);
 
-        await tx.user.update({
-          where: { uid: booking.uid },
+        // คำนวณส่วนต่างที่แท้จริง (เช่น 5 - 10 = ติดลบแค่ 5)
+        const actualScoreChange = newScore - currentScore;
+
+        const userUpdate = await tx.user.updateMany({
+          where: { uid: booking.uid, behaviourScore: user.behaviourScore },
           data: { behaviourScore: newScore },
         });
 
-        // 4. บันทึก Audit log ลงใน ManageScore (FK Safety: ต้องพบ Admin ก่อนจึงจะ insert)
+        if (userUpdate.count === 0) {
+          throw new Error(
+            'CONCURRENT_MODIFICATION: The user score was modified by another process.'
+          );
+        }
+
+        // 4. บันทึก Audit log ลงใน ManageScore
         const admin = await tx.admin.findFirst({ select: { adminId: true } });
 
         if (admin) {
@@ -100,7 +109,8 @@ export class NoShowService {
             data: {
               uid: booking.uid,
               adminId: admin.adminId,
-              scoreChange: -penaltyAmount,
+              scoreChange: actualScoreChange, // <-- ใช้ค่าส่วนต่างที่คำนวณได้จริง
+              reason: `Automated penalty for No-show on Booking #${booking.bookingId}`,
               timestamp: new Date(),
             },
           });
@@ -140,8 +150,12 @@ export class NoShowService {
       // 2. ปล่อยโต๊ะและปรับสถานะทีละรายการ (Subtask 3)
       let processedCount = 0;
       for (const booking of lateBookings) {
-        const success = await this.processNoShowBooking(booking, prisma);
-        if (success) processedCount++;
+        try {
+          const success = await this.processNoShowBooking(booking, prisma);
+          if (success) processedCount++;
+        } catch (err: any) {
+          console.warn(`[NoShowWorker] Skipped booking #${booking.bookingId}: ${err.message}`);
+        }
       }
 
       console.log(`[NoShowWorker] Completed scan cycle. Processed ${processedCount} no-shows.`);

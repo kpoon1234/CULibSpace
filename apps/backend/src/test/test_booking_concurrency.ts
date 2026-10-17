@@ -1,6 +1,26 @@
-import { PrismaClient } from '@prisma/client';
-import { BookingService } from '../services/bookingService.js';
+// This legacy suite deletes bookings and resets a seeded table. Never run it
+// against the application database; score concurrency is tested separately.
+const testDatabaseUrl = process.env.TEST_DATABASE_URL;
+if (!testDatabaseUrl) {
+  throw new Error('TEST_DATABASE_URL is required for this database-mutating test suite.');
+}
 
+const testUrl = new URL(testDatabaseUrl);
+const testDatabaseName = decodeURIComponent(testUrl.pathname.slice(1));
+if (!/_test$/i.test(testDatabaseName)) {
+  throw new Error('TEST_DATABASE_URL must point to a dedicated database ending in _test.');
+}
+
+if (process.env.DATABASE_URL) {
+  const applicationUrl = new URL(process.env.DATABASE_URL);
+  if (applicationUrl.host === testUrl.host && applicationUrl.pathname === testUrl.pathname) {
+    throw new Error('TEST_DATABASE_URL must differ from DATABASE_URL.');
+  }
+}
+
+process.env.DATABASE_URL = testDatabaseUrl;
+const { PrismaClient } = await import('@prisma/client');
+const { BookingService } = await import('../services/bookingService.js');
 const prisma = new PrismaClient();
 
 console.log('🧪 Starting Concurrency & Exploit Prevention Tests...\n');

@@ -9,6 +9,7 @@ import profileRoutes from './routes/profileRoutes.js';
 import layoutRoutes from './routes/layoutRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import systemConfigRoutes from './routes/systemConfigRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
 
@@ -51,6 +52,7 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/tables/layout', layoutRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/system-config', systemConfigRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {
