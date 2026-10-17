@@ -395,6 +395,7 @@ export class AuthService {
           uid: targetUid,
           adminId: adminId,
           scoreChange: actualScoreChange,
+          reason: reason,
           timestamp: new Date(),
         },
       });
