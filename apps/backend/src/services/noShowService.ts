@@ -1,5 +1,5 @@
 // apps/backend/src/services/noShowService.ts
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, BookingStatus, TableStatus } from '@prisma/client';
 
 const defaultPrisma = new PrismaClient();
 
@@ -12,17 +12,124 @@ export class NoShowService {
     now: Date = new Date(),
     prisma: any = defaultPrisma
   ): Promise<any[]> {
-    // TODO (Subtask 2 - Poom, Punt): Query late PENDING bookings based on lateThresholdMinutes
-    return [];
+    let config = null;
+    try {
+      config = await prisma.systemConfig.findFirst();
+    } catch {
+      // Fallback defaults if SystemConfig query fails
+    }
+    const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
+    const cutoffTime = new Date(now.getTime() - lateThresholdMinutes * 60 * 1000);
+
+    return await prisma.booking.findMany({
+      where: {
+        status: BookingStatus.PENDING,
+        startDateTime: { lt: cutoffTime },
+      },
+      include: { table: true },
+    });
   }
 
   /**
    * [Subtask 3 - Hill, Kaopoon]: ประมวลผลคืนโต๊ะ ปรับสถานะเป็น NO_SHOW และตัดคะแนนพฤติกรรม
    * ฟังก์ชัน Transaction สำหรับปรับปรุงสถานะและตัดคะแนน
    */
-  static async processNoShowBooking(booking: any, prisma: any = defaultPrisma): Promise<boolean> {
-    // TODO (Subtask 3 - Hill, Kaopoon): Update booking status to NO_SHOW, release table to AVAILABLE, deduct behavior score
-    return true;
+  static async processNoShowBooking(
+    booking: { bookingId: number; uid: number; tableId: number },
+    prisma: any = defaultPrisma
+  ): Promise<boolean> {
+    const executeInTx = async (tx: any) => {
+      // 1. Guard: Atomic conditional update เป็น NO_SHOW เฉพาะเมื่อสถานะยังเป็น PENDING
+      // ป้องกัน Race Condition กรณีที่ user เพิ่ง check-in (ACTIVE) หรือ cancel ก่อน Worker ประมวลผล
+      const updatedBooking = await tx.booking.updateMany({
+        where: {
+          bookingId: booking.bookingId,
+          status: BookingStatus.PENDING, // <-- CRITICAL: Blocks the check-in race condition
+        },
+        data: { status: BookingStatus.NO_SHOW },
+      });
+
+      // หาก count === 0 แสดงว่า booking ถูก check-in หรือ cancel ไปก่อนแล้ว
+      // Abort penalty ทั้งหมดอย่างปลอดภัย ไม่ตัดคะแนน ไม่คืนโต๊ะ
+      if (updatedBooking.count === 0) {
+        console.log(
+          `[NoShowWorker] Booking #${booking.bookingId} already transitioned (checked-in or cancelled). Skipping penalty.`
+        );
+        return false;
+      }
+
+      // 2. ปล่อยสถานะโต๊ะคืนเป็น AVAILABLE (ยกเว้นกรณีที่โต๊ะถูกปิดซ่อมบำรุง CLOSED)
+      const table = await tx.table.findUnique({
+        where: { tableId: booking.tableId },
+        select: { status: true },
+      });
+
+      if (table && table.status !== TableStatus.CLOSED) {
+        await tx.table.update({
+          where: { tableId: booking.tableId },
+          data: {
+            status: TableStatus.AVAILABLE,
+            lockToken: null,
+            lockedUntil: null,
+            lockedByUid: null,
+          },
+        });
+      }
+
+      // 3. ตัดคะแนนพฤติกรรมผู้ใช้
+      const user = await tx.user.findUnique({
+        where: { uid: booking.uid },
+        select: { behaviourScore: true },
+      });
+
+      if (user) {
+        const currentScore = Number(user.behaviourScore);
+        const penaltyAmount = 10;
+        const newScore = Math.max(0, currentScore - penaltyAmount);
+
+        // คำนวณส่วนต่างที่แท้จริง (เช่น 5 - 10 = ติดลบแค่ 5)
+        const actualScoreChange = newScore - currentScore;
+
+        const userUpdate = await tx.user.updateMany({
+          where: { uid: booking.uid, behaviourScore: user.behaviourScore },
+          data: { behaviourScore: newScore },
+        });
+
+        if (userUpdate.count === 0) {
+          throw new Error(
+            'CONCURRENT_MODIFICATION: The user score was modified by another process.'
+          );
+        }
+
+        // 4. บันทึก Audit log ลงใน ManageScore
+        const admin = await tx.admin.findFirst({ select: { adminId: true } });
+
+        if (admin) {
+          await tx.manageScore.create({
+            data: {
+              uid: booking.uid,
+              adminId: admin.adminId,
+              scoreChange: actualScoreChange, // <-- ใช้ค่าส่วนต่างที่คำนวณได้จริง
+              reason: `Automated penalty for No-show on Booking #${booking.bookingId}`,
+              timestamp: new Date(),
+            },
+          });
+        } else {
+          // Graceful fallback: ตัดคะแนนสำเร็จแต่ไม่มี Admin ใน DB -> ข้าม ManageScore insert
+          console.warn(
+            `[NoShowWorker] No admin found in DB. Skipping ManageScore record for uid=${booking.uid}. Score deducted successfully.`
+          );
+        }
+      }
+
+      return true;
+    };
+
+    if (prisma.$transaction) {
+      return await prisma.$transaction(executeInTx);
+    } else {
+      return await executeInTx(prisma);
+    }
   }
 
   /**
@@ -43,8 +150,12 @@ export class NoShowService {
       // 2. ปล่อยโต๊ะและปรับสถานะทีละรายการ (Subtask 3)
       let processedCount = 0;
       for (const booking of lateBookings) {
-        const success = await this.processNoShowBooking(booking, prisma);
-        if (success) processedCount++;
+        try {
+          const success = await this.processNoShowBooking(booking, prisma);
+          if (success) processedCount++;
+        } catch (err: any) {
+          console.warn(`[NoShowWorker] Skipped booking #${booking.bookingId}: ${err.message}`);
+        }
       }
 
       console.log(`[NoShowWorker] Completed scan cycle. Processed ${processedCount} no-shows.`);

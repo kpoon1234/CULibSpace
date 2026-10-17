@@ -24,5 +24,6 @@ router.post('/validate', authenticateToken, BookingController.validate);
 router.post('/', authenticateToken, BookingController.create);
 
 router.post('/:bookingId/check-in', authenticateToken, BookingController.checkIn);
+router.post('/:bookingId/cancel', authenticateToken, BookingController.cancel);
 
 export default router;

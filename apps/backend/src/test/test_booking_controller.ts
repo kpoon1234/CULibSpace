@@ -1,5 +1,5 @@
-import { BookingController } from './controllers/bookingController.js';
-import { BookingService } from './services/bookingService.js';
+import { BookingController } from '../controllers/bookingController.js';
+import { BookingService } from '../services/bookingService.js';
 import { UserType, TableStatus } from '@prisma/client';
 
 console.log('🧪 Starting BookingController HTTP Request/Response Tests...\n');

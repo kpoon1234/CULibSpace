@@ -1,4 +1,4 @@
-import { BookingService, BookingValidationInput } from './services/bookingService.js';
+import { BookingService, BookingValidationInput } from '../services/bookingService.js';
 import { UserType, TableStatus, BookingStatus, TicketStatus } from '@prisma/client';
 
 console.log('🧪 Starting US3-1 Booking Rules Validation Tests...\n');

@@ -1,6 +1,6 @@
-import { LayoutController } from './controllers/layoutController.js';
-import { LayoutService, LayoutFilters } from './services/layoutService.js';
-import { ScheduleService } from './services/scheduleService.js';
+import { LayoutController } from '../controllers/layoutController.js';
+import { LayoutService, LayoutFilters } from '../services/layoutService.js';
+import { ScheduleService } from '../services/scheduleService.js';
 import { ZoneType, TableStatus } from '@prisma/client';
 
 console.log('🧪 Starting EPIC 2 Multi-Layer Verification Test Suite...\n');
