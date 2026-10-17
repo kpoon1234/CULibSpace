@@ -107,3 +107,66 @@ Point `NEXT_PUBLIC_API_URL` at the backend (already the convention in
 `components/FloorPlan` or `app/zones` changes — `source` becomes `'api'`. Add
 table geometry to the payload whenever the schema supports it; the UI picks it
 up with no further work.
+
+## `lib/adminUsers` — admin user search (US5-4)
+
+Feeds `components/AdminUsers` on `/admin/users`: a librarian finds a user and
+opens their behaviour score + account details. The Score Adjustment Form (a
+separate US5-4 task) mounts into the detail panel via
+`<UserSearchView renderActions={(user) => …} />`.
+
+### The one endpoint — proposed, not built yet
+
+#### `GET /api/admin/users`
+
+Override the path with `NEXT_PUBLIC_ADMIN_USERS_PATH` (default `/api/admin/users`).
+Must sit behind `authenticateToken` + `requireRoles('ADMIN')`; the client sends
+the stored Bearer token, and treats 401/403 as an expired admin session.
+
+| param      | effect                                                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `q`        | case-insensitive contains-match on firstname, lastname, "firstname lastname", email, studentId, phone. Omitted/empty → everyone |
+| `userType` | `UNIVERSITY` / `THAI` / `FOREIGN` (Prisma `UserType` member names)                                                              |
+| `page`     | 1-based, default 1                                                                                                              |
+| `pageSize` | default 20                                                                                                                      |
+
+Sort by firstname, then lastname. Response:
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "users": [
+      {
+        "uid": 4,
+        "firstname": "Natthapong",
+        "lastname": "Rattanakul",
+        "email": "6731100321@student.chula.ac.th",
+        "phone": "0812345604", // null if not set
+        "userType": "UNIVERSITY",
+        "behaviourScore": 45, // Int, 0–100
+        "isProfileComplete": true,
+        "studentId": "6731100321", // UniversityUser, else null
+        "citizenId": null, // ThaiUser — send MASKED, never the full 13 digits
+        "passportId": null, // ForeignUser
+        "imageUrl": null,
+        "createdAt": "2026-08-04T00:00:00.000Z",
+      },
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 20,
+  },
+}
+```
+
+### Sample data
+
+`NEXT_PUBLIC_ADMIN_USERS_MOCK=1` serves invented users from `mockData.ts`
+(filtered and paged by the same rules) and the list shows a **"Sample data"**
+badge. Like the floor plan, it is an explicit opt-in, never an error fallback.
+
+The "can't book" flag and the marker on the score bar use
+`SystemConfig.minScoreToBook`, read via `useBookingLimits()` from
+`GET /api/system-config/booking-limits`. Until that loads — or if the backend
+predates the field — it falls back to 50, the same default the backend uses.
