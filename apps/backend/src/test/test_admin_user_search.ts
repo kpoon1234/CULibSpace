@@ -102,6 +102,13 @@ test('admin search builds case-insensitive filters without searching identity nu
   assert.equal('admin' in calls.findMany.select, false);
 });
 
+test('behaviour score is returned as a number even for a Decimal-like value', async () => {
+  const { client } = mockPrisma([userRow({ behaviourScore: { toString: () => '45' } })]);
+  const result = await AdminUserService.search({ q: '', page: 1, pageSize: 20 }, client);
+  assert.equal(result.users[0].behaviourScore, 45);
+  assert.equal(typeof result.users[0].behaviourScore, 'number');
+});
+
 test('full-name search matches first name and remaining last name', async () => {
   const { client, calls } = mockPrisma([userRow()]);
   await AdminUserService.search({ q: ' Natthapong   Ratt ', page: 1, pageSize: 20 }, client);

@@ -117,7 +117,7 @@ export class AdminUserService {
         email: user.email,
         phone: user.phone,
         userType: user.userType,
-        behaviourScore: user.behaviourScore,
+        behaviourScore: Number(user.behaviourScore),
         isProfileComplete: user.isProfileComplete,
         studentId: user.universityUser?.studentId ?? null,
         citizenId: maskCitizenId(user.outsideUser?.thaiUser?.citizenId),
