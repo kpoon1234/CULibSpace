@@ -115,7 +115,7 @@ opens their behaviour score + account details. The Score Adjustment Form (a
 separate US5-4 task) mounts into the detail panel via
 `<UserSearchView renderActions={(user) => …} />`.
 
-### The one endpoint — proposed, not built yet
+### The one endpoint — `AdminUserController.search`
 
 #### `GET /api/admin/users`
 
@@ -128,7 +128,7 @@ the stored Bearer token, and treats 401/403 as an expired admin session.
 | `q`        | case-insensitive contains-match on firstname, lastname, "firstname lastname", email, studentId, phone. Omitted/empty → everyone |
 | `userType` | `UNIVERSITY` / `THAI` / `FOREIGN` (Prisma `UserType` member names)                                                              |
 | `page`     | 1-based, default 1                                                                                                              |
-| `pageSize` | default 20                                                                                                                      |
+| `pageSize` | default 20, max 100 (400 above that)                                                                                            |
 
 Sort by firstname, then lastname. Response:
 

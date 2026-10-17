@@ -1,6 +1,6 @@
 // Types for the admin user search (US5-4). Shapes mirror the Prisma `User` model
 // plus its subtype rows (UniversityUser / ThaiUser / ForeignUser) — see
-// lib/ARCHITECTURE.md for the proposed GET /api/admin/users contract.
+// lib/ARCHITECTURE.md for the GET /api/admin/users contract.
 
 /** Prisma `UserType` enum, by member name (how the backend serialises it). */
 export type UserType = 'UNIVERSITY' | 'THAI' | 'FOREIGN';
@@ -20,7 +20,7 @@ export interface AdminUserSummary {
   isProfileComplete: boolean;
   /** UniversityUser.studentId — null for staff and outside visitors. */
   studentId: string | null;
-  /** ThaiUser.citizenId — the backend should send it masked (e.g. "1-1037-xxxxx-12-3"). */
+  /** ThaiUser.citizenId — the backend sends it masked (e.g. "1-1037-xxxxx-12-3"). */
   citizenId: string | null;
   /** ForeignUser.passportId. */
   passportId: string | null;

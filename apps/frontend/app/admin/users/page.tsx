@@ -7,7 +7,7 @@ import { ChevronLeftIcon } from '@/components/AdminUsers/icons';
 
 // Admin user search (US5-4). Data comes from GET /api/admin/users (see
 // lib/ARCHITECTURE.md) — set NEXT_PUBLIC_ADMIN_USERS_MOCK=1 to use sample users
-// until that endpoint exists.
+// instead (e.g. without a running backend).
 export default function AdminUsersPage() {
   const admin = useAdminGuard();
 

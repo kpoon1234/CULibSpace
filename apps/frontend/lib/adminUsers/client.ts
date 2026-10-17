@@ -6,8 +6,8 @@ import { mockSearchUsers } from './mockData';
 import type { UserSearchEnvelope, UserSearchPage, UserSearchQuery } from './types';
 import { DEFAULT_PAGE_SIZE } from './types';
 
-// Data access for the admin user search (US5-4). One backend endpoint, not
-// built yet — the contract is proposed in lib/ARCHITECTURE.md:
+// Data access for the admin user search (US5-4). One backend endpoint
+// (AdminUserController.search) — contract in lib/ARCHITECTURE.md:
 //
 //   GET /api/admin/users?q=&userType=&page=&pageSize=  ->  { success, data: UserSearchPage }
 //
