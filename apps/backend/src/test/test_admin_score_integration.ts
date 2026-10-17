@@ -7,32 +7,41 @@ const prisma = new PrismaClient();
 async function runIntegrationTests() {
   console.log('🧪 Starting DB Integration Tests for Admin Score Audit Logging...\n');
 
-  try {
-    // 1. เคลียร์และเตรียมข้อมูลทดสอบ
-    await prisma.manageScore.deleteMany();
-    await prisma.user.deleteMany({ where: { email: 'user_audit@student.chula.ac.th' } });
-    await prisma.admin.deleteMany({ where: { email: 'admin_audit@chula.ac.th' } });
+  // เตรียมตัวแปรไว้สำหรับเก็บกวาดตอนท้าย
+  let testAdminId: number | null = null;
+  let testUserId: number | null = null;
+  const adminEmail = 'admin_audit_integration@chula.ac.th';
+  const userEmail = 'user_audit_integration@student.chula.ac.th';
 
+  try {
+    // เก็บกวาดข้อมูลเก่าที่อาจค้างจากเทสต์รอบก่อน (ลบแบบมีเงื่อนไข)
+    await prisma.manageScore.deleteMany({ where: { admin: { email: adminEmail } } });
+    await prisma.admin.deleteMany({ where: { email: adminEmail } });
+    await prisma.user.deleteMany({ where: { email: userEmail } });
+
+    // สร้างข้อมูลจำลอง
     const admin = await prisma.admin.create({
       data: {
-        email: 'admin_audit@chula.ac.th',
+        email: adminEmail,
         password: 'hashedpassword123',
         firstname: 'Audit',
         lastname: 'Admin',
       },
     });
+    testAdminId = admin.adminId;
 
     const user = await prisma.user.create({
       data: {
-        email: 'user_audit@student.chula.ac.th',
+        email: userEmail,
         firstname: 'Target',
         lastname: 'User',
         userType: 'UNIVERSITY',
         behaviourScore: 100,
       },
     });
+    testUserId = user.uid;
 
-    // 2. เคสที่ 1: ปรับคะแนนสำเร็จ และตรวจสอบการบันทึก Audit Log
+    // เคสที่ 1: ปรับคะแนนสำเร็จ
     await AuthService.adjustUserScore(
       admin.adminId,
       user.uid,
@@ -40,16 +49,16 @@ async function runIntegrationTests() {
       'Penalty integration test',
       prisma
     );
-
-    const logs = await prisma.manageScore.findMany({ where: { uid: user.uid } });
+    const logs = await prisma.manageScore.findMany({
+      where: { uid: user.uid, adminId: admin.adminId },
+    });
 
     assert.strictEqual(logs.length, 1, 'ต้องมี ManageScore 1 รายการ');
     assert.ok(logs[0], 'ต้องพบรายการ Log');
-    assert.strictEqual(logs[0].adminId, admin.adminId, 'adminId ต้องถูกต้อง');
     assert.strictEqual(logs[0].scoreChange, -10, 'ส่วนต่างคะแนนต้องตรงความจริง');
     console.log('✅ Passed: Audit log written successfully to the database.');
 
-    // 3. เคสที่ 2: จำลองกรณีบันทึก Log ล้มเหลว -> คะแนนต้อง Rollback กลับค่าเดิม
+    // เคสที่ 2: จำลอง DB ขัดข้อง (Rollback)
     const faultyPrisma = {
       ...prisma,
       $transaction: async (cb: any) => {
@@ -93,7 +102,15 @@ async function runIntegrationTests() {
     console.log('✅ Passed: Score rolled back successfully on audit failure.');
   } catch (error) {
     console.error('❌ Integration Test Failed:', error);
+    process.exitCode = 1;
   } finally {
+    // Cleanup ลบข้อมูลเฉพาะที่ Test นี้สร้างขึ้นมาเท่านั้น
+    if (testAdminId && testUserId) {
+      await prisma.manageScore.deleteMany({ where: { adminId: testAdminId } });
+      await prisma.user.deleteMany({ where: { uid: testUserId } });
+      await prisma.admin.deleteMany({ where: { adminId: testAdminId } });
+      console.log('🧹 Cleanup: Test-specific records deleted safely.');
+    }
     await prisma.$disconnect();
   }
 }
