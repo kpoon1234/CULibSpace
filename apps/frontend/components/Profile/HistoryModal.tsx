@@ -31,6 +31,9 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
     // Only fetch if the modal is open
     if (!isOpen) return;
 
+    // Reset visible count back to initial limit whenever modal opens
+    setVisibleCount(ITEMS_PER_PAGE);
+
     const fetchHistory = async () => {
       try {
         setIsLoading(true);
@@ -56,14 +59,15 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
           const formatted: HistoryRecord[] = data.history.map(
             (
               entry: {
-                timestamp: string;
-                scoreChange: number;
-                adminName?: string;
+                timestamp?: string;
+                scoreChange?: number;
                 reason?: string;
+                description?: string;
+                details?: string;
               },
               idx: number
             ) => {
-              const dt = new Date(entry.timestamp);
+              const dt = entry.timestamp ? new Date(entry.timestamp) : new Date(NaN);
               const dateStr = !isNaN(dt.getTime())
                 ? dt.toLocaleDateString('en-GB', {
                     day: '2-digit',
@@ -78,26 +82,19 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
               const scoreVal = Number(entry.scoreChange) || 0;
               const scoreStr = scoreVal > 0 ? `+${scoreVal}` : `${scoreVal}`;
 
-              // Resolve display reason matching noShowService.ts behavior (-10 deduction)
-              let resolvedReason = entry.reason;
-              if (!resolvedReason) {
-                if (scoreVal === -10) {
-                  resolvedReason = 'No-Show Penalty';
-                } else if (entry.adminName) {
-                  resolvedReason = `Adjusted by ${entry.adminName}`;
-                } else if (scoreVal < 0) {
-                  resolvedReason = 'Score Deduction';
-                } else {
-                  resolvedReason = 'Score Adjustment';
-                }
-              }
+              // Safely handle reason with fallbacks for alternative field names or empty values
+              const reasonText =
+                entry.reason?.trim() ||
+                entry.description?.trim() ||
+                entry.details?.trim() ||
+                'No reason provided';
 
               return {
-                id: `${entry.timestamp}-${idx}`,
+                id: `${entry.timestamp || 'record'}-${idx}`,
                 date: dateStr,
                 time: timeStr,
                 score: scoreStr,
-                reason: resolvedReason,
+                reason: reasonText,
               };
             }
           );
@@ -119,7 +116,7 @@ export default function HistoryModal({ isOpen, onClose }: HistoryModalProps) {
   if (!isOpen) return null;
 
   return (
-    // Modal Overlay (Backdrop with outside click)
+    /* Modal Overlay (Backdrop with outside click) */
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm sm:p-8"
       onClick={(event) => {
