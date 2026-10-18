@@ -329,6 +329,13 @@ export class AuthService {
     reason: string,
     prismaClient: any = prisma
   ) {
+    if (!Number.isSafeInteger(scoreChange) || scoreChange === 0) {
+      throw {
+        status: 400,
+        code: 'INVALID_SCORE_CHANGE',
+        message: 'Score change must be a safe, non-zero integer.',
+      };
+    }
     return await prismaClient.$transaction(async (tx: any) => {
       // 1. Admin FK Safety Guard
       const adminExists = await tx.admin.findUnique({
@@ -383,7 +390,6 @@ export class AuthService {
         };
       }
 
-      // TODO (US5-4 - Hill, Kaopoon): Write audit log entry to ManageScore here
       await tx.manageScore.create({
         data: {
           uid: targetUid,

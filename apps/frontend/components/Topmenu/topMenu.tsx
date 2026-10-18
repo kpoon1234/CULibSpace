@@ -5,16 +5,14 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
-import ScoreAdjustmentModal from '@/components/Profile/ScoreAdjustmentModal';
 import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
 import { useProfileModal } from '@/lib/profileModalContext';
 
 export default function TopMenu() {
   const router = useRouter();
   const pathname = usePathname();
-  const { openProfile, openHistory, openBookingHistory } = useProfileModal();
+  const { openProfile, openBookingHistory } = useProfileModal();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [showScoreAdjustmentModal, setShowScoreAdjustmentModal] = useState(false);
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
     if (!storedUser) return null;
@@ -169,30 +167,6 @@ export default function TopMenu() {
                         >
                           Booking History
                         </button>
-                        <button
-                          role="menuitem"
-                          type="button"
-                          onClick={() => {
-                            openHistory();
-                            setIsDropdownOpen(false);
-                          }}
-                          className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
-                        >
-                          Behavior History
-                        </button>
-                        {user.role === 'ADMIN' && (
-                          <button
-                            role="menuitem"
-                            type="button"
-                            onClick={() => {
-                              setShowScoreAdjustmentModal(true);
-                              setIsDropdownOpen(false);
-                            }}
-                            className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-gray-100"
-                          >
-                            Adjust Score
-                          </button>
-                        )}
                         <hr className="my-1 border-hairline" />
                         <button
                           role="menuitem"
@@ -216,13 +190,6 @@ export default function TopMenu() {
           </div>
         </nav>
       </header>
-
-      {user && user.role === 'ADMIN' && (
-        <ScoreAdjustmentModal
-          isOpen={showScoreAdjustmentModal}
-          onClose={() => setShowScoreAdjustmentModal(false)}
-        />
-      )}
     </>
   );
 }
