@@ -14,7 +14,7 @@ import type { AdminUserSummary } from '@/lib/adminUsers';
 export default function AdminUsersPage() {
   const admin = useAdminGuard();
   const [adjustUser, setAdjustUser] = useState<AdminUserSummary | null>(null);
-  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const retryRef = useRef<(() => void) | null>(null);
 
   if (!admin) {
@@ -40,6 +40,12 @@ export default function AdminUsersPage() {
         </p>
       </header>
 
+      {notice && (
+        <div className="mb-4 rounded-md bg-emerald-50 px-4 py-3 border border-emerald-100">
+          <p className="text-sm text-emerald-700">{notice}</p>
+        </div>
+      )}
+
       <UserSearchView
         renderActions={(user, { retry }) => {
           retryRef.current = retry;
@@ -48,7 +54,7 @@ export default function AdminUsersPage() {
               type="button"
               onClick={() => {
                 setAdjustUser(user);
-                setShowAdjustmentModal(true);
+                setNotice(null);
               }}
               aria-label={`Adjust score for ${user.firstname} ${user.lastname}`}
               className="w-full rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-2 text-sm font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white"
@@ -59,29 +65,26 @@ export default function AdminUsersPage() {
         }}
       />
 
-      <ScoreAdjustmentModal
-        isOpen={showAdjustmentModal}
-        onClose={() => {
-          setShowAdjustmentModal(false);
-          setAdjustUser(null);
-        }}
-        targetUser={
-          adjustUser
-            ? {
-                uid: adjustUser.uid,
-                firstname: adjustUser.firstname,
-                lastname: adjustUser.lastname,
-                userType: adjustUser.userType,
-                behaviourScore: adjustUser.behaviourScore,
-              }
-            : null
-        }
-        onSuccess={() => {
-          setShowAdjustmentModal(false);
-          setAdjustUser(null);
-          retryRef.current?.();
-        }}
-      />
+      {adjustUser && (
+        <ScoreAdjustmentModal
+          key={adjustUser.uid}
+          onClose={() => {
+            setAdjustUser(null);
+          }}
+          targetUser={{
+            uid: adjustUser.uid,
+            firstname: adjustUser.firstname,
+            lastname: adjustUser.lastname,
+            userType: adjustUser.userType,
+            behaviourScore: adjustUser.behaviourScore,
+          }}
+          onSuccess={() => {
+            setAdjustUser(null);
+            setNotice(`ปรับคะแนน ${adjustUser.firstname} ${adjustUser.lastname} เรียบร้อยแล้ว`);
+            retryRef.current?.();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -13,7 +13,6 @@ interface TargetUser {
 }
 
 interface ScoreAdjustmentModalProps {
-  isOpen: boolean;
   onClose: () => void;
   targetUser: TargetUser | null;
   onSuccess: () => void;
@@ -22,7 +21,6 @@ interface ScoreAdjustmentModalProps {
 type Action = 'add' | 'deduct';
 
 export default function ScoreAdjustmentModal({
-  isOpen,
   onClose,
   targetUser,
   onSuccess,
@@ -32,13 +30,11 @@ export default function ScoreAdjustmentModal({
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setSuccess(false);
     setSubmitted(true);
 
     if (!targetUser) {
@@ -52,8 +48,8 @@ export default function ScoreAdjustmentModal({
     }
 
     const scoreValue = Number(score);
-    if (!scoreValue || scoreValue <= 0) {
-      setError('Please enter a valid score greater than 0.');
+    if (!Number.isInteger(scoreValue) || scoreValue <= 0) {
+      setError('Please enter a valid whole number greater than 0.');
       return;
     }
 
@@ -85,15 +81,22 @@ export default function ScoreAdjustmentModal({
         }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to adjust score.');
+      let data: { error?: string; message?: string } | null = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
       }
 
-      setSuccess(true);
-      setScore('');
-      setReason('');
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setError('Your admin session has expired. Please sign in again.');
+        } else {
+          setError(data?.error || 'Failed to adjust score.');
+        }
+        return;
+      }
+
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while adjusting the score.');
@@ -102,7 +105,7 @@ export default function ScoreAdjustmentModal({
     }
   }
 
-  if (!isOpen || !targetUser) return null;
+  if (!targetUser) return null;
 
   const scoreEmpty = !score.trim();
   const reasonEmpty = !reason.trim();
@@ -184,6 +187,7 @@ export default function ScoreAdjustmentModal({
               <input
                 type="number"
                 min="1"
+                step="1"
                 value={score}
                 onChange={(event) => {
                   setScore(event.target.value);
@@ -235,12 +239,6 @@ export default function ScoreAdjustmentModal({
               {isSubmitting ? 'Adjusting…' : 'Confirm Adjustment'}
             </button>
           </form>
-
-          {success && (
-            <p className="mt-3 text-center text-sm font-medium text-emerald-600">
-              Score adjusted successfully.
-            </p>
-          )}
         </div>
       </div>
     </div>
