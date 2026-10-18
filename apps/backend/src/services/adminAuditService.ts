@@ -71,19 +71,34 @@ function buildWhere({
   to,
 }: AdminAuditListParams): Prisma.ManageScoreWhereInput {
   const where: Prisma.ManageScoreWhereInput = {};
-  const search = q.trim();
+  const search = q.trim().replace(/\s+/g, ' ');
   if (search) {
-    const contains: Prisma.StringFilter = { contains: search, mode: 'insensitive' };
-    where.OR = [
-      { reason: contains },
-      { user: { is: { firstname: contains } } },
-      { user: { is: { lastname: contains } } },
-      { user: { is: { email: contains } } },
-      { user: { is: { universityUser: { is: { studentId: contains } } } } },
-      { admin: { is: { firstname: contains } } },
-      { admin: { is: { lastname: contains } } },
-      { admin: { is: { email: contains } } },
+    const contains = (value: string): Prisma.StringFilter => ({
+      contains: value,
+      mode: 'insensitive',
+    });
+    const matches: Prisma.ManageScoreWhereInput[] = [
+      { reason: contains(search) },
+      { user: { is: { firstname: contains(search) } } },
+      { user: { is: { lastname: contains(search) } } },
+      { user: { is: { email: contains(search) } } },
+      { user: { is: { universityUser: { is: { studentId: contains(search) } } } } },
+      { admin: { is: { firstname: contains(search) } } },
+      { admin: { is: { lastname: contains(search) } } },
+      { admin: { is: { email: contains(search) } } },
     ];
+
+    const firstSpace = search.indexOf(' ');
+    if (firstSpace !== -1) {
+      const firstName = search.slice(0, firstSpace);
+      const lastName = search.slice(firstSpace + 1);
+      matches.push(
+        { user: { is: { firstname: contains(firstName), lastname: contains(lastName) } } },
+        { admin: { is: { firstname: contains(firstName), lastname: contains(lastName) } } }
+      );
+    }
+
+    where.OR = matches;
   }
   if (direction === 'deduct') where.scoreChange = { lt: 0 };
   if (direction === 'add') where.scoreChange = { gt: 0 };

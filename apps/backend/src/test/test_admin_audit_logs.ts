@@ -162,6 +162,28 @@ test('service supports additions, unfiltered results, and users without a studen
   assert.deepEqual(calls.findMany.where, {});
 });
 
+test('full-name search matches both user and admin names', async () => {
+  const { client, calls } = mockPrisma([auditRow()]);
+  await AdminAuditService.list({ q: '  Alice   Wonderland  ', page: 1, pageSize: 20 }, client);
+
+  assert.equal(calls.findMany.where.OR.length, 10);
+  assert.deepEqual(calls.findMany.where.OR[8].user.is, {
+    firstname: { contains: 'Alice', mode: 'insensitive' },
+    lastname: { contains: 'Wonderland', mode: 'insensitive' },
+  });
+  assert.deepEqual(calls.findMany.where.OR[9].admin.is, {
+    firstname: { contains: 'Alice', mode: 'insensitive' },
+    lastname: { contains: 'Wonderland', mode: 'insensitive' },
+  });
+  assert.deepEqual(calls.count.where, calls.findMany.where);
+
+  await AdminAuditService.list({ q: 'Library Master', page: 1, pageSize: 20 }, client);
+  assert.deepEqual(calls.findMany.where.OR[9].admin.is, {
+    firstname: { contains: 'Library', mode: 'insensitive' },
+    lastname: { contains: 'Master', mode: 'insensitive' },
+  });
+});
+
 test('service returns an empty page and total zero', async () => {
   const { client } = mockPrisma([], 0);
   const result = await AdminAuditService.list({ q: '', page: 1, pageSize: 20 }, client);
