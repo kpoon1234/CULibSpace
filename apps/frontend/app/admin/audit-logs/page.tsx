@@ -1,30 +1,16 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { getAuthToken, getStoredUser, subscribeToAuth, type AuthUser } from '@/lib/auth';
-import AuditLogView from '@/components/Admin/AuditLogView';
+import { getAuthToken } from '@/lib/auth';
+import { useAdminGuard } from '@/lib/useAdminGuard';
+import AuditLogView from '@/components/AuditLog/AuditLogView';
 
 export default function AdminAuditLogsPage() {
-  const router = useRouter();
-  const token = useSyncExternalStore(subscribeToAuth, getAuthToken, () => null);
-  const [adminUser, setAdminUser] = useState<AuthUser | null>(null);
+  const adminUser = useAdminGuard();
+  // useAdminGuard only returns an admin once a token is stored, so this is set whenever it renders.
+  const token = adminUser ? getAuthToken() : null;
 
-  useEffect(() => {
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
-    const user = getStoredUser();
-    if (!user || user.role !== 'ADMIN') {
-      router.replace('/login');
-      return;
-    }
-    setAdminUser(user);
-  }, [token, router]);
-
-  if (!token || !adminUser || adminUser.role !== 'ADMIN') {
+  if (!adminUser || !token) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-canvas">
         <p className="text-stone-500">Verifying administrative credentials…</p>
