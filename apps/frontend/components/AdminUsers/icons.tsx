@@ -55,3 +55,11 @@ export const UsersIcon = (p: IconProps) => (
     <path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M18 14.4c1.8.7 3 2.6 3.5 5.1" />
   </Icon>
 );
+
+export const HistoryIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" />
+    <path d="M3.5 4v4h4" />
+    <path d="M12 7.5V12l3 2" />
+  </Icon>
+);

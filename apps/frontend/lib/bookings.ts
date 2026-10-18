@@ -155,7 +155,9 @@ export async function fetchActiveBooking(): Promise<ActiveBookingData | null> {
 }
 
 /** POST /api/bookings/:id/check-in — check-in on-site (US4-1). */
-export async function checkInBooking(bookingId: number): Promise<{ ok: boolean; reason?: string }> {
+export async function checkInBooking(
+  bookingId: number
+): Promise<{ ok: boolean; reason?: string; code?: string }> {
   const token = getAuthToken();
   try {
     const res = await fetch(`${API_URL}/api/bookings/${bookingId}/check-in`, {
@@ -168,7 +170,12 @@ export async function checkInBooking(bookingId: number): Promise<{ ok: boolean; 
 
     const body = await res.json().catch(() => null);
     if (res.ok && body?.success) return { ok: true };
-    return { ok: false, reason: body?.error || `Check-in failed (${res.status})` };
+    return {
+      ok: false,
+      reason: body?.error || `Check-in failed (${res.status})`,
+      // e.g. CHECK_IN_TOO_LATE — lets the card react to the server's verdict.
+      code: typeof body?.code === 'string' ? body.code : undefined,
+    };
   } catch {
     return { ok: false, reason: 'Unable to connect to server' };
   }

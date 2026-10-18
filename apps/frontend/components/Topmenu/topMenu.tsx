@@ -66,14 +66,6 @@ export default function TopMenu() {
           <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4">
             {user ? (
               <div className="flex items-center gap-2 sm:gap-3">
-                {user.role === 'ADMIN' && (
-                  <Link
-                    href="/admin"
-                    className="hidden rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-1.5 text-xs font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white sm:block"
-                  >
-                    Admin Portal
-                  </Link>
-                )}
                 <div className="relative">
                   <button
                     type="button"
@@ -132,19 +124,24 @@ export default function TopMenu() {
                         role="menu"
                         className="absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-md border border-hairline bg-white py-1 shadow-lg"
                       >
-                        {user.role === 'ADMIN' && (
-                          <button
-                            role="menuitem"
-                            type="button"
-                            onClick={() => {
-                              router.push('/admin');
-                              setIsDropdownOpen(false);
-                            }}
-                            className="block w-full px-4 py-2 text-left text-sm font-semibold text-chula-pink hover:bg-chula-pink/10"
-                          >
-                            Admin Dashboard
-                          </button>
-                        )}
+                        {user.role === 'ADMIN' &&
+                          [
+                            { href: '/admin/users', label: 'Users' },
+                            { href: '/admin/audit-logs', label: 'View Audit History' },
+                          ].map((item) => (
+                            <button
+                              key={item.href}
+                              role="menuitem"
+                              type="button"
+                              onClick={() => {
+                                router.push(item.href);
+                                setIsDropdownOpen(false);
+                              }}
+                              className="block w-full px-4 py-2 text-left text-sm font-semibold text-chula-pink hover:bg-chula-pink/10"
+                            >
+                              {item.label}
+                            </button>
+                          ))}
                         <button
                           role="menuitem"
                           type="button"
