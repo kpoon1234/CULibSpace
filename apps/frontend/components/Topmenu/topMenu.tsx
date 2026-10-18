@@ -66,14 +66,6 @@ export default function TopMenu() {
           <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4">
             {user ? (
               <div className="flex items-center gap-2 sm:gap-3">
-                {user.role === 'ADMIN' && (
-                  <Link
-                    href="/admin"
-                    className="hidden rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-1.5 text-xs font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white sm:block"
-                  >
-                    Admin Portal
-                  </Link>
-                )}
                 <div className="relative">
                   <button
                     type="button"
@@ -137,12 +129,12 @@ export default function TopMenu() {
                             role="menuitem"
                             type="button"
                             onClick={() => {
-                              router.push('/admin');
+                              router.push('/admin/audit-logs');
                               setIsDropdownOpen(false);
                             }}
                             className="block w-full px-4 py-2 text-left text-sm font-semibold text-chula-pink hover:bg-chula-pink/10"
                           >
-                            Admin Dashboard
+                            View Audit History
                           </button>
                         )}
                         <button

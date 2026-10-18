@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getAuthToken, getStoredUser, subscribeToAuth, type AuthUser } from '@/lib/auth';
 
@@ -38,6 +39,12 @@ export default function AdminDashboardPage() {
           Welcome, {adminUser.firstname}. The administrative portal features will be implemented in
           future sprints.
         </p>
+        <Link
+          href="/admin/audit-logs"
+          className="mt-6 inline-flex items-center justify-center rounded-md bg-cta-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-cta-primary-hover"
+        >
+          View Audit History
+        </Link>
       </div>
     </div>
   );
