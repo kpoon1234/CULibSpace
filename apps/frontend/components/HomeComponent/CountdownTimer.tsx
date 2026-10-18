@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { CHECK_IN_WINDOW } from '@/lib/checkInWindow';
 import { formatHms, useCountdown } from '@/lib/useCountdown';
 import type { ActiveBookingData } from '@/lib/bookings';
 
@@ -13,8 +12,9 @@ interface CountdownTimerProps {
    *  refetch instead of waiting for SWR's next poll — NoShowWorker only sweeps
    *  once a minute, so a stale card can otherwise linger well past expiry. */
   onExpire?: () => void;
-  earlyMinutes?: number;
-  lateMinutes?: number;
+  /** From resolveCheckInWindow() — the backend's real check-in window. */
+  earlyMinutes: number;
+  lateMinutes: number;
 }
 
 /** Colour per phase. Each phase pairs its colour with its own wording, because
@@ -31,21 +31,23 @@ const TONES = {
  *
  *   PENDING, more than earlyMinutes out → not rendered (check-in is not open)
  *   PENDING, within earlyMinutes        → counts down to startDateTime, ink
+ *                                         ("Booking starts in" — the target is the
+ *                                         start, not the check-in deadline)
  *   PENDING, past startDateTime         → counts up for lateMinutes, scarlet
  *   PENDING, past the late threshold    → frozen at the cutoff, scarlet
  *   ACTIVE                              → counts down to endDateTime, spruce
  *
  * Every phase renders digits — a frozen clock keeps the card from reflowing at
  * the exact moment the user is reading it. The thresholds mirror
- * BookingService.checkIn(); see lib/checkInWindow.ts for why they live here.
+ * BookingService.checkIn(); see lib/checkInWindow.ts for where they come from.
  */
 export default function CountdownTimer({
   startDateTime,
   endDateTime,
   status,
   onExpire,
-  earlyMinutes = CHECK_IN_WINDOW.earlyMinutes,
-  lateMinutes = CHECK_IN_WINDOW.lateMinutes,
+  earlyMinutes,
+  lateMinutes,
 }: CountdownTimerProps) {
   const isCheckedIn = status === 'ACTIVE';
 
@@ -92,7 +94,7 @@ export default function CountdownTimer({
     return null;
   } else if (diff > 0) {
     tone = TONES.countdown;
-    label = 'Check in within';
+    label = 'Booking starts in';
     seconds = Math.ceil(diff / 1000);
   } else if (!isFinished) {
     tone = TONES.late;

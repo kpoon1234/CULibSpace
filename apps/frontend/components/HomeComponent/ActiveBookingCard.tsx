@@ -6,6 +6,7 @@ import { getAuthToken, subscribeToAuth } from '@/lib/auth';
 import CancelReservationModal from '@/components/Reservation/CancelReservationModal';
 import type { CancellableBooking } from '@/lib/cancellation';
 import { fetchActiveBooking, checkInBooking, type ActiveBookingData } from '@/lib/bookings';
+import { resolveCheckInWindow } from '@/lib/checkInWindow';
 import { ClockIcon, SeatIcon, PlugIcon, ScreenIcon, QrCodeIcon, CheckIcon } from './icons';
 import CountdownTimer from './CountdownTimer';
 
@@ -102,9 +103,15 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
   // a minute and SWR polls every 15s, so without this the card can sit on screen
   // well after the seat has actually been given up. Memoised so CountdownTimer's
   // expiry effect sees a stable identity across renders.
+  //
+  // A PENDING booking can stay PENDING until NoShowWorker's next sweep, so the
+  // card also marks it expired locally right away. That only changes what the
+  // UI offers — the server still decides any check-in attempt.
+  const [expiredBookingId, setExpiredBookingId] = useState<number | null>(null);
   const handleTimerExpire = useCallback(() => {
+    if (booking?.status === 'PENDING') setExpiredBookingId(booking.bookingId);
     mutate();
-  }, [mutate]);
+  }, [booking, mutate]);
 
   const visibleBooking = booking && booking.bookingId !== cancelledBookingId ? booking : null;
   const currentBooking = (visibleBooking ?? cancellationBooking) as CancellableBooking | null;
@@ -117,6 +124,8 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
       ? 'Checked-in reservations cannot be cancelled.'
       : currentBooking.cancellation?.reason || 'This reservation can no longer be cancelled.';
   const isCheckedIn = status === 'ACTIVE';
+  const isCheckInExpired = status === 'PENDING' && expiredBookingId === bookingId;
+  const checkInWindow = resolveCheckInWindow(currentBooking);
 
   async function handleCheckIn() {
     setIsCheckingIn(true);
@@ -133,6 +142,8 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
           closeQrModal();
         }, 1500);
       } else {
+        // The server's verdict wins over the local clock.
+        if (res.code === 'CHECK_IN_TOO_LATE') setExpiredBookingId(bookingId);
         setCheckInStatus({
           ok: false,
           message:
@@ -163,15 +174,25 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
                     className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-xs font-semibold tracking-wide uppercase ${
                       isCheckedIn
                         ? 'bg-spruce/10 text-spruce ring-1 ring-spruce/30'
-                        : 'bg-amber-50 text-amber-800 ring-1 ring-amber-600/30'
+                        : isCheckInExpired
+                          ? 'bg-red-50 text-red-700 ring-1 ring-red-200'
+                          : 'bg-amber-50 text-amber-800 ring-1 ring-amber-600/30'
                     }`}
                   >
                     <span
                       className={`h-2 w-2 rounded-full ${
-                        isCheckedIn ? 'bg-spruce' : 'animate-pulse bg-amber-500'
+                        isCheckedIn
+                          ? 'bg-spruce'
+                          : isCheckInExpired
+                            ? 'bg-red-500'
+                            : 'animate-pulse bg-amber-500'
                       }`}
                     />
-                    {isCheckedIn ? 'Active Session' : 'Pending Check-in'}
+                    {isCheckedIn
+                      ? 'Active Session'
+                      : isCheckInExpired
+                        ? 'Check-in Expired'
+                        : 'Pending Check-in'}
                   </span>
 
                   <span className="rounded-md bg-stone-100/90 px-2.5 py-0.5 text-xs font-medium text-stone-700">
@@ -259,6 +280,8 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
               endDateTime={endDateTime}
               status={status}
               onExpire={handleTimerExpire}
+              earlyMinutes={checkInWindow.earlyMinutes}
+              lateMinutes={checkInWindow.lateMinutes}
             />
 
             {/* Ticket Divider (Dashed on Desktop, Solid on Mobile) */}
@@ -276,6 +299,21 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
                   <div>
                     <div className="text-xs font-bold text-spruce">Checked In</div>
                     <div className="text-[11px] text-spruce/70">Seat Active</div>
+                  </div>
+                </div>
+              ) : isCheckInExpired ? (
+                <div
+                  role="status"
+                  className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-center"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-red-600">
+                    <ClockIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-red-700">Check-in closed</div>
+                    <div className="text-[11px] text-red-700/80">
+                      The check-in window has passed
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -359,7 +397,7 @@ export default function ActiveBookingCard({ initialData }: ActiveBookingCardProp
 
             <button
               type="button"
-              disabled={isCheckingIn}
+              disabled={isCheckingIn || isCheckInExpired}
               onClick={handleCheckIn}
               className="w-full rounded-lg bg-cta-primary py-2.5 text-sm font-semibold text-white transition-colors hover:bg-cta-primary-hover disabled:opacity-50"
             >

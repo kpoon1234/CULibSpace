@@ -1,12 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  fetchAuditLogs,
-  IS_MOCK_AUDIT_DATA,
-  type AuditDirection,
-  type AuditLogPage,
-} from '@/lib/auditLogs';
+import { fetchAuditLogs, type AuditDirection, type AuditLogPage } from '@/lib/auditLogs';
 
 const PAGE_SIZE = 20;
 
@@ -105,12 +100,6 @@ export default function AuditLogView({ token }: { token: string }) {
 
   return (
     <section className="overflow-hidden rounded-xl border border-hairline bg-paper shadow-sm">
-      {IS_MOCK_AUDIT_DATA && (
-        <p className="border-b border-brass-200 bg-brass-50 px-4 py-2 text-xs font-medium text-brass-800">
-          Sample data — the audit-log API isn&apos;t available on main yet, so these entries are
-          placeholders.
-        </p>
-      )}
       {/* Filters */}
       <div className="flex flex-col gap-3 border-b border-hairline p-4 lg:flex-row lg:items-end">
         <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-stone-500">

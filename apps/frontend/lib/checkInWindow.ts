@@ -1,18 +1,44 @@
-// Mirrors the check-in window the backend actually enforces in
-// BookingService.checkIn() (apps/backend/src/services/bookingService.ts) —
-// it reads SystemConfig.earlyCheckInMinutes / lateThresholdMinutes and falls
-// back to 15/15 when that row is unreadable.
+// Resolves the check-in window the backend actually enforces in
+// BookingService.checkIn() (apps/backend/src/services/bookingService.ts), which
+// reads SystemConfig.earlyCheckInMinutes / lateThresholdMinutes and falls back
+// to 15/15 when that row is unreadable.
 //
-// These are duplicated here rather than fetched because nothing in the app
-// writes SystemConfig (only prisma/seed.ts does), so the value cannot drift at
-// runtime today. If an admin screen ever gains the ability to edit it, extend
-// /api/system-config/booking-limits with these two fields and feed them in
-// through CountdownTimer's props — the timer takes them as arguments precisely
-// so that swap stays a one-line change.
+// - earlyMinutes is derived from the booking's own `cancellation.deadline`,
+//   which getActiveBooking() computes as startDateTime − earlyCheckInMinutes
+//   from the real SystemConfig row, so it tracks the DB without a new endpoint.
+// - lateMinutes is not exposed by any endpoint; it is 15 in SystemConfig today,
+//   so it stays a constant here.
+//
+// Either way the backend stays authoritative: a check-in outside the real window
+// is rejected with CHECK_IN_TOO_EARLY / CHECK_IN_TOO_LATE whatever this shows.
 
-export const CHECK_IN_WINDOW = {
+export const DEFAULT_CHECK_IN_WINDOW = {
   /** How long before startDateTime check-in opens. */
   earlyMinutes: 15,
   /** How long after startDateTime check-in stays open before NO_SHOW. */
   lateMinutes: 15,
 } as const;
+
+export interface CheckInWindow {
+  earlyMinutes: number;
+  lateMinutes: number;
+}
+
+export function resolveCheckInWindow(booking: {
+  startDateTime: string;
+  cancellation?: { deadline?: string };
+}): CheckInWindow {
+  const startMs = Date.parse(booking.startDateTime);
+  const deadlineMs = booking.cancellation?.deadline
+    ? Date.parse(booking.cancellation.deadline)
+    : NaN;
+  const derivedEarly = (startMs - deadlineMs) / 60_000;
+
+  return {
+    earlyMinutes:
+      Number.isFinite(derivedEarly) && derivedEarly >= 0
+        ? derivedEarly
+        : DEFAULT_CHECK_IN_WINDOW.earlyMinutes,
+    lateMinutes: DEFAULT_CHECK_IN_WINDOW.lateMinutes,
+  };
+}
