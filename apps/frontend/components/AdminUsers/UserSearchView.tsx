@@ -17,7 +17,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 interface UserSearchViewProps {
   /** Mount the Score Adjustment Form (separate US5-4 task) for the selected user. */
-  renderActions?: (user: AdminUserSummary) => ReactNode;
+  renderActions?: (user: AdminUserSummary, actions: { retry: () => void }) => ReactNode;
 }
 
 // Admin user search (US5-4): find a user by name / email / student ID / phone,
@@ -221,7 +221,7 @@ export default function UserSearchView({ renderActions }: UserSearchViewProps) {
         <UserDetailPanel
           user={selected}
           onClose={() => setSelected(null)}
-          actions={selected && renderActions ? renderActions(selected) : undefined}
+          actions={selected && renderActions ? renderActions(selected, { retry }) : undefined}
         />
       </div>
     </div>

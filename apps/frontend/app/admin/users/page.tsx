@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { UserSearchView } from '@/components/AdminUsers';
 import { useAdminGuard } from '@/lib/useAdminGuard';
@@ -15,6 +15,7 @@ export default function AdminUsersPage() {
   const admin = useAdminGuard();
   const [adjustUser, setAdjustUser] = useState<AdminUserSummary | null>(null);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const retryRef = useRef<(() => void) | null>(null);
 
   if (!admin) {
     return (
@@ -40,19 +41,22 @@ export default function AdminUsersPage() {
       </header>
 
       <UserSearchView
-        renderActions={(user) => (
-          <button
-            type="button"
-            onClick={() => {
-              setAdjustUser(user);
-              setShowAdjustmentModal(true);
-            }}
-            aria-label={`Adjust score for ${user.firstname} ${user.lastname}`}
-            className="w-full rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-2 text-sm font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white"
-          >
-            Adjust score
-          </button>
-        )}
+        renderActions={(user, { retry }) => {
+          retryRef.current = retry;
+          return (
+            <button
+              type="button"
+              onClick={() => {
+                setAdjustUser(user);
+                setShowAdjustmentModal(true);
+              }}
+              aria-label={`Adjust score for ${user.firstname} ${user.lastname}`}
+              className="w-full rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-2 text-sm font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white"
+            >
+              Adjust score
+            </button>
+          );
+        }}
       />
 
       <ScoreAdjustmentModal
@@ -72,6 +76,11 @@ export default function AdminUsersPage() {
               }
             : null
         }
+        onSuccess={() => {
+          setShowAdjustmentModal(false);
+          setAdjustUser(null);
+          retryRef.current?.();
+        }}
       />
     </div>
   );

@@ -16,6 +16,7 @@ interface ScoreAdjustmentModalProps {
   isOpen: boolean;
   onClose: () => void;
   targetUser: TargetUser | null;
+  onSuccess: () => void;
 }
 
 type Action = 'add' | 'deduct';
@@ -24,6 +25,7 @@ export default function ScoreAdjustmentModal({
   isOpen,
   onClose,
   targetUser,
+  onSuccess,
 }: ScoreAdjustmentModalProps) {
   const [action, setAction] = useState<Action>('deduct');
   const [score, setScore] = useState('');
@@ -31,14 +33,21 @@ export default function ScoreAdjustmentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(false);
+    setSubmitted(true);
 
     if (!targetUser) {
       setError('No user selected.');
+      return;
+    }
+
+    if (!score.trim()) {
+      setError('Score amount is required.');
       return;
     }
 
@@ -49,7 +58,7 @@ export default function ScoreAdjustmentModal({
     }
 
     if (!reason.trim()) {
-      setError('Please enter a reason for the adjustment.');
+      setError('Reason is required.');
       return;
     }
 
@@ -85,6 +94,7 @@ export default function ScoreAdjustmentModal({
       setSuccess(true);
       setScore('');
       setReason('');
+      onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while adjusting the score.');
     } finally {
@@ -93,6 +103,9 @@ export default function ScoreAdjustmentModal({
   }
 
   if (!isOpen || !targetUser) return null;
+
+  const scoreEmpty = !score.trim();
+  const reasonEmpty = !reason.trim();
 
   return (
     <div
@@ -171,28 +184,38 @@ export default function ScoreAdjustmentModal({
               <input
                 type="number"
                 min="1"
-                required
                 value={score}
-                onChange={(event) => setScore(event.target.value)}
+                onChange={(event) => {
+                  setScore(event.target.value);
+                  setSubmitted(false);
+                }}
                 className={`mt-1 w-full rounded-md border px-3 py-2 text-black focus:border-rose-400 focus:outline-none ${
-                  error ? 'border-red-500' : 'border-gray-300'
+                  submitted && scoreEmpty ? 'border-red-500' : 'border-gray-300'
                 }`}
                 placeholder="0"
               />
+              {submitted && scoreEmpty && (
+                <p className="mt-1 text-xs text-red-600">This field is required.</p>
+              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700">Reason</label>
               <textarea
-                required
                 value={reason}
-                onChange={(event) => setReason(event.target.value)}
+                onChange={(event) => {
+                  setReason(event.target.value);
+                  setSubmitted(false);
+                }}
                 rows={3}
                 className={`mt-1 w-full rounded-md border px-3 py-2 text-black focus:border-rose-400 focus:outline-none ${
-                  error ? 'border-red-500' : 'border-gray-300'
+                  submitted && reasonEmpty ? 'border-red-500' : 'border-gray-300'
                 }`}
                 placeholder="Enter reason for score adjustment"
               />
+              {submitted && reasonEmpty && (
+                <p className="mt-1 text-xs text-red-600">This field is required.</p>
+              )}
             </div>
 
             {error && (
