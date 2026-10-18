@@ -2,11 +2,13 @@
 
 import { useState } from 'react';
 import { API_URL, getAuthToken } from '@/lib/auth';
+import { USER_TYPE_LABEL } from '@/components/AdminUsers/format';
 
 interface TargetUser {
   uid: number;
   firstname: string;
   lastname: string;
+  userType: string;
   behaviourScore: number;
 }
 
@@ -134,7 +136,8 @@ export default function ScoreAdjustmentModal({
               {targetUser.firstname} {targetUser.lastname}
             </h2>
             <p className="text-sm text-gray-600">
-              Current behaviour score: {targetUser.behaviourScore} / 100
+              {USER_TYPE_LABEL[targetUser.userType as keyof typeof USER_TYPE_LABEL]} &bull; Current
+              behaviour score: {targetUser.behaviourScore} / 100
             </p>
           </div>
 
@@ -171,7 +174,9 @@ export default function ScoreAdjustmentModal({
                 required
                 value={score}
                 onChange={(event) => setScore(event.target.value)}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
+                className={`mt-1 w-full rounded-md border px-3 py-2 text-black focus:border-rose-400 focus:outline-none ${
+                  error ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="0"
               />
             </div>
@@ -183,12 +188,21 @@ export default function ScoreAdjustmentModal({
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 rows={3}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-black focus:border-rose-400 focus:outline-none"
+                className={`mt-1 w-full rounded-md border px-3 py-2 text-black focus:border-rose-400 focus:outline-none ${
+                  error ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="Enter reason for score adjustment"
               />
             </div>
 
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && (
+              <div className="mt-2 rounded-md bg-red-50 p-3 border border-red-100">
+                <p className="flex items-start gap-2 text-sm text-red-700">
+                  <span className="shrink-0">⚠</span>
+                  {error}
+                </p>
+              </div>
+            )}
 
             <button
               type="submit"

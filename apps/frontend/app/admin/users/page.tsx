@@ -47,6 +47,7 @@ export default function AdminUsersPage() {
               setAdjustUser(user);
               setShowAdjustmentModal(true);
             }}
+            aria-label={`Adjust score for ${user.firstname} ${user.lastname}`}
             className="w-full rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-2 text-sm font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white"
           >
             Adjust score
@@ -66,6 +67,7 @@ export default function AdminUsersPage() {
                 uid: adjustUser.uid,
                 firstname: adjustUser.firstname,
                 lastname: adjustUser.lastname,
+                userType: adjustUser.userType,
                 behaviourScore: adjustUser.behaviourScore,
               }
             : null
