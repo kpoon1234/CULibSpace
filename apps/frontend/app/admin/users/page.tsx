@@ -1,15 +1,20 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { UserSearchView } from '@/components/AdminUsers';
 import { useAdminGuard } from '@/lib/useAdminGuard';
 import { ChevronLeftIcon } from '@/components/AdminUsers/icons';
+import ScoreAdjustmentModal from '@/components/Profile/ScoreAdjustmentModal';
+import type { AdminUserSummary } from '@/lib/adminUsers';
 
 // Admin user search (US5-4). Data comes from GET /api/admin/users (see
 // lib/ARCHITECTURE.md) — set NEXT_PUBLIC_ADMIN_USERS_MOCK=1 to use sample users
 // instead (e.g. without a running backend).
 export default function AdminUsersPage() {
   const admin = useAdminGuard();
+  const [adjustUser, setAdjustUser] = useState<AdminUserSummary | null>(null);
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
 
   if (!admin) {
     return (
@@ -34,7 +39,38 @@ export default function AdminUsersPage() {
         </p>
       </header>
 
-      <UserSearchView />
+      <UserSearchView
+        renderActions={(user) => (
+          <button
+            type="button"
+            onClick={() => {
+              setAdjustUser(user);
+              setShowAdjustmentModal(true);
+            }}
+            className="w-full rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-2 text-sm font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white"
+          >
+            Adjust score
+          </button>
+        )}
+      />
+
+      <ScoreAdjustmentModal
+        isOpen={showAdjustmentModal}
+        onClose={() => {
+          setShowAdjustmentModal(false);
+          setAdjustUser(null);
+        }}
+        targetUser={
+          adjustUser
+            ? {
+                uid: adjustUser.uid,
+                firstname: adjustUser.firstname,
+                lastname: adjustUser.lastname,
+                behaviourScore: adjustUser.behaviourScore,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

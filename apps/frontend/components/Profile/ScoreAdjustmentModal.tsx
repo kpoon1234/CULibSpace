@@ -1,16 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { API_URL, getAuthToken, getStoredUser } from '@/lib/auth';
+import { API_URL, getAuthToken } from '@/lib/auth';
+
+interface TargetUser {
+  uid: number;
+  firstname: string;
+  lastname: string;
+  behaviourScore: number;
+}
 
 interface ScoreAdjustmentModalProps {
   isOpen: boolean;
   onClose: () => void;
+  targetUser: TargetUser | null;
 }
 
 type Action = 'add' | 'deduct';
 
-export default function ScoreAdjustmentModal({ isOpen, onClose }: ScoreAdjustmentModalProps) {
+export default function ScoreAdjustmentModal({
+  isOpen,
+  onClose,
+  targetUser,
+}: ScoreAdjustmentModalProps) {
   const [action, setAction] = useState<Action>('deduct');
   const [score, setScore] = useState('');
   const [reason, setReason] = useState('');
@@ -18,12 +30,15 @@ export default function ScoreAdjustmentModal({ isOpen, onClose }: ScoreAdjustmen
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const targetUid = getStoredUser()?.uid;
-
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(false);
+
+    if (!targetUser) {
+      setError('No user selected.');
+      return;
+    }
 
     const scoreValue = Number(score);
     if (!scoreValue || scoreValue <= 0) {
@@ -53,7 +68,7 @@ export default function ScoreAdjustmentModal({ isOpen, onClose }: ScoreAdjustmen
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          targetUid,
+          targetUid: targetUser.uid,
           scoreChange,
           reason: reason.trim(),
         }),
@@ -75,7 +90,7 @@ export default function ScoreAdjustmentModal({ isOpen, onClose }: ScoreAdjustmen
     }
   }
 
-  if (!isOpen) return null;
+  if (!isOpen || !targetUser) return null;
 
   return (
     <div
@@ -114,6 +129,15 @@ export default function ScoreAdjustmentModal({ isOpen, onClose }: ScoreAdjustmen
         </div>
 
         <div className="bg-gray-50/30 p-4 sm:p-8">
+          <div className="mb-5">
+            <h2 className="text-base font-semibold text-gray-900">
+              {targetUser.firstname} {targetUser.lastname}
+            </h2>
+            <p className="text-sm text-gray-600">
+              Current behaviour score: {targetUser.behaviourScore} / 100
+            </p>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-gray-700">Adjustment type</label>
