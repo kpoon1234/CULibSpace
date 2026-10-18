@@ -125,6 +125,30 @@ async function runTests() {
     }
   }
 
+  console.log('\n--- Suite 2b: Service Score Change Validation ---');
+  {
+    let transactionCalls = 0;
+    const mockPrisma = {
+      $transaction: async () => {
+        transactionCalls++;
+        throw new Error('Invalid input must not start a transaction');
+      },
+    };
+
+    for (const scoreChange of [0, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      try {
+        await AuthService.adjustUserScore(1, 2, scoreChange, 'Invalid', mockPrisma);
+        assert(false, `service rejects invalid scoreChange ${scoreChange}`);
+      } catch (err: any) {
+        assert(
+          err.status === 400 && err.code === 'INVALID_SCORE_CHANGE',
+          `service rejects invalid scoreChange ${scoreChange}`
+        );
+      }
+    }
+    assert(transactionCalls === 0, 'invalid scoreChange does not start a transaction');
+  }
+
   console.log('\n--- Suite 3: Clamping, Effective Change, and Audit Log ---');
   {
     let capturedAuditData: any = null;
