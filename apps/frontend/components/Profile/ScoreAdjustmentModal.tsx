@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { API_URL, getAuthToken } from '@/lib/auth';
 import { USER_TYPE_LABEL } from '@/components/AdminUsers/format';
 
@@ -15,7 +15,7 @@ interface TargetUser {
 interface ScoreAdjustmentModalProps {
   onClose: () => void;
   targetUser: TargetUser | null;
-  onSuccess: () => void;
+  onSuccess: (expectedRequestId: number) => void;
 }
 
 type Action = 'add' | 'deduct';
@@ -31,6 +31,7 @@ export default function ScoreAdjustmentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const requestIdRef = useRef(0);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -66,6 +67,8 @@ export default function ScoreAdjustmentModal({
       return;
     }
 
+    const currentRequestId = ++requestIdRef.current;
+
     setIsSubmitting(true);
     try {
       const response = await fetch(`${API_URL}/api/admin/adjust-score`, {
@@ -97,7 +100,11 @@ export default function ScoreAdjustmentModal({
         return;
       }
 
-      onSuccess();
+      // Only act on the latest request so an old in-flight response can’t
+      // close a modal opened for a different user.
+      if (currentRequestId !== requestIdRef.current) return;
+
+      onSuccess(currentRequestId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while adjusting the score.');
     } finally {
@@ -114,6 +121,7 @@ export default function ScoreAdjustmentModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm sm:p-8"
       onClick={(event) => {
+        if (isSubmitting) return;
         if (event.target === event.currentTarget) onClose();
       }}
       role="dialog"
@@ -125,9 +133,10 @@ export default function ScoreAdjustmentModal({
           <h1 className="text-lg font-semibold text-white">Adjust User Score</h1>
           <button
             type="button"
-            onClick={onClose}
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            onClick={isSubmitting ? undefined : onClose}
+            disabled={isSubmitting}
             aria-label="Close modal"
+            className={`absolute right-4 top-1/2 -translate-y-1/2 rounded-full p-1.5 transition-all ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white'}`}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"

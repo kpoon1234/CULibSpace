@@ -16,6 +16,7 @@ export default function AdminUsersPage() {
   const [adjustUser, setAdjustUser] = useState<AdminUserSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const retryRef = useRef<(() => void) | null>(null);
+  const pageRequestIdRef = useRef(0);
 
   if (!admin) {
     return (
@@ -55,6 +56,7 @@ export default function AdminUsersPage() {
               type="button"
               disabled={isMock}
               onClick={() => {
+                pageRequestIdRef.current++;
                 setAdjustUser(user);
                 setNotice(null);
               }}
@@ -84,7 +86,8 @@ export default function AdminUsersPage() {
             userType: adjustUser.userType,
             behaviourScore: adjustUser.behaviourScore,
           }}
-          onSuccess={() => {
+          onSuccess={(expectedRequestId) => {
+            if (expectedRequestId !== pageRequestIdRef.current) return;
             setAdjustUser(null);
             setNotice(`ปรับคะแนน ${adjustUser.firstname} ${adjustUser.lastname} เรียบร้อยแล้ว`);
             retryRef.current?.();
