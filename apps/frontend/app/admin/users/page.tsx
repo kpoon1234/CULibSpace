@@ -47,19 +47,25 @@ export default function AdminUsersPage() {
       )}
 
       <UserSearchView
-        renderActions={(user, { retry }) => {
+        renderActions={(user, { retry, source }) => {
           retryRef.current = retry;
+          const isMock = source === 'mock';
           return (
             <button
               type="button"
+              disabled={isMock}
               onClick={() => {
                 setAdjustUser(user);
                 setNotice(null);
               }}
               aria-label={`Adjust score for ${user.firstname} ${user.lastname}`}
-              className="w-full rounded-md border border-chula-pink bg-chula-pink/5 px-3 py-2 text-sm font-semibold text-chula-pink transition-colors hover:bg-chula-pink hover:text-white"
+              className={`w-full rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                isMock
+                  ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'border-chula-pink bg-chula-pink/5 text-chula-pink hover:bg-chula-pink hover:text-white'
+              }`}
             >
-              Adjust score
+              {isMock ? 'ไม่สามารถปรับคะแนนในโหมดตัวอย่าง' : 'Adjust score'}
             </button>
           );
         }}
