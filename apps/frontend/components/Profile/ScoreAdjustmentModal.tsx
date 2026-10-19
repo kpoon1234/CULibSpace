@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { API_URL, getAuthToken } from '@/lib/auth';
 import { USER_TYPE_LABEL } from '@/components/AdminUsers/format';
 
@@ -15,7 +15,7 @@ interface TargetUser {
 interface ScoreAdjustmentModalProps {
   onClose: () => void;
   targetUser: TargetUser | null;
-  onSuccess: (expectedRequestId: number) => void;
+  onSuccess: () => void;
 }
 
 type Action = 'add' | 'deduct';
@@ -31,7 +31,6 @@ export default function ScoreAdjustmentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const requestIdRef = useRef(0);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,8 +66,6 @@ export default function ScoreAdjustmentModal({
       return;
     }
 
-    const currentRequestId = ++requestIdRef.current;
-
     setIsSubmitting(true);
     try {
       const response = await fetch(`${API_URL}/api/admin/adjust-score`, {
@@ -100,11 +97,7 @@ export default function ScoreAdjustmentModal({
         return;
       }
 
-      // Only act on the latest request so an old in-flight response can’t
-      // close a modal opened for a different user.
-      if (currentRequestId !== requestIdRef.current) return;
-
-      onSuccess(currentRequestId);
+      onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while adjusting the score.');
     } finally {
