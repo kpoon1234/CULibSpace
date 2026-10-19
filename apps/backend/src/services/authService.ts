@@ -218,6 +218,7 @@ export class AuthService {
       scoreChange: entry.scoreChange,
       adminId: entry.adminId ?? null,
       adminName: entry.admin ? `${entry.admin.firstname} ${entry.admin.lastname}`.trim() : 'System',
+      reason: entry.reason,
     }));
 
     return {

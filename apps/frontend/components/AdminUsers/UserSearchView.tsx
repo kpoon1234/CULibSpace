@@ -17,7 +17,10 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 interface UserSearchViewProps {
   /** Mount the Score Adjustment Form (separate US5-4 task) for the selected user. */
-  renderActions?: (user: AdminUserSummary) => ReactNode;
+  renderActions?: (
+    user: AdminUserSummary,
+    actions: { retry: () => void; source: 'api' | 'mock' | undefined }
+  ) => ReactNode;
 }
 
 // Admin user search (US5-4): find a user by name / email / student ID / phone,
@@ -27,7 +30,7 @@ export default function UserSearchView({ renderActions }: UserSearchViewProps) {
   const [q, setQ] = useState('');
   const [userType, setUserType] = useState<UserType | undefined>(undefined);
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<AdminUserSummary | null>(null);
+  const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +70,7 @@ export default function UserSearchView({ renderActions }: UserSearchViewProps) {
   }
 
   function select(user: AdminUserSummary) {
-    setSelected(user);
+    setSelectedUid(user.uid);
     // Below lg the panel stacks under the results — bring it into view.
     if (!window.matchMedia('(min-width: 1024px)').matches) {
       requestAnimationFrame(() =>
@@ -75,6 +78,11 @@ export default function UserSearchView({ renderActions }: UserSearchViewProps) {
       );
     }
   }
+
+  // Derive the selected user from the latest results so the score stays in sync
+  // after a retry (e.g. following a score adjustment) without calling setState
+  // inside an effect.
+  const selected = selectedUid ? (result?.users.find((u) => u.uid === selectedUid) ?? null) : null;
 
   const total = result?.total ?? 0;
   const first = total === 0 ? 0 : (page - 1) * DEFAULT_PAGE_SIZE + 1;
@@ -220,8 +228,10 @@ export default function UserSearchView({ renderActions }: UserSearchViewProps) {
       <div ref={detailRef} className="scroll-mt-20 lg:sticky lg:top-20">
         <UserDetailPanel
           user={selected}
-          onClose={() => setSelected(null)}
-          actions={selected && renderActions ? renderActions(selected) : undefined}
+          onClose={() => setSelectedUid(null)}
+          actions={
+            selected && renderActions ? renderActions(selected, { retry, source }) : undefined
+          }
         />
       </div>
     </div>
