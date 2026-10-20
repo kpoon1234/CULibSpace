@@ -65,11 +65,13 @@ function clientFor(state: State, actor: Actor, afterRead?: (actor: Actor) => Pro
       const staged: Partial<Pick<State, 'score' | 'bookingStatus' | 'tableStatus'>> = {};
       const audits: Audit[] = [];
       const tx = {
+        $queryRaw: async () => [],
         admin: {
           findUnique: async () => ({ adminId }),
           findFirst: async () => ({ adminId }),
         },
         booking: {
+          findFirst: async () => null,
           updateMany: async ({ where, data }: any) => {
             if (where.bookingId !== bookingId || state.bookingStatus !== where.status) {
               return { count: 0 };

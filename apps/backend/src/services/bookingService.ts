@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
 import { ScoreGuard } from './scoreGuard.js';
+import { lockTableForStatusChange, refreshTableStatus } from './tableStatusService.js';
 import { randomUUID } from 'crypto';
 
 export interface BookingWithTableAndZone {
@@ -588,31 +589,44 @@ export class BookingService {
       };
     }
 
-    // 4. Update สถานะใน Transaction
+    // 4. Serialize all status changes for this table before transitioning the booking.
     const updatedBooking = await prisma.$transaction(async (tx: any) => {
-      const b = await tx.booking.update({
-        where: { bookingId },
+      await lockTableForStatusChange(tx, booking.tableId);
+
+      const table = await tx.table.findUnique({
+        where: { tableId: booking.tableId },
+        select: { status: true },
+      });
+      if (!table || table.status === TableStatus.CLOSED) {
+        throw {
+          status: 400,
+          code: 'TABLE_CLOSED',
+          message: 'This table is currently closed for maintenance.',
+        };
+      }
+
+      const transition = await tx.booking.updateMany({
+        where: { bookingId, uid: userId, status: BookingStatus.PENDING },
         data: {
           status: BookingStatus.ACTIVE,
           arriveTime: now,
         },
-        include: {
-          table: {
-            include: {
-              zone: true,
-            },
-          },
-        },
       });
 
-      await tx.table.update({
-        where: { tableId: booking.tableId },
-        data: {
-          status: TableStatus.OCCUPIED,
-        },
-      });
+      if (transition.count === 0) {
+        throw {
+          status: 409,
+          code: 'BOOKING_STATUS_CHANGED',
+          message: 'This booking changed while you were checking in. Please refresh and try again.',
+        };
+      }
 
-      return b;
+      await refreshTableStatus(tx, booking.tableId, now);
+
+      return await tx.booking.findUnique({
+        where: { bookingId },
+        include: { table: { include: { zone: true } } },
+      });
     });
 
     return updatedBooking;
@@ -632,7 +646,7 @@ export class BookingService {
    *    - If now >= startDateTime -> 400 CANCELLATION_DEADLINE_PASSED
    * 4. Atomic Transaction:
    *    - Updates booking status to CANCELLED
-   *    - Releases table status back to AVAILABLE
+   *    - Recalculates the table status after cancellation
    *    - Clears any temporary hold locks on the table
    *    - ZERO PENALTY: User behavior score is untouched, no record inserted into ManageScore
    */
@@ -705,8 +719,10 @@ export class BookingService {
         };
       }
 
-      // Atomic Transaction: Cancel booking, restore table availability, zero penalty to user score
+      // Atomic Transaction: Cancel booking, reconcile table status, zero penalty to user score
       const executeInTx = async (tx: any) => {
+        await lockTableForStatusChange(tx, booking.tableId);
+
         // Optimistic Concurrency Guard: Atomic update only if still PENDING (prevents check-in race condition)
         const updateResult = await tx.booking.updateMany({
           where: {
@@ -748,37 +764,7 @@ export class BookingService {
           };
         }
 
-        // Release table back to AVAILABLE (if table exists and is not closed for maintenance)
-        if (booking.table && booking.table.status !== TableStatus.CLOSED) {
-          // Check if another active or pending booking overlaps right now
-          let ongoingBooking = null;
-          if (tx.booking.findFirst) {
-            ongoingBooking = await tx.booking.findFirst({
-              where: {
-                tableId: booking.tableId,
-                bookingId: { not: bookingId },
-                status: { in: [BookingStatus.ACTIVE, BookingStatus.PENDING] },
-                startDateTime: { lte: now },
-                endDateTime: { gt: now },
-              },
-            });
-          }
-
-          const targetStatus = ongoingBooking
-            ? ongoingBooking.status === BookingStatus.ACTIVE
-              ? TableStatus.OCCUPIED
-              : TableStatus.RESERVED
-            : TableStatus.AVAILABLE;
-
-          if (tx.table.update) {
-            await tx.table.update({
-              where: { tableId: booking.tableId },
-              data: {
-                status: targetStatus,
-              },
-            });
-          }
-        }
+        await refreshTableStatus(tx, booking.tableId, now);
 
         // Clear hold lock ONLY if locked by this user (prevent clearing another user's active hold lock)
         if (tx.table.updateMany) {
@@ -839,11 +825,14 @@ export class BookingService {
     prisma: any = defaultPrisma
   ): Promise<boolean> {
     const executeInTx = async (tx: any) => {
-      // 1. Atomic conditional update to COMPLETED (only if currently ACTIVE)
+      await lockTableForStatusChange(tx, booking.tableId);
+
+      // 1. Complete only bookings which are still ACTIVE and still past their end time.
       const updatedBooking = await tx.booking.updateMany({
         where: {
           bookingId: booking.bookingId,
           status: BookingStatus.ACTIVE,
+          endDateTime: { lte: now },
         },
         data: {
           status: BookingStatus.COMPLETED,
@@ -854,33 +843,7 @@ export class BookingService {
         return false;
       }
 
-      // 2. Check if another active booking is currently using this table
-      const otherActiveBooking = await tx.booking.findFirst({
-        where: {
-          tableId: booking.tableId,
-          bookingId: { not: booking.bookingId },
-          status: BookingStatus.ACTIVE,
-          startDateTime: { lte: now },
-          endDateTime: { gt: now },
-        },
-      });
-
-      // 3. Release table status to AVAILABLE within the same transaction only if no other booking is using it
-      if (!otherActiveBooking) {
-        const table = await tx.table.findUnique({
-          where: { tableId: booking.tableId },
-          select: { status: true },
-        });
-
-        if (table && table.status === TableStatus.OCCUPIED) {
-          await tx.table.update({
-            where: { tableId: booking.tableId },
-            data: {
-              status: TableStatus.AVAILABLE,
-            },
-          });
-        }
-      }
+      await refreshTableStatus(tx, booking.tableId, now);
 
       return true;
     };

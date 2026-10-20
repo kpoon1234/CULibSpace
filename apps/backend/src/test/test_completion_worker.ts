@@ -31,6 +31,7 @@ async function runTests() {
     let tableUpdated = false;
 
     const mockPrisma = {
+      $queryRaw: async () => [],
       booking: {
         findMany: async (args: any) => {
           // Finds ACTIVE bookings where endDateTime <= now
@@ -81,6 +82,7 @@ async function runTests() {
   try {
     let transactionUsed = false;
     const mockPrisma = {
+      $queryRaw: async () => [],
       booking: {
         findMany: async () => [{ bookingId: 201, tableId: 20 }],
         updateMany: async () => ({ count: 1 }),
@@ -107,17 +109,22 @@ async function runTests() {
     let tableWasReleased = false;
 
     const mockPrisma = {
+      $queryRaw: async () => [],
       booking: {
         findMany: async () => [{ bookingId: 202, tableId: 20 }],
         updateMany: async () => ({ count: 1 }),
-        // Another active booking is currently using this table!
+        // Another booking checked in 15 minutes early, before its scheduled start.
         findFirst: async (args: any) => {
-          if (args.where?.tableId === 20 && args.where?.bookingId?.not === 202) {
+          if (
+            args.where?.tableId === 20 &&
+            args.where?.status === BookingStatus.ACTIVE &&
+            !args.where?.startDateTime
+          ) {
             return {
               bookingId: 999,
               tableId: 20,
               status: BookingStatus.ACTIVE,
-              startDateTime: new Date('2026-10-20T09:30:00.000Z'),
+              startDateTime: new Date('2026-10-20T10:15:00.000Z'),
               endDateTime: new Date('2026-10-20T11:00:00.000Z'),
             };
           }
@@ -136,10 +143,7 @@ async function runTests() {
 
     const res = await BookingService.completeEndedBookings(now, mockPrisma as any);
     assert(res.processed === 1, 'Booking 202 successfully marked COMPLETED');
-    assert(
-      !tableWasReleased,
-      'Table remains OCCUPIED because another active booking is currently using the table'
-    );
+    assert(!tableWasReleased, 'Table remains OCCUPIED while another booking is checked in early');
   } catch (err: any) {
     assert(false, 'Other booking table guard check', err?.message);
   }
@@ -149,6 +153,7 @@ async function runTests() {
     let tableUpdateCalled = false;
 
     const mockPrisma = {
+      $queryRaw: async () => [],
       booking: {
         findMany: async () => [{ bookingId: 203, tableId: 25 }],
         updateMany: async () => ({ count: 1 }),
