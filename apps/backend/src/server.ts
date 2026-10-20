@@ -12,6 +12,7 @@ import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
+import { BookingService } from './services/bookingService.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -67,4 +68,7 @@ app.listen(PORT, () => {
 
   // 3. สั่งเริ่มการทำงานของ No-show Detection Cron Worker (ทุก 1 นาที)
   NoShowService.startNoShowWorker();
+
+  // 4. สั่งเริ่มการทำงานของ Booking Completion Worker (ทุก 30 วินาที เมื่อหมดเวลาจอง เปลี่ยน ACTIVE -> COMPLETED และคืนโต๊ะ)
+  BookingService.startCompletionWorker();
 });

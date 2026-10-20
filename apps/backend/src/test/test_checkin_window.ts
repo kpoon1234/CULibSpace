@@ -51,13 +51,21 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
-            update: async ({ data }: any) => {
+            updateMany: async ({ data }: any) => {
               updatedBookingStatus = data.status;
-              return { bookingId, status: data.status, arriveTime: data.arriveTime };
+              return { count: 1 };
             },
+            findFirst: async () => ({ bookingId, status: BookingStatus.ACTIVE }),
+            findUnique: async () => ({
+              bookingId,
+              status: BookingStatus.ACTIVE,
+              arriveTime: mockNow,
+            }),
           },
           table: {
+            findUnique: async () => ({ status: TableStatus.RESERVED }),
             update: async ({ data }: any) => {
               updatedTableStatus = data.status;
               return { tableId, status: data.status };
@@ -73,11 +81,56 @@ async function runTests() {
       // @ts-ignore
       const result = await BookingService.checkIn(userId, bookingId, mockNow, mockPrisma);
       assert(
-        result.status === BookingStatus.ACTIVE && updatedTableStatus === TableStatus.OCCUPIED,
+        result.status === BookingStatus.ACTIVE &&
+          updatedBookingStatus === BookingStatus.ACTIVE &&
+          updatedTableStatus === TableStatus.OCCUPIED,
         'AC 4.1.1: Valid check-in within window transitions booking to ACTIVE and table to OCCUPIED'
       );
     } catch (err: any) {
       assert(false, 'AC 4.1.1: Valid check-in within window', err?.message);
+    }
+  }
+
+  // A table closed after the initial booking read must not be reopened by check-in.
+  {
+    let bookingUpdated = false;
+    const mockNow = new Date('2026-10-01T13:50:00Z');
+    const mockPrisma = {
+      systemConfig: {
+        findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
+      },
+      booking: {
+        findUnique: async () => ({
+          bookingId,
+          uid: userId,
+          tableId,
+          startDateTime: bookingStart,
+          endDateTime: bookingEnd,
+          status: BookingStatus.PENDING,
+          table: { tableId, status: TableStatus.RESERVED },
+        }),
+      },
+      $transaction: async (callback: any) =>
+        callback({
+          $queryRaw: async () => [],
+          table: { findUnique: async () => ({ status: TableStatus.CLOSED }) },
+          booking: {
+            updateMany: async () => {
+              bookingUpdated = true;
+              return { count: 1 };
+            },
+          },
+        }),
+    };
+
+    try {
+      await BookingService.checkIn(userId, bookingId, mockNow, mockPrisma);
+      assert(false, 'Check-in should reject a table closed for maintenance');
+    } catch (err: any) {
+      assert(
+        err.code === 'TABLE_CLOSED' && !bookingUpdated,
+        'Check-in preserves CLOSED status and does not activate the booking'
+      );
     }
   }
 

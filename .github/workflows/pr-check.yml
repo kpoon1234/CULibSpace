@@ -55,7 +55,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/culibspace_test
 
-      - name: Test Admin Score Audit Transaction
+      - name: Test Backend Database Transactions
         run: npm run test:integration --workspace=apps/backend
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/culibspace_test
