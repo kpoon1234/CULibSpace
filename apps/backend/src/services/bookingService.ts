@@ -38,6 +38,10 @@ export interface BookingWithTableAndZone {
     deadline?: string;
     reason?: string;
   };
+  checkInWindow?: {
+    earlyMinutes: number;
+    lateMinutes: number;
+  };
 }
 
 const defaultPrisma = new PrismaClient();
@@ -893,7 +897,7 @@ export async function getActiveBooking(
 
   if (!booking) return null;
 
-  // Read system configuration for early check-in window / cancellation cutoff
+  // Read the same check-in limits used by checkIn() and the No-show worker.
   let config = null;
   try {
     config = prisma.systemConfig?.findFirst ? await prisma.systemConfig.findFirst() : null;
@@ -901,6 +905,7 @@ export async function getActiveBooking(
     // fallback
   }
   const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
+  const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
   const cancellationCutoffMs = earlyCheckInMinutes * 60 * 1000;
   const deadline = new Date(booking.startDateTime.getTime() - cancellationCutoffMs);
 
@@ -918,6 +923,10 @@ export async function getActiveBooking(
 
   const result = {
     ...booking,
+    checkInWindow: {
+      earlyMinutes: earlyCheckInMinutes,
+      lateMinutes: lateThresholdMinutes,
+    },
     cancellation: {
       allowed,
       deadline: deadline.toISOString(),

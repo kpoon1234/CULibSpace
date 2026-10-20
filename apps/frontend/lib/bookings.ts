@@ -120,6 +120,8 @@ export interface ActiveBookingData {
   arriveTime: string | null;
   status: 'PENDING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
   createdAt: string;
+  /** Check-in limits from SystemConfig, supplied by GET /api/bookings/my-active. */
+  checkInWindow?: { earlyMinutes: number; lateMinutes: number };
   table: {
     tableId: number;
     zoneId: number;

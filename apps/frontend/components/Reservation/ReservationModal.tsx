@@ -39,7 +39,7 @@ function combineDateAndTime(date: Date, hhmm: string): Date {
   return combined;
 }
 
-/** Date -> the "HH:mm" nearest `TIME_SLOTS` entry it falls on. */
+/** Date -> the "HH:mm" value for a `TIME_SLOTS` entry. */
 function toHHMM(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
@@ -79,7 +79,7 @@ export default function ReservationModal({
   });
   const [endTime, setEndTime] = useState(() => {
     const range = filterTimeRange(filter);
-    return range ? toHHMM(new Date(range.endDateTime)) : TIME_SLOTS[1] || '';
+    return range ? toHHMM(new Date(range.endDateTime)) : TIME_SLOTS[2] || '';
   });
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);

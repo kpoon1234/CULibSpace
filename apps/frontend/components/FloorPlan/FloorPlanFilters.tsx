@@ -46,7 +46,7 @@ function computeMaxDate(maxAdvanceBookingDays: number): string {
 
 // Table Filter dialog — maps the Figma panel to the GET /api/tables/layout params:
 // large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
-// minSeats, and a same-day Date + From + To (each a fixed half-hour slot) ->
+// minSeats, and a same-day Date + From + To (each a fixed 15-minute slot) ->
 // startDateTime / endDateTime, the window the status is evaluated against.
 export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanFiltersProps) {
   const [draft, setDraft] = useState<FloorPlanFilter>(value);
@@ -273,8 +273,8 @@ export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanF
             <p className="text-xs text-red-600">{timeErrorMessage}</p>
           ) : (
             <p className="text-xs text-gray-500">
-              Same-day window in 30-minute slots, up to {maxBookingWindowMinutes / 60} hours (e.g.
-              10:00 – 10:30).
+              Same-day window in 15-minute slots, up to {maxBookingWindowMinutes / 60} hours (e.g.
+              10:00 – 10:15).
             </p>
           )}
         </div>
