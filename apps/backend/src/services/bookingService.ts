@@ -828,21 +828,182 @@ export class BookingService {
       }
     });
   }
+
+  /**
+   * Process completion for a single ended active booking within an atomic transaction.
+   * Updates booking to COMPLETED, and checks if another booking is using the table before releasing it to AVAILABLE.
+   */
+  static async processBookingCompletion(
+    booking: { bookingId: number; tableId: number },
+    now: Date = new Date(),
+    prisma: any = defaultPrisma
+  ): Promise<boolean> {
+    const executeInTx = async (tx: any) => {
+      // 1. Atomic conditional update to COMPLETED (only if currently ACTIVE)
+      const updatedBooking = await tx.booking.updateMany({
+        where: {
+          bookingId: booking.bookingId,
+          status: BookingStatus.ACTIVE,
+        },
+        data: {
+          status: BookingStatus.COMPLETED,
+        },
+      });
+
+      if (updatedBooking.count === 0) {
+        return false;
+      }
+
+      // 2. Check if another active booking is currently using this table
+      const otherActiveBooking = await tx.booking.findFirst({
+        where: {
+          tableId: booking.tableId,
+          bookingId: { not: booking.bookingId },
+          status: BookingStatus.ACTIVE,
+          startDateTime: { lte: now },
+          endDateTime: { gt: now },
+        },
+      });
+
+      // 3. Release table status to AVAILABLE within the same transaction only if no other booking is using it
+      if (!otherActiveBooking) {
+        const table = await tx.table.findUnique({
+          where: { tableId: booking.tableId },
+          select: { status: true },
+        });
+
+        if (table && table.status === TableStatus.OCCUPIED) {
+          await tx.table.update({
+            where: { tableId: booking.tableId },
+            data: {
+              status: TableStatus.AVAILABLE,
+            },
+          });
+        }
+      }
+
+      return true;
+    };
+
+    if (prisma.$transaction) {
+      return await prisma.$transaction(executeInTx);
+    } else {
+      return await executeInTx(prisma);
+    }
+  }
+
+  /**
+   * Automatically complete any ACTIVE bookings that have reached their endDateTime (endDateTime <= now),
+   * transition their status to COMPLETED, and release the occupied table back to AVAILABLE.
+   */
+  static async completeEndedBookings(
+    now: Date = new Date(),
+    prisma: any = defaultPrisma
+  ): Promise<{ processed: number; errors: number }> {
+    try {
+      const endedBookings = await prisma.booking.findMany({
+        where: {
+          status: BookingStatus.ACTIVE,
+          endDateTime: { lte: now },
+        },
+        select: {
+          bookingId: true,
+          tableId: true,
+        },
+      });
+
+      if (!endedBookings || endedBookings.length === 0) {
+        return { processed: 0, errors: 0 };
+      }
+
+      let processedCount = 0;
+      let errorCount = 0;
+
+      for (const booking of endedBookings) {
+        try {
+          const success = await this.processBookingCompletion(booking, now, prisma);
+          if (success) processedCount++;
+        } catch (err: any) {
+          errorCount++;
+          console.error(
+            `[BookingCompletionWorker] Failed to complete booking #${booking.bookingId}:`,
+            err?.message || err
+          );
+        }
+      }
+
+      if (processedCount > 0) {
+        console.log(
+          `[BookingCompletionWorker] Transitioned ${processedCount} ended booking(s) to COMPLETED and evaluated table availability at ${now.toISOString()}`
+        );
+      }
+
+      return { processed: processedCount, errors: errorCount };
+    } catch (error) {
+      console.error('[BookingCompletionWorker] Error completing ended bookings:', error);
+      return { processed: 0, errors: 1 };
+    }
+  }
+
+  /**
+   * Start background worker to automatically complete ended active reservations
+   * Runs periodically (default every 30 seconds)
+   */
+  static startCompletionWorker(
+    intervalMs: number = 30 * 1000,
+    prisma: any = defaultPrisma
+  ): NodeJS.Timeout {
+    console.log(
+      `[BookingCompletionWorker] Started background completion worker (Interval: ${intervalMs}ms)`
+    );
+    // Run an initial scan immediately on boot
+    this.completeEndedBookings(new Date(), prisma).catch((err) =>
+      console.error('[BookingCompletionWorker] Initial scan failed:', err)
+    );
+
+    return setInterval(async () => {
+      try {
+        await this.completeEndedBookings(new Date(), prisma);
+      } catch (err) {
+        console.error('[BookingCompletionWorker] Error in interval cycle:', err);
+      }
+    }, intervalMs);
+  }
+
+  static stopCompletionWorker(timer: NodeJS.Timeout): void {
+    clearInterval(timer);
+    console.log('[BookingCompletionWorker] Stopped background completion worker.');
+  }
 }
 
 /**
  * Fetch booking history for a user (Completed, Cancelled, and No-show bookings) - AC 3.3.1
- * Active and Pending bookings are excluded as they are displayed on the Home dashboard card.
+ * Also displays ended active bookings (endDateTime <= now) as COMPLETED so that records
+ * are never omitted from history even if worker processing is delayed or failed.
  * @param uid User ID
+ * @param now Reference current timestamp
+ * @param prisma Prisma client instance
  * @returns Array of bookings with table and zone information, ordered by startDateTime descending
  */
-export async function getBookingHistory(uid: number): Promise<BookingWithTableAndZone[]> {
-  const bookings = await defaultPrisma.booking.findMany({
+export async function getBookingHistory(
+  uid: number,
+  now: Date = new Date(),
+  prisma: any = defaultPrisma
+): Promise<BookingWithTableAndZone[]> {
+  const bookings = await prisma.booking.findMany({
     where: {
       uid,
-      status: {
-        in: [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW],
-      },
+      OR: [
+        {
+          status: {
+            in: [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW],
+          },
+        },
+        {
+          status: BookingStatus.ACTIVE,
+          endDateTime: { lte: now },
+        },
+      ],
     },
     include: {
       table: {
@@ -856,10 +1017,16 @@ export async function getBookingHistory(uid: number): Promise<BookingWithTableAn
     },
   });
 
-  // Map to our desired shape (though include already gives us nested objects)
-  // We'll just return as is, but we need to cast to our interface.
-  // Prisma's findMany with include returns the nested objects already.
-  return bookings as unknown as BookingWithTableAndZone[];
+  // Ensure ended bookings are presented as COMPLETED to the client so that
+  // any un-synced or failed worker update does not hide the completed session from the user
+  const formattedBookings = bookings.map((b: any) => {
+    if (b.status === BookingStatus.ACTIVE && new Date(b.endDateTime) <= now) {
+      return { ...b, status: BookingStatus.COMPLETED };
+    }
+    return b;
+  });
+
+  return formattedBookings as unknown as BookingWithTableAndZone[];
 }
 
 /**
