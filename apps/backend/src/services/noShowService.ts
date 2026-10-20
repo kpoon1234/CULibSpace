@@ -1,5 +1,6 @@
 // apps/backend/src/services/noShowService.ts
-import { PrismaClient, BookingStatus, TableStatus } from '@prisma/client';
+import { PrismaClient, BookingStatus } from '@prisma/client';
+import { lockTableForStatusChange, refreshTableStatus } from './tableStatusService.js';
 
 const defaultPrisma = new PrismaClient();
 
@@ -36,9 +37,12 @@ export class NoShowService {
    */
   static async processNoShowBooking(
     booking: { bookingId: number; uid: number; tableId: number },
-    prisma: any = defaultPrisma
+    prisma: any = defaultPrisma,
+    now: Date = new Date()
   ): Promise<boolean> {
     const executeInTx = async (tx: any) => {
+      await lockTableForStatusChange(tx, booking.tableId);
+
       // 1. Guard: Atomic conditional update เป็น NO_SHOW เฉพาะเมื่อสถานะยังเป็น PENDING
       // ป้องกัน Race Condition กรณีที่ user เพิ่ง check-in (ACTIVE) หรือ cancel ก่อน Worker ประมวลผล
       const updatedBooking = await tx.booking.updateMany({
@@ -58,23 +62,8 @@ export class NoShowService {
         return false;
       }
 
-      // 2. ปล่อยสถานะโต๊ะคืนเป็น AVAILABLE (ยกเว้นกรณีที่โต๊ะถูกปิดซ่อมบำรุง CLOSED)
-      const table = await tx.table.findUnique({
-        where: { tableId: booking.tableId },
-        select: { status: true },
-      });
-
-      if (table && table.status !== TableStatus.CLOSED) {
-        await tx.table.update({
-          where: { tableId: booking.tableId },
-          data: {
-            status: TableStatus.AVAILABLE,
-            lockToken: null,
-            lockedUntil: null,
-            lockedByUid: null,
-          },
-        });
-      }
+      // 2. Reconcile the table after this transition; another checked-in booking may use it.
+      await refreshTableStatus(tx, booking.tableId, now, true);
 
       // 3. ตัดคะแนนพฤติกรรมผู้ใช้
       const user = await tx.user.findUnique({
@@ -151,7 +140,7 @@ export class NoShowService {
       let processedCount = 0;
       for (const booking of lateBookings) {
         try {
-          const success = await this.processNoShowBooking(booking, prisma);
+          const success = await this.processNoShowBooking(booking, prisma, now);
           if (success) processedCount++;
         } catch (err: any) {
           console.warn(`[NoShowWorker] Skipped booking #${booking.bookingId}: ${err.message}`);

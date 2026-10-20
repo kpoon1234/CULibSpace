@@ -75,6 +75,7 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
             updateMany: async ({ data }: any) => {
               updatedBookingStatus = data.status;
@@ -92,6 +93,7 @@ async function runTests() {
             }),
           },
           table: {
+            findUnique: async () => ({ status: TableStatus.RESERVED }),
             update: async ({ data }: any) => {
               updatedTableStatus = data.status;
               return { tableId, ...data };
@@ -137,7 +139,7 @@ async function runTests() {
   // Case 2.1: Table has another ongoing ACTIVE booking -> Table status preserved as OCCUPIED
   {
     const mockNow = new Date('2026-10-05T15:30:00Z');
-    let recordedTableStatus: any = null;
+    let tableStatusWasChanged = false;
 
     const mockPrisma = {
       systemConfig: { findFirst: async () => ({ earlyCheckInMinutes: 15 }) },
@@ -154,6 +156,7 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
             updateMany: async () => ({ count: 1 }),
             // Another active booking exists covering now
@@ -169,9 +172,10 @@ async function runTests() {
             }),
           },
           table: {
-            update: async ({ data }: any) => {
-              recordedTableStatus = data.status;
-              return { tableId, ...data };
+            findUnique: async () => ({ status: TableStatus.OCCUPIED }),
+            update: async () => {
+              tableStatusWasChanged = true;
+              return {};
             },
             updateMany: async () => ({ count: 0 }),
           },
@@ -183,7 +187,7 @@ async function runTests() {
     try {
       await BookingService.cancelBooking(userId, bookingId, mockNow, mockPrisma);
       assert(
-        recordedTableStatus === TableStatus.OCCUPIED,
+        !tableStatusWasChanged,
         'Item 2: Preserves OCCUPIED table status when another active booking is ongoing'
       );
     } catch (err: any) {
@@ -210,6 +214,7 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
             updateMany: async () => ({ count: 0 }), // 0 updated due to race condition
             findUnique: async () => ({
@@ -256,6 +261,7 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
             updateMany: async () => ({ count: 0 }),
             findUnique: async () => ({
@@ -604,6 +610,7 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
             updateMany: async () => ({ count: 1 }),
             findFirst: async () => null,
@@ -614,6 +621,7 @@ async function runTests() {
             }),
           },
           table: {
+            findUnique: async () => ({ status: TableStatus.RESERVED }),
             update: async ({ data }: any) => ({ tableId, ...data }),
             updateMany: async () => ({ count: 1 }),
           },
@@ -684,6 +692,7 @@ async function runTests() {
       },
       $transaction: async (callback: any) => {
         const tx = {
+          $queryRaw: async () => [],
           booking: {
             updateMany: async () => ({ count: 1 }),
             findFirst: async () => null,
@@ -694,6 +703,7 @@ async function runTests() {
             }),
           },
           table: {
+            findUnique: async () => ({ status: TableStatus.RESERVED }),
             update: async ({ data }: any) => ({ tableId, ...data }),
             updateMany: async () => ({ count: 1 }),
           },
