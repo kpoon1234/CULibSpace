@@ -48,6 +48,17 @@ enum TicketStatus {
   @@map("ticket_status_enum")
 }
 
+// [US6-1] สถานะรายการชำระเงินผ่าน Payment Gateway
+enum PaymentStatus {
+  PENDING   @map("Pending")
+  PAID      @map("Paid")
+  FAILED    @map("Failed")
+  EXPIRED   @map("Expired")
+  REFUNDED  @map("Refunded")
+
+  @@map("payment_status_enum")
+}
+
 enum ZoneType {
   SILENT     @map("Silent")
   GROUP      @map("Group")
@@ -243,10 +254,45 @@ model Ticket {
 
   // Relations
   outsideUser   OutsideUser  @relation(fields: [uid], references: [uid])
+  payments      Payment[]
 
   // ตรวจสอบสิทธิ์ตั๋ว Active ที่ครอบคลุมช่วงเวลาจองของบุคคลภายนอก (fn_check_ticket_for_outsider)
   @@index([uid, status, startDateTime, endDateTime], name: "idx_ticket_active_coverage")
   @@map("ticket")
+}
+
+// [US6-1] ตาราง Payment ผูกกับ Ticket เพื่อเก็บยอดเงิน (หน่วยสตางค์), สกุลเงิน,
+// สถานะการชำระเงิน, gateway reference และ idempotency key
+// ตกลง schema ชุดเดียวกับทีม US6-2 / US6-3 (migration กลาง)
+model Payment {
+  paymentId      Int           @id @default(autoincrement()) @map("paymentid")
+  ticketId       Int           @map("ticketid")
+  uid            Int           @map("uid")
+  // ยอดเงินเก็บเป็นหน่วยสตางค์ (1 THB = 100 satang) เพื่อเลี่ยง floating point
+  amountSatang   Int           @map("amount_satang")
+  currency       String        @default("THB") @db.VarChar(3) @map("currency")
+  status         PaymentStatus @default(PENDING) @map("status")
+  // ระบุผู้ให้บริการเก็บเงิน เช่น 'stripe' (รองรับการเปลี่ยน gateway ในอนาคต)
+  gateway        String        @db.VarChar(32) @map("gateway")
+  // อ้างอิงฝั่ง gateway (เช่น Stripe Checkout Session ID) ใช้จับคู่ webhook
+  gatewayRef     String?       @db.VarChar(255) @map("gateway_ref")
+  // กันการซื้อซ้ำ: client ส่ง key เดิมมา ระบบจะคืนรายการเดิมแทนที่จะสร้างใหม่
+  idempotencyKey String        @unique @db.VarChar(64) @map("idempotency_key")
+  checkoutUrl    String?       @db.Text @map("checkout_url")
+  // เวลาหมดอายุของคำสั่งซื้อ (payment attempt) ไม่ใช่อายุใช้งานตั๋ว
+  expiresAt      DateTime      @map("expires_at")
+  // เวลาที่ชำระเงินสำเร็จ
+  paidAt         DateTime?     @map("paid_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  ticket         Ticket        @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([uid, status], name: "idx_payment_user_status")
+  @@index([status, expiresAt], name: "idx_payment_expiry")
+  @@index([gatewayRef], name: "idx_payment_gateway_ref")
+  @@map("payment")
 }
 
 // ==========================================
@@ -338,6 +384,12 @@ model SystemConfig {
   earlyCheckInMinutes       Int      @default(15) @map("early_checkin_minutes")
   minScoreToBook            Int      @default(50) @map("min_score_to_book")
   maxAdvanceBookingDays     Int      @default(7) @map("max_advance_booking_days")
+  // [US6-1] ราคาตั๋วผู้เข้าชมภายนอก (หน่วยสตางค์) และอายุใช้งานตั๋ว (ชั่วโมง)
+  // กำหนดโดย Backend เท่านั้น client ส่งมาไม่ได้
+  ticketPriceSatang         Int      @default(5000) @map("ticket_price_satang")
+  ticketValidityHours       Int      @default(2) @map("ticket_validity_hours")
+  // อายุของ Checkout Session (นาที) ต้อง >= 30 ตามข้อกำหนดของ Stripe
+  paymentCheckoutExpiryMinutes Int   @default(30) @map("payment_checkout_expiry_minutes")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
   @@map("system_config")
