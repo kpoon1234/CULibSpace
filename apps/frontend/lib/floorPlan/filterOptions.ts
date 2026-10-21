@@ -19,10 +19,10 @@ export const PLUG_BUCKETS: PlugBucket[] = [
 /** "Minimum seats" options for the Table Filter — maps to the backend `minSeats`. */
 export const MIN_SEATS_OPTIONS: number[] = [2, 4, 6, 8];
 
-/** Bookable times: every 15 minutes, 00:00 → 23:45. Start/end can only be one of
- *  these, so the window is always on a :00 / :15 / :30 / :45 boundary. */
-export const TIME_SLOTS: string[] = Array.from({ length: 96 }, (_, i) => {
-  const minutes = i * 15;
+/** Bookable times: every 30 minutes, 00:00 → 23:30. Start/end can only be one of
+ *  these, so the window is always on a :00 / :30 boundary. */
+export const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
+  const minutes = i * 30;
   const h = String(Math.floor(minutes / 60)).padStart(2, '0');
   const m = String(minutes % 60).padStart(2, '0');
   return `${h}:${m}`;

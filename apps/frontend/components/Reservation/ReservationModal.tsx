@@ -79,7 +79,7 @@ export default function ReservationModal({
   });
   const [endTime, setEndTime] = useState(() => {
     const range = filterTimeRange(filter);
-    return range ? toHHMM(new Date(range.endDateTime)) : TIME_SLOTS[2] || '';
+    return range ? toHHMM(new Date(range.endDateTime)) : TIME_SLOTS[1] || '';
   });
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
