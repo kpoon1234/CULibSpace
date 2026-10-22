@@ -1,6 +1,11 @@
 import { PrismaClient, PaymentStatus, TicketStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { PaymentGateway, PaymentGatewayError, CheckoutSessionResult } from './paymentGateway.js';
+import {
+  PaymentGateway,
+  PaymentGatewayError,
+  CheckoutSessionResult,
+  CreateCheckoutSessionInput,
+} from './paymentGateway.js';
 
 const defaultPrisma = new PrismaClient();
 
@@ -49,6 +54,23 @@ interface TicketPricingConfig {
 }
 
 /**
+ * payload สำหรับสร้าง checkout ที่ "เตรียมไว้แล้ว"
+ * เก็บลงฐานข้อมูลเพื่อให้ retry ใช้พารามิเตอร์ชุดเดิมเป๊ะ ๆ
+ * (gateway ปฏิเสธการใช้ idempotency key เดิมถ้าพารามิเตอร์ต่างกัน)
+ */
+interface StoredCheckoutPayload {
+  amountSatang: number;
+  currency: string;
+  reference: string;
+  description: string;
+  expiresAt: string;
+  idempotencyKey: string;
+  customerEmail?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+}
+
+/**
  * [US6-1] ซื้อตั๋วผู้เข้าชมภายนอก
  * -------------------------------------------------------------------------
  * ขอบเขตงานนี้จบที่: สร้าง Ticket (UNPAID) + Payment (PENDING) -> สร้าง checkout
@@ -82,7 +104,7 @@ export class TicketService {
 
     // ---------- 2. Backend กำหนดราคาและอายุใช้งานตั๋วเอง ----------
     // ถ้าอ่าน config ไม่ได้ -> โยน error ทันที (ห้าม fallback ไปเก็บราคาผิด)
-    const config = await this.readPricingConfig(prisma);
+    const config = await this.readPricingConfig(prisma, gateway);
     const amountSatang = config.ticketPriceSatang;
     const currency = 'THB';
     const validityMs = config.ticketValidityHours * 60 * 60 * 1000;
@@ -120,6 +142,25 @@ export class TicketService {
     const ticketEnd = new Date(now.getTime() + validityMs);
     const idempotencyKey = this.buildIdempotencyKey(uid, clientKey);
 
+    // เตรียม payload ของ checkout ไว้ก่อน แล้วเก็บลงรายการ
+    // เพื่อให้ทุกครั้งที่ retry ใช้พารามิเตอร์ชุดเดิมเป๊ะ ๆ
+    // (expires_at ถูกคำนวณจากเวลา "ตอนสร้างรายการ" ไม่ใช่เวลา ณ ตอน retry)
+    const prepared = gateway.prepareCheckoutSession({
+      amountSatang,
+      currency,
+      description: `CU LibSpace visitor ticket (${uid})`,
+      expiresAt,
+      idempotencyKey,
+      customerEmail: (await this.getUserEmail(uid, prisma)) ?? undefined,
+      successUrl: process.env.TICKET_CHECKOUT_SUCCESS_URL,
+      cancelUrl: process.env.TICKET_CHECKOUT_CANCEL_URL,
+      // reference จะเติมหลังสร้าง payment เสร็จ (ต้องเป็น paymentId จริง)
+      reference: '',
+    });
+
+    // ใช้เวลาหมดอายุชุดเดียวกันทั้งฐานข้อมูลและ gateway
+    const preparedExpiresAt = prepared.expiresAt;
+
     let created: { ticket: any; payment: any };
     try {
       created = await prisma.$transaction(async (tx: any) => {
@@ -145,7 +186,7 @@ export class TicketService {
             // snapshot อายุใช้งานตั๋วไว้ตอนซื้อ เพื่อไม่ให้ config ที่แก้ระหว่างรอจ่าย
             // เปลี่ยนอายุตั๋วของผู้ใช้
             ticketValidityHours: config.ticketValidityHours,
-            expiresAt,
+            expiresAt: preparedExpiresAt,
             // จองช่อง "รายการที่เปิดอยู่" ของผู้ใช้ไว้ 1 ช่อง (unique)
             // -> กันไม่ให้มีรายการเปิดพร้อมกันมากกว่า 1 รายการ
             openUid: uid,
@@ -164,22 +205,18 @@ export class TicketService {
       throw error;
     }
 
-    // ---------- 5. เรียก gateway ----------
+    // เก็บ payload ที่เตรียมไว้ (พร้อม reference = paymentId จริง) ลงรายการ
+    // เพื่อให้ทุกครั้งที่ retry ใช้พารามิเตอร์ชุดเดิมเป๊ะ ๆ
+    const checkoutPayload = this.buildStoredPayload(prepared, String(created.payment.paymentId));
+    await prisma.payment.update({
+      where: { paymentId: created.payment.paymentId },
+      data: { checkoutPayload: JSON.stringify(checkoutPayload) },
+    });
+
+    // ---------- 5. เรียก gateway ด้วย payload ที่เตรียมไว้ ----------
     let session: CheckoutSessionResult;
     try {
-      session = await gateway.createCheckoutSession({
-        amountSatang,
-        currency,
-        // reference ที่ส่งให้ gateway ต้องเป็น paymentId เสมอ
-        // (US6-3 ใช้ค่านี้ค้นหารายการ จะได้เจอแม้ยังไม่ได้บันทึก gateway_ref)
-        reference: String(created.payment.paymentId),
-        description: `CU LibSpace visitor ticket (${uid})`,
-        expiresAt,
-        idempotencyKey,
-        customerEmail: (await this.getUserEmail(uid, prisma)) ?? undefined,
-        successUrl: process.env.TICKET_CHECKOUT_SUCCESS_URL,
-        cancelUrl: process.env.TICKET_CHECKOUT_CANCEL_URL,
-      });
+      session = await gateway.createCheckoutSession(this.toGatewayInput(checkoutPayload));
     } catch (error) {
       throw await this.handleGatewayFailure(created.payment.paymentId, error, prisma);
     }
@@ -276,12 +313,65 @@ export class TicketService {
   }
 
   /**
+   * แปลง payload ที่เตรียมไว้เป็นรูปแบบที่เก็บลงฐานข้อมูล
+   */
+  private static buildStoredPayload(
+    prepared: CreateCheckoutSessionInput,
+    reference: string
+  ): StoredCheckoutPayload {
+    return {
+      amountSatang: prepared.amountSatang,
+      currency: prepared.currency,
+      reference,
+      description: prepared.description,
+      expiresAt: prepared.expiresAt.toISOString(),
+      idempotencyKey: prepared.idempotencyKey,
+      ...(prepared.customerEmail ? { customerEmail: prepared.customerEmail } : {}),
+      ...(prepared.successUrl ? { successUrl: prepared.successUrl } : {}),
+      ...(prepared.cancelUrl ? { cancelUrl: prepared.cancelUrl } : {}),
+    };
+  }
+
+  /**
+   * แปลง payload ที่เก็บไว้กลับเป็น input ของ gateway
+   * ใช้ตอน retry เพื่อให้ส่งพารามิเตอร์ชุดเดิมเป๊ะ ๆ
+   */
+  private static toGatewayInput(payload: StoredCheckoutPayload): CreateCheckoutSessionInput {
+    return {
+      amountSatang: payload.amountSatang,
+      currency: payload.currency,
+      reference: payload.reference,
+      description: payload.description,
+      expiresAt: new Date(payload.expiresAt),
+      idempotencyKey: payload.idempotencyKey,
+      ...(payload.customerEmail ? { customerEmail: payload.customerEmail } : {}),
+      ...(payload.successUrl ? { successUrl: payload.successUrl } : {}),
+      ...(payload.cancelUrl ? { cancelUrl: payload.cancelUrl } : {}),
+    };
+  }
+
+  /**
+   * อ่าน payload ที่เก็บไว้จากรายการ
+   */
+  private static readStoredPayload(payment: any): StoredCheckoutPayload | null {
+    if (!payment?.checkoutPayload) return null;
+    try {
+      return JSON.parse(payment.checkoutPayload) as StoredCheckoutPayload;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * อ่านราคา/อายุตั๋วจาก SystemConfig
    * ------------------------------------------------------------------
    * ห้าม fallback เป็นค่า default เมื่ออ่านไม่ได้หรือค่าไม่ถูกต้อง
    * เพราะจะทำให้เรียกเก็บเงินผิดราคา (เช่นเก็บ 50 บาท แทนราคาจริง)
    */
-  private static async readPricingConfig(prisma: any): Promise<TicketPricingConfig> {
+  private static async readPricingConfig(
+    prisma: any,
+    gateway: PaymentGateway
+  ): Promise<TicketPricingConfig> {
     let config: any;
     try {
       config = await prisma.systemConfig.findFirst();
@@ -333,6 +423,24 @@ export class TicketService {
         status: 503,
         code: 'INVALID_CHECKOUT_EXPIRY',
         message: 'Checkout expiry is not configured correctly. (No charge was made.)',
+        retryable: false,
+      } as TicketPurchaseError;
+    }
+
+    // อายุ checkout ต้องอยู่ในช่วงที่ gateway รองรับจริง
+    // ถ้าไม่ตรวจตรงนี้ adapter จะ "ขยาย" ค่าให้อัตโนมัติ -> เวลาหมดอายุในฐานข้อมูล
+    // จะไม่ตรงกับที่ gateway ใช้จริง -> อาจปิดรายการทั้งที่ checkout ยังเปิดอยู่
+    if (
+      expiryMinutes < gateway.minCheckoutExpiryMinutes ||
+      expiryMinutes > gateway.maxCheckoutExpiryMinutes
+    ) {
+      console.error(
+        `[TicketService] paymentCheckoutExpiryMinutes=${expiryMinutes} is outside the range supported by gateway "${gateway.name}" (${gateway.minCheckoutExpiryMinutes}-${gateway.maxCheckoutExpiryMinutes})`
+      );
+      throw {
+        status: 503,
+        code: 'INVALID_CHECKOUT_EXPIRY',
+        message: `Checkout expiry must be between ${gateway.minCheckoutExpiryMinutes} and ${gateway.maxCheckoutExpiryMinutes} minutes for the configured payment gateway. (No charge was made.)`,
         retryable: false,
       } as TicketPurchaseError;
     }
@@ -411,10 +519,17 @@ export class TicketService {
   /**
    * กู้รายการเดิมก่อนอนุญาตให้ซื้อใหม่
    * ------------------------------------------------------------------
-   * - ถ้าหมดอายุแล้ว -> ปิดรายการ (EXPIRED) แล้วคืน null เพื่อให้ caller ไปสร้างรายการใหม่
-   * - ถ้ายังไม่หมดอายุและมี checkoutUrl -> ใช้รายการเดิมต่อ
-   * - ถ้ายังไม่หมดอายุและไม่มี checkoutUrl (เคย timeout) -> ยิง gateway ซ้ำด้วย
-   *   idempotency key เดิม เพื่อกู้ checkout เดิม (gateway คืน session เดิม ไม่สร้างซ้ำ)
+   * หลักการ: **ห้ามปิดรายการจากเวลาฝั่ง DB อย่างเดียว**
+   *   เวลาในฐานข้อมูลอาจผ่านไปแล้ว แต่ checkout ที่ gateway สร้างไว้ยังเปิดอยู่
+   *   -> ต้องถาม gateway ก่อนเสมอ แล้วค่อยตัดสินใจ
+   *
+   * - มี gatewayRef -> ดึงสถานะจริงจาก gateway
+   *   - open      : ยังจ่ายได้ -> เก็บช่องไว้ คืนรายการเดิม
+   *   - paid      : จ่ายแล้ว -> บันทึกสถานะ (การเปิดใช้ตั๋วเป็นหน้าที่ของ US6-3)
+   *   - expired   : หมดอายุ -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
+   *   - not_found : gateway ไม่เคยสร้าง -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
+   *   - unknown   : ตรวจไม่ได้ -> คงสถานะรอตรวจสอบ ห้ามปล่อยช่อง
+   * - ไม่มี gatewayRef -> ใช้ payload + key เดิมยิง gateway ซ้ำเพื่อกู้ session เดิม
    */
   private static async reconcileOpenPayment(
     payment: any,
@@ -422,33 +537,77 @@ export class TicketService {
     prisma: any,
     now: Date
   ): Promise<any | null> {
-    // หมดอายุแล้ว -> ปิดรายการ แล้วคืน null เพื่อให้ caller ไปสร้างรายการใหม่
-    if (payment.expiresAt && new Date(payment.expiresAt).getTime() <= now.getTime()) {
+    // ---------- กรณีที่มี gatewayRef: ถาม gateway ว่าสถานะจริงเป็นอะไร ----------
+    if (payment.gatewayRef) {
+      const status = await gateway.retrieveCheckoutStatus(payment.gatewayRef);
+
+      if (status.state === 'paid') {
+        // จ่ายแล้วจริง -> บันทึกสถานะให้ตรงกับ gateway
+        // (การเปิดใช้ตั๋วเป็นหน้าที่ของ US6-3 ผ่าน webhook)
+        return await prisma.payment.update({
+          where: { paymentId: payment.paymentId },
+          data: {
+            status: PaymentStatus.PAID,
+            paidAt: status.paidAt ?? new Date(),
+            openUid: null,
+          },
+        });
+      }
+
+      if (status.state === 'expired' || status.state === 'not_found') {
+        // gateway ยืนยันว่าใช้ไม่ได้แล้ว -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
+        await prisma.payment.updateMany({
+          where: {
+            paymentId: payment.paymentId,
+            status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+          },
+          data: { status: PaymentStatus.EXPIRED, openUid: null },
+        });
+        return null;
+      }
+
+      if (status.state === 'open') {
+        // checkout ยังเปิดอยู่ที่ gateway -> เก็บช่องไว้ ห้ามปล่อยให้ซื้อใหม่
+        return payment;
+      }
+
+      // unknown -> ตรวจสอบไม่ได้ ห้ามปิดรายการจากเวลาฝั่ง DB
+      console.error(
+        `[TicketService] Could not confirm the state of payment #${payment.paymentId} with the gateway; keeping it open.`
+      );
       await prisma.payment.updateMany({
         where: {
           paymentId: payment.paymentId,
           status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
         },
-        data: { status: PaymentStatus.EXPIRED, openUid: null },
+        data: { status: PaymentStatus.UNCONFIRMED },
       });
-      return null;
-    }
-
-    // มี checkoutUrl แล้ว -> ใช้รายการเดิมต่อ ไม่ต้องยิง gateway ซ้ำ
-    if (payment.checkoutUrl) {
       return payment;
     }
 
-    // ยังไม่มี checkoutUrl -> พยายามกู้ด้วย idempotency key เดิม
-    try {
-      const session = await gateway.createCheckoutSession({
-        amountSatang: payment.amountSatang,
-        currency: payment.currency,
-        reference: String(payment.paymentId),
-        description: `CU LibSpace visitor ticket (${payment.uid})`,
-        expiresAt: payment.expiresAt,
-        idempotencyKey: payment.idempotencyKey,
+    // ---------- กรณีไม่มี gatewayRef: กู้ด้วย payload + key เดิม ----------
+    const payload = this.readStoredPayload(payment);
+
+    if (!payload) {
+      // ไม่มี payload และไม่มี gatewayRef -> ยืนยันไม่ได้ว่า gateway สร้าง session ไหม
+      // -> คงสถานะรอตรวจสอบ ห้ามปล่อยช่องให้ซื้อใหม่
+      console.error(
+        `[TicketService] Payment #${payment.paymentId} has neither a gateway reference nor a stored checkout payload; keeping it open.`
+      );
+      await prisma.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: { status: PaymentStatus.UNCONFIRMED },
       });
+      return payment;
+    }
+
+    try {
+      // ใช้ payload ชุดเดิม + idempotency key เดิม
+      // -> gateway จะคืน session เดิม (ไม่สร้างใหม่ และไม่ปฏิเสธเพราะพารามิเตอร์ตรงกัน)
+      const session = await gateway.createCheckoutSession(this.toGatewayInput(payload));
 
       return await prisma.payment.update({
         where: { paymentId: payment.paymentId },

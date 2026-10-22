@@ -34,6 +34,7 @@ CREATE TABLE "payment" (
     "client_key" VARCHAR(64) NOT NULL,
     "idempotency_key" VARCHAR(128) NOT NULL,
     "checkout_url" TEXT,
+    "checkout_payload" TEXT,
     "ticket_validity_hours" INTEGER NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
     "open_uid" INTEGER,

@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { PaymentStatus, TicketStatus } from '@prisma/client';
 import type { PaymentGatewayErrorCode } from '../services/paymentGateway.js';
+
+/**
+ * สร้างลายเซ็น Stripe แบบเดียวกับที่ Stripe ใช้จริง
+ * (t=<timestamp>,v1=HMAC-SHA256(secret, "<timestamp>.<payload>"))
+ */
+function stripeSignature(payload: string, secret: string, timestamp?: number): string {
+  const ts = timestamp ?? Math.floor(Date.now() / 1000);
+  const v1 = crypto.createHmac('sha256', secret).update(`${ts}.${payload}`).digest('hex');
+  return `t=${ts},v1=${v1}`;
+}
 
 // ชุดทดสอบนี้ต้องไม่แตะฐานข้อมูลจริงของ developer
 process.env.DATABASE_URL = 'postgresql://invalid:invalid@127.0.0.1:1/invalid';
@@ -24,19 +35,86 @@ const VALIDITY_HOURS = 2;
 // ---------------------------------------------------------------------------
 // Fake gateway
 // ---------------------------------------------------------------------------
+const GATEWAY_MIN_EXPIRY_MINUTES = 30;
+const GATEWAY_MAX_EXPIRY_MINUTES = 24 * 60;
+
+/**
+ * Fake gateway ที่จำลองพฤติกรรมของ Stripe:
+ * - prepareCheckoutSession จะ "ดัน" expiresAt เข้าไปในช่วงที่ gateway รองรับ
+ *   (ค่าที่ได้จะถูกเก็บลง DB แล้วใช้ซ้ำตอน retry)
+ * - ถ้ามีการเรียก createCheckoutSession ด้วย idempotency key เดิมแต่พารามิเตอร์ต่างกัน
+ *   จะ throw เลียนแบบ Stripe (Stripe ปฏิเสธการใช้ idempotency key ซ้ำด้วยพารามิเตอร์ที่ไม่ตรงกัน)
+ */
 function fakeGateway(overrides: Record<string, any> = {}) {
   const calls: any[] = [];
-  return {
+  const byKey = new Map<string, any>();
+
+  const gateway: any = {
     name: 'stripe',
+    minCheckoutExpiryMinutes: GATEWAY_MIN_EXPIRY_MINUTES,
+    maxCheckoutExpiryMinutes: GATEWAY_MAX_EXPIRY_MINUTES,
     calls,
+    checkoutState: 'open' as string,
+    paidAt: undefined as Date | undefined,
+
+    prepareCheckoutSession(input: any) {
+      const min = Date.now() + this.minCheckoutExpiryMinutes * 60 * 1000;
+      const max = Date.now() + this.maxCheckoutExpiryMinutes * 60 * 1000;
+      const target = new Date(input.expiresAt).getTime();
+      return {
+        ...input,
+        expiresAt: new Date(Math.min(Math.max(target, min), max)),
+      };
+    },
+
     async createCheckoutSession(input: any) {
+      const previous = byKey.get(input.idempotencyKey);
+      if (previous) {
+        // Stripe ปฏิเสธเมื่อใช้ idempotency key เดิมด้วยพารามิเตอร์ที่ต่างกัน
+        const same =
+          previous.amountSatang === input.amountSatang &&
+          previous.currency === input.currency &&
+          previous.reference === input.reference &&
+          previous.description === input.description &&
+          previous.expiresAt.getTime() === new Date(input.expiresAt).getTime() &&
+          previous.customerEmail === input.customerEmail &&
+          previous.successUrl === input.successUrl &&
+          previous.cancelUrl === input.cancelUrl;
+        if (!same) {
+          throw new PaymentGatewayError(
+            'GATEWAY_REJECTED',
+            'Keys for idempotent requests can only be used with the same parameters they were first used with.',
+            { retryable: false, status: 502 }
+          );
+        }
+        calls.push(input);
+        return {
+          gatewayRef: `cs_existing_${calls.length}`,
+          checkoutUrl: `https://checkout.stripe.com/c/pay/cs_existing_${calls.length}`,
+          expiresAt: input.expiresAt,
+        };
+      }
+
       calls.push(input);
+      byKey.set(input.idempotencyKey, input);
       return {
         gatewayRef: `cs_test_${calls.length}`,
         checkoutUrl: `https://checkout.stripe.com/c/pay/cs_test_${calls.length}`,
         expiresAt: input.expiresAt,
       };
     },
+
+    async retrieveCheckoutStatus() {
+      return {
+        state: gateway.checkoutState,
+        amountSatang: PRICE_SATANG,
+        currency: 'THB',
+        reference: undefined,
+        paidAt: gateway.paidAt,
+        raw: {},
+      };
+    },
+
     async parseWebhookEvent() {
       return {
         type: 'payment.unknown',
@@ -45,8 +123,9 @@ function fakeGateway(overrides: Record<string, any> = {}) {
         raw: {},
       };
     },
-    ...overrides,
   };
+
+  return Object.assign(gateway, overrides);
 }
 
 function failingGateway(code: PaymentGatewayErrorCode, retryable: boolean) {
@@ -683,9 +762,10 @@ test('a retry after timeout reconciles the original payment instead of creating 
   assert.ok(result.checkoutUrl);
 });
 
-test('an expired open payment is closed and a new purchase is allowed', async () => {
+test('a checkout the gateway reports as expired is closed and a new purchase is allowed', async () => {
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
+  gateway.checkoutState = 'expired';
 
   const past = new Date(Date.now() - 60 * 1000);
   state.payments.push({
@@ -700,6 +780,7 @@ test('an expired open payment is closed and a new purchase is allowed', async ()
     gateway: 'stripe',
     gatewayRef: 'cs_old',
     checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_old',
+    checkoutPayload: null,
     openUid: 7,
     ticketValidityHours: VALIDITY_HOURS,
     expiresAt: past,
@@ -759,6 +840,413 @@ test('an unconfirmed payment blocks a new purchase with 409 PAYMENT_AWAITING_CON
 
   assert.equal(state.payments.length, 1);
   assert.equal(state.tickets.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: [1] recovery must reuse the exact same checkout payload
+// ---------------------------------------------------------------------------
+
+test('recovery after a timeout reuses the identical payload and the identical key', async () => {
+  const { client, state } = mockPrisma();
+
+  // ครั้งแรก: gateway สร้าง session สำเร็จ แต่ response ของเรา timeout
+  const timingOut = fakeGateway();
+  timingOut.createCheckoutSession = async (input: any) => {
+    timingOut.calls.push(input);
+    throw new PaymentGatewayError('GATEWAY_TIMEOUT', 'timed out after creating session', {
+      retryable: true,
+      status: 504,
+    });
+  };
+
+  await assert.rejects(() =>
+    TicketService.purchase({ uid: 7, idempotencyKey: 'payload-key' }, timingOut as any, client)
+  );
+
+  assert.equal(state.payments[0].status, PaymentStatus.UNCONFIRMED);
+  // payload ต้องถูกเก็บไว้ก่อนเรียก gateway
+  assert.ok(state.payments[0].checkoutPayload, 'checkout payload must be stored on the record');
+
+  const storedPayload = JSON.parse(state.payments[0].checkoutPayload);
+
+  // ครั้งที่สอง: gateway ทำงานได้ -> ต้องกู้รายการเดิมด้วย payload ชุดเดิม
+  const working = fakeGateway();
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'payload-key' },
+    working as any,
+    client
+  );
+
+  assert.equal(result.paymentId, state.payments[0].paymentId);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 1);
+
+  // พารามิเตอร์ที่ส่งในการกู้ต้องตรงกับที่เก็บไว้ทุกค่า
+  assert.equal(working.calls.length, 1);
+  const recoveryCall = working.calls[0];
+
+  assert.equal(recoveryCall.idempotencyKey, storedPayload.idempotencyKey);
+  assert.equal(recoveryCall.amountSatang, storedPayload.amountSatang);
+  assert.equal(recoveryCall.currency, storedPayload.currency);
+  assert.equal(recoveryCall.reference, storedPayload.reference);
+  assert.equal(recoveryCall.description, storedPayload.description);
+  assert.equal(recoveryCall.expiresAt.getTime(), new Date(storedPayload.expiresAt).getTime());
+  assert.equal(recoveryCall.customerEmail, storedPayload.customerEmail);
+  assert.equal(recoveryCall.successUrl, storedPayload.successUrl);
+  assert.equal(recoveryCall.cancelUrl, storedPayload.cancelUrl);
+
+  // reference ต้องเป็น paymentId จริง
+  assert.equal(recoveryCall.reference, String(state.payments[0].paymentId));
+});
+
+test('the checkout payload keeps the customer email and the redirect urls', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  process.env.TICKET_CHECKOUT_SUCCESS_URL = 'http://localhost:3000/tickets/success';
+  process.env.TICKET_CHECKOUT_CANCEL_URL = 'http://localhost:3000/tickets/cancel';
+
+  try {
+    await TicketService.purchase({ uid: 7 }, gateway as any, client);
+
+    const stored = JSON.parse(state.payments[0].checkoutPayload);
+    assert.equal(stored.customerEmail, 'visitor@example.com');
+    assert.equal(stored.successUrl, 'http://localhost:3000/tickets/success');
+    assert.equal(stored.cancelUrl, 'http://localhost:3000/tickets/cancel');
+  } finally {
+    delete process.env.TICKET_CHECKOUT_SUCCESS_URL;
+    delete process.env.TICKET_CHECKOUT_CANCEL_URL;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Regression: [2] the gateway decides when a record may be closed
+// ---------------------------------------------------------------------------
+
+test('a checkout expiry outside the range supported by the gateway is rejected', async () => {
+  const { client, state } = mockPrisma({
+    config: {
+      ticketPriceSatang: PRICE_SATANG,
+      ticketValidityHours: VALIDITY_HOURS,
+      // Stripe บังคับขั้นต่ำ 30 นาที -> ค่านี้อยู่นอกช่วง
+      paymentCheckoutExpiryMinutes: 1,
+    },
+  });
+  const gateway = fakeGateway();
+
+  await assert.rejects(
+    () => TicketService.purchase({ uid: 7 }, gateway as any, client),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.equal(err.code, 'INVALID_CHECKOUT_EXPIRY');
+      return true;
+    }
+  );
+
+  assert.equal(state.calls.paymentCreate, 0);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test('a checkout expiry above the range supported by the gateway is rejected', async () => {
+  const { client, state } = mockPrisma({
+    config: {
+      ticketPriceSatang: PRICE_SATANG,
+      ticketValidityHours: VALIDITY_HOURS,
+      paymentCheckoutExpiryMinutes: GATEWAY_MAX_EXPIRY_MINUTES + 1,
+    },
+  });
+  const gateway = fakeGateway();
+
+  await assert.rejects(
+    () => TicketService.purchase({ uid: 7 }, gateway as any, client),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.equal(err.code, 'INVALID_CHECKOUT_EXPIRY');
+      return true;
+    }
+  );
+
+  assert.equal(state.calls.paymentCreate, 0);
+});
+
+test('a checkout the gateway still reports as open is never closed by the database clock', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+  gateway.checkoutState = 'open';
+
+  // เวลาฝั่ง DB ผ่านไปแล้ว แต่ checkout ที่ gateway สร้างยังเปิดอยู่
+  const past = new Date(Date.now() - 60 * 1000);
+  state.payments.push({
+    paymentId: 810,
+    uid: 7,
+    clientKey: 'still-open',
+    idempotencyKey: 'user_7_still-open',
+    ticketId: 510,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.PENDING,
+    gateway: 'stripe',
+    gatewayRef: 'cs_still_open',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_still_open',
+    checkoutPayload: null,
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: past,
+    paidAt: null,
+    createdAt: past,
+    updatedAt: past,
+  });
+
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'another-key' },
+    gateway as any,
+    client
+  );
+
+  // ต้องคืนรายการเดิม ไม่ใช่สร้าง checkout ใหม่
+  assert.equal(result.paymentId, 810);
+  assert.equal(result.replayed, true);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 0);
+  assert.equal(state.payments[0].status, PaymentStatus.PENDING);
+  assert.equal(state.payments[0].openUid, 7);
+});
+
+test('a checkout the gateway cannot confirm keeps the record open', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+  gateway.checkoutState = 'unknown';
+
+  const past = new Date(Date.now() - 60 * 1000);
+  state.payments.push({
+    paymentId: 811,
+    uid: 7,
+    clientKey: 'cannot-confirm',
+    idempotencyKey: 'user_7_cannot-confirm',
+    ticketId: 511,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.UNCONFIRMED,
+    gateway: 'stripe',
+    gatewayRef: 'cs_unknown',
+    checkoutUrl: null,
+    checkoutPayload: null,
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: past,
+    paidAt: null,
+    createdAt: past,
+    updatedAt: past,
+  });
+
+  await assert.rejects(
+    () =>
+      TicketService.purchase({ uid: 7, idempotencyKey: 'yet-another-key' }, gateway as any, client),
+    (err: any) => {
+      assert.equal(err.status, 409);
+      assert.equal(err.code, 'PAYMENT_AWAITING_CONFIRMATION');
+      return true;
+    }
+  );
+
+  // ต้องไม่มีการสร้างรายการใหม่
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 0);
+  assert.equal(state.payments[0].status, PaymentStatus.UNCONFIRMED);
+  assert.equal(state.payments[0].openUid, 7);
+});
+
+test('a checkout the gateway never created is closed so a new purchase is possible', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+  gateway.checkoutState = 'not_found';
+
+  const past = new Date(Date.now() - 60 * 1000);
+  state.payments.push({
+    paymentId: 812,
+    uid: 7,
+    clientKey: 'never-created',
+    idempotencyKey: 'user_7_never-created',
+    ticketId: 512,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.UNCONFIRMED,
+    gateway: 'stripe',
+    gatewayRef: 'cs_missing',
+    checkoutUrl: null,
+    checkoutPayload: null,
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: past,
+    paidAt: null,
+    createdAt: past,
+    updatedAt: past,
+  });
+
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'brand-new-key' },
+    gateway as any,
+    client
+  );
+
+  assert.notEqual(result.paymentId, 812);
+  assert.equal(result.replayed, false);
+  assert.equal(state.payments[0].status, PaymentStatus.EXPIRED);
+  assert.equal(state.payments[0].openUid, null);
+});
+
+test('a checkout the gateway reports as paid is recorded as paid for US6-3 to activate', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+  gateway.checkoutState = 'paid';
+  gateway.paidAt = new Date('2026-10-22T10:00:00.000Z');
+
+  const past = new Date(Date.now() - 60 * 1000);
+  state.payments.push({
+    paymentId: 813,
+    uid: 7,
+    clientKey: 'already-paid',
+    idempotencyKey: 'user_7_already-paid',
+    ticketId: 513,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.UNCONFIRMED,
+    gateway: 'stripe',
+    gatewayRef: 'cs_paid',
+    checkoutUrl: null,
+    checkoutPayload: null,
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: past,
+    paidAt: null,
+    createdAt: past,
+    updatedAt: past,
+  });
+
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'paid-key' },
+    gateway as any,
+    client
+  );
+
+  assert.equal(result.paymentId, 813);
+  assert.equal(state.payments[0].status, PaymentStatus.PAID);
+  assert.equal(state.payments[0].paidAt?.toISOString(), '2026-10-22T10:00:00.000Z');
+  assert.equal(state.payments[0].openUid, null);
+  // ตั๋วยังไม่ถูกเปิดใช้ -> เป็นหน้าที่ของ US6-3
+  assert.equal(state.tickets[0]?.status, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: [4] paidAt must never fall back to the session / intent creation time
+// ---------------------------------------------------------------------------
+
+test('the adapter does not use payment_intent.created as the paid time', async () => {
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
+
+  const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+  const gateway = new StripePaymentGateway({
+    secretKey: 'sk_test_fake',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  });
+
+  const intentCreated = 1_700_000_000;
+  const payload = JSON.stringify({
+    id: 'evt_test',
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: 'cs_test',
+        payment_status: 'paid',
+        amount_total: PRICE_SATANG,
+        currency: 'thb',
+        metadata: { reference: '123' },
+        // payment intent สำเร็จ แต่ latest_charge มีแค่ id (ยังไม่ได้ expand)
+        payment_intent: {
+          id: 'pi_test',
+          created: intentCreated,
+          status: 'succeeded',
+          latest_charge: 'ch_test_only_an_id',
+        },
+      },
+    },
+  });
+
+  const signature = stripeSignature(payload, process.env.STRIPE_WEBHOOK_SECRET!);
+  const event = await gateway.parseWebhookEvent(Buffer.from(payload), signature);
+
+  // ต้องรู้ว่าจ่ายสำเร็จ แต่ห้ามคืนเวลาสร้าง PaymentIntent
+  assert.equal(event.type, 'payment.succeeded');
+  assert.equal(event.paymentState, 'paid');
+  assert.equal(event.paidAt, undefined, 'must not fall back to payment_intent.created');
+});
+
+test('the adapter uses the charge timestamp when the charge is expanded', async () => {
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
+
+  const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+  const gateway = new StripePaymentGateway({
+    secretKey: 'sk_test_fake',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  });
+
+  const chargeCreated = 1_700_000_500;
+  const payload = JSON.stringify({
+    id: 'evt_test',
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: 'cs_test',
+        payment_status: 'paid',
+        amount_total: PRICE_SATANG,
+        currency: 'thb',
+        metadata: { reference: '123' },
+        payment_intent: {
+          id: 'pi_test',
+          created: 1_700_000_000,
+          status: 'succeeded',
+          latest_charge: { id: 'ch_test', created: chargeCreated },
+        },
+      },
+    },
+  });
+
+  const signature = stripeSignature(payload, process.env.STRIPE_WEBHOOK_SECRET!);
+  const event = await gateway.parseWebhookEvent(Buffer.from(payload), signature);
+
+  assert.equal(event.type, 'payment.succeeded');
+  assert.equal(event.paidAt?.getTime(), chargeCreated * 1000);
+});
+
+test('a completed session that is not paid is not reported as a successful payment', async () => {
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
+
+  const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+  const gateway = new StripePaymentGateway({
+    secretKey: 'sk_test_fake',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  });
+
+  const payload = JSON.stringify({
+    id: 'evt_test',
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: 'cs_test',
+        payment_status: 'unpaid',
+        amount_total: PRICE_SATANG,
+        currency: 'thb',
+        metadata: { reference: '123' },
+      },
+    },
+  });
+
+  const signature = stripeSignature(payload, process.env.STRIPE_WEBHOOK_SECRET!);
+  const event = await gateway.parseWebhookEvent(Buffer.from(payload), signature);
+
+  // session.completed ไม่ได้แปลว่าจ่ายสำเร็จเสมอ
+  assert.equal(event.type, 'payment.unknown');
+  assert.equal(event.paymentState, 'unpaid');
 });
 
 // ---------------------------------------------------------------------------

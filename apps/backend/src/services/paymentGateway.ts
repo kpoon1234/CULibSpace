@@ -48,6 +48,29 @@ export interface CheckoutSessionResult {
   expiresAt: Date;
 }
 
+/**
+ * สถานะของ checkout session ที่ gateway ยืนยันให้
+ * - open      : ยังเปิดอยู่ ผู้ใช้ยังจ่ายได้
+ * - paid      : จ่ายสำเร็จแล้ว
+ * - expired   : หมดอายุแล้ว
+ * - not_found : gateway ไม่มี session นี้ (ไม่เคยถูกสร้าง)
+ * - unknown   : ตรวจสอบไม่ได้
+ */
+export type GatewayCheckoutState = 'open' | 'paid' | 'expired' | 'not_found' | 'unknown';
+
+export interface GatewayCheckoutStatus {
+  state: GatewayCheckoutState;
+  /** ยอดเงินที่ gateway ยืนยัน (หน่วยสตางค์) */
+  amountSatang?: number;
+  /** สกุลเงินที่ gateway ยืนยัน */
+  currency?: string;
+  /** อ้างอิงกลับเข้าระบบ (paymentId) */
+  reference?: string;
+  /** เวลาที่ชำระเงินสำเร็จจริง (เฉพาะเมื่อมีข้อมูลที่เชื่อถือได้) */
+  paidAt?: Date;
+  raw: unknown;
+}
+
 /** ประเภท event ที่ระบบสนใจจาก webhook */
 export type GatewayPaymentEventType =
   'payment.succeeded' | 'payment.failed' | 'payment.expired' | 'payment.unknown';
@@ -126,6 +149,20 @@ export interface PaymentGateway {
   /** ชื่อ gateway เก็บลง DB (เช่น 'stripe') เพื่อรองรับการมีหลาย provider */
   readonly name: string;
 
+  /** อายุ checkout ที่สั้นที่สุดที่ gateway รองรับ (นาที) */
+  readonly minCheckoutExpiryMinutes: number;
+  /** อายุ checkout ที่ยาวที่สุดที่ gateway รองรับ (นาที) */
+  readonly maxCheckoutExpiryMinutes: number;
+
+  /**
+   * ปรับ input ให้อยู่ในรูปแบบที่ gateway จะส่งจริง
+   * -------------------------------------------------------------------------
+   * ต้องถูกเรียก **ครั้งเดียวตอนสร้างรายการ** แล้วเก็บผลลัพธ์ไว้
+   * เพื่อให้การ retry ใช้พารามิเตอร์ชุดเดิมเป๊ะ ๆ
+   * (gateway ปฏิเสธการใช้ idempotency key เดิมถ้าพารามิเตอร์ต่างกัน)
+   */
+  prepareCheckoutSession(input: CreateCheckoutSessionInput): CreateCheckoutSessionInput;
+
   /**
    * สร้าง checkout session ให้ผู้ใช้ไปชำระเงิน
    *
@@ -136,6 +173,12 @@ export interface PaymentGateway {
    *      แต่ response ของเรา timeout กลางทาง
    */
   createCheckoutSession(input: CreateCheckoutSessionInput): Promise<CheckoutSessionResult>;
+
+  /**
+   * ตรวจสอบสถานะจริงของ checkout session ที่ gateway สร้างไว้
+   * ใช้ตัดสินว่าจะ "ปิดรายการ" ได้หรือยัง (ห้ามปิดจากเวลาฝั่ง DB อย่างเดียว)
+   */
+  retrieveCheckoutStatus(gatewayRef: string): Promise<GatewayCheckoutStatus>;
 
   /**
    * ตรวจสอบลายเซ็นและแปลง webhook payload เป็น event ที่ระบบเข้าใจ

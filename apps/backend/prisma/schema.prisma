@@ -284,6 +284,10 @@ model Payment {
   // key เต็มที่ส่งต่อให้ gateway (ผูก uid + client_key) ใช้ซ้ำได้กับ gateway เพื่อกู้รายการเดิม
   idempotencyKey String        @db.VarChar(128) @map("idempotency_key")
   checkoutUrl    String?       @db.Text @map("checkout_url")
+  // payload สำหรับสร้าง checkout ที่ "เตรียมไว้แล้ว" เก็บเป็น JSON
+  // ต้องใช้ payload ชุดเดิมทุกครั้งที่ retry เพราะ gateway จะปฏิเสธการใช้
+  // idempotency key เดิมถ้าพารามิเตอร์ต่างกัน (เช่น expires_at ที่คำนวณใหม่)
+  checkoutPayload String?      @db.Text @map("checkout_payload")
   // อายุใช้งานตั๋วที่ snapshot ไว้ตอนซื้อ (ชั่วโมง) ไม่อ่าน config ซ้ำตอนยืนยันการจ่ายเงิน
   // เพราะ config อาจถูกแก้ระหว่างที่ผู้ใช้กำลังกรอกข้อมูลในหน้า checkout
   ticketValidityHours Int      @map("ticket_validity_hours")
@@ -294,7 +298,7 @@ model Payment {
   // -> บังคับว่าผู้ใช้มีรายการที่ยังเปิดอยู่ได้แค่รายการเดียว
   //    (กันสร้าง checkout ซ้ำ และบังคับให้กู้รายการเดิมก่อนซื้อใหม่)
   // หมายเหตุ: US6-3 ต้องล้าง openUid เมื่อ payment เปลี่ยนเป็น Paid/Expired/Failed
-  openUid        Int?          @unique @map("open_uid")
+  openUid        Int?          @unique(map: "payment_open_uid_key") @map("open_uid")
   // เวลาที่ชำระเงินสำเร็จ
   paidAt         DateTime?     @map("paid_at")
   createdAt      DateTime      @default(now()) @map("created_at")
@@ -304,7 +308,8 @@ model Payment {
   ticket         Ticket        @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
 
   // หนึ่งผู้ใช้ + หนึ่ง client key = หนึ่งรายการซื้อ (ตัวตั้งกันรายการซ้ำอยู่ที่ระดับ DB)
-  @@unique([uid, clientKey], name: "uq_payment_user_client_key")
+  // map: ต้องตรงกับชื่อ index ที่ migration สร้างจริง ไม่งั้น Prisma จะคิดว่ามี diff
+  @@unique([uid, clientKey], name: "uq_payment_user_client_key", map: "uq_payment_user_client_key")
   @@index([uid, status], name: "idx_payment_user_status")
   @@index([status, expiresAt], name: "idx_payment_expiry")
   @@index([gatewayRef], name: "idx_payment_gateway_ref")

@@ -34,6 +34,17 @@
 > (ทั้งใน `session.metadata.reference` และ `payment_intent_data.metadata.reference`)
 > → ให้ค้นหา payment ด้วย **paymentId** เสมอ จะได้เจอแม้ยังไม่ได้บันทึก `gateway_ref`
 > (เช่นกรณี gateway สร้าง checkout สำเร็จแต่ response timeout — ดูหัวข้อ 4)
+>
+> **เรื่องเวลาที่ชำระเงินสำเร็จ (`paidAt`):** ระบบจะคืน `paidAt` **เฉพาะเมื่อมีเวลาที่เกิดการเรียกเก็บเงินจริง**
+> (`charge.created`) เท่านั้น — ห้ามใช้เวลาสร้าง session หรือเวลาสร้าง PaymentIntent แทน
+> ถ้าต้องการเวลาที่ชำระสำเร็จที่แน่นอน ให้ดึงข้อมูลการชำระเงินเพิ่มเติม (เช่น expand `latest_charge`)
+> หรือกำหนดเวลาเปิดใช้ตั๋วตามนโยบายที่ทีมตกลงกัน
+>
+> **กรณี gateway ยืนยันว่าจ่ายแล้ว แต่ตั๋วยังไม่ถูกเปิดใช้:**
+> ฝั่งเราบันทึก `payment.status = Paid` และปล่อยช่อง (`open_uid = null`) แต่ **ไม่** เปิดใช้ตั๋ว
+> → US6-3 ต้อง activate ตั๋วเมื่อได้รับ webhook ที่ยืนยันการจ่าย โดยตรวจ **สถานะของตั๋ว**
+> (ถ้า `ticket.status` ยังเป็น `Unpaid` ให้เปลี่ยนเป็น `Paid`) ไม่ใช่ตรวจเฉพาะสถานะของ payment
+> เพื่อให้ flow นี้ทำงานได้ทั้งกรณีที่ webhook มาก่อนและหลังที่เรา reconcile รายการ
 
 ---
 
@@ -76,8 +87,9 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 | `client_key`            | VARCHAR(64)                    | key ที่ client ส่งมา (สูงสุด 64 ตัว)                                   |
 | `idempotency_key`       | VARCHAR(128)                   | key เต็ม `user_<uid>_<client_key>` ที่ส่งต่อให้ gateway                |
 | `checkout_url`          | TEXT                           | URL ที่ frontend redirect ไปชำระเงิน                                   |
+| `checkout_payload`      | TEXT (JSON)                    | payload ของ checkout ที่ "เตรียมไว้" ใช้ซ้ำตอน retry (หัวข้อ 4)        |
 | `ticket_validity_hours` | INTEGER                        | snapshot อายุตั๋วตอนซื้อ                                               |
-| `expires_at`            | TIMESTAMP                      | หมดอายุของ **payment attempt** (ไม่ใช่อายุใช้งานตั๋ว)                  |
+| `expires_at`            | TIMESTAMP                      | หมดอายุของ **payment attempt** — ค่าเดียวกับที่ส่งให้ gateway          |
 | `open_uid`              | INTEGER UNIQUE                 | ช่อง "รายการที่เปิดอยู่" ของผู้ใช้ (ดูหัวข้อ 4)                        |
 | `paid_at`               | TIMESTAMP                      | เวลาที่ชำระเงินสำเร็จ (US6-3 เป็นคนเขียน)                              |
 
@@ -87,6 +99,9 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 | ---------------------------------------------- | --------------------------------------------- |
 | `uq_payment_user_client_key` (uid, client_key) | retry คำขอเดิม → คืนรายการเดิม                |
 | `payment_open_uid_key` (open_uid)              | ผู้ใช้มีรายการที่ยัง "เปิด" ได้แค่รายการเดียว |
+
+> ชื่อ index ใน schema มี `map:` กำกับ เพื่อให้ตรงกับชื่อที่ migration สร้างจริง
+> (ตรวจสอบแล้วด้วย `prisma migrate diff` ว่า schema กับ migration ตรงกันทุก index และทุกคอลัมน์)
 
 ### `system_config` — คอลัมน์ใหม่
 
@@ -188,15 +203,35 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 **สถานการณ์:** gateway สร้าง checkout สำเร็จ แต่ response ของเรา timeout กลางทาง
 → ถ้าตัดเป็น `Failed` ทันที ผู้ใช้จะถูกห้ามซื้อใหม่ และ webhook ที่มาสำเร็จภายหลังจะถูกข้าม (เพราะสถานะไม่ใช่ `Pending`)
 
-**วิธีแก้:** เก็บเป็น `Unconfirmed` (ไม่ใช่ `Failed`) แล้ว **ยิง gateway ซ้ำด้วย idempotency key เดิม**
-Stripe เก็บผลลัพธ์ของ idempotency key ไว้ → คืน session เดิม ไม่สร้าง checkout ซ้ำ
+**วิธีแก้:**
+
+1. เก็บเป็น `Unconfirmed` (ไม่ใช่ `Failed`) — ยังไม่รู้ว่า gateway สร้าง session หรือไม่
+2. **payload ที่เตรียมไว้ต้องถูกเก็บลงรายการ** (`payment.checkout_payload`) และใช้ชุดเดิมทุกครั้งที่ retry
+   — Stripe ปฏิเสธการใช้ idempotency key เดิมถ้าพารามิเตอร์ต่างกัน (เช่น `expires_at` ที่คำนวณใหม่,
+   หรือ `customer_email` / `success_url` / `cancel_url` ที่ไม่ได้ส่งไป)
+3. ครั้งถัดไปที่ยิงด้วย key เดิม ระบบจะยิง gateway ซ้ำด้วย payload ชุดเดิม → gateway คืน session เดิม
 
 ```
-ครั้งที่ 1: POST /purchase  -> timeout           -> payment = Unconfirmed (open_uid ยังถูกจอง)
+ครั้งที่ 1: POST /purchase  -> timeout  -> payment = Unconfirmed (open_uid ยังถูกจอง)
+                            -> checkout_payload ถูกเก็บไว้แล้ว
 ครั้งที่ 2: POST /purchase (key เดิม)
-            -> เจอรายการเดิม -> ยิง gateway ซ้ำด้วย key เดิม -> ได้ session เดิมกลับมา
-            -> payment = Pending + checkoutUrl  (กู้สำเร็จ)
+            -> เจอรายการเดิม -> ยิง gateway ซ้ำด้วย payload ชุดเดิม + key เดิม
+            -> ได้ session เดิมกลับมา -> payment = Pending + checkoutUrl (กู้สำเร็จ)
 ```
+
+**ข้อสำคัญ — ห้ามปิดรายการจากเวลาฝั่ง DB อย่างเดียว**
+เวลาในฐานข้อมูลอาจผ่านไปแล้ว แต่ checkout ที่ gateway สร้างไว้ยังเปิดอยู่
+→ ต้องถาม gateway ก่อนเสมอด้วย `retrieveCheckoutStatus()`:
+
+| ผลจาก gateway           | การกระทำ                                                               |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `open`                  | ยังจ่ายได้ → เก็บช่องไว้ คืนรายการเดิม                                 |
+| `paid`                  | จ่ายแล้ว → บันทึก `Paid` + ปล่อยช่อง (เปิดใช้ตั๋วเป็นหน้าที่ของ US6-3) |
+| `expired` / `not_found` | ใช้ไม่ได้แล้ว → ปิดรายการ ปล่อยให้ซื้อใหม่ได้                          |
+| `unknown`               | ตรวจไม่ได้ → คง `Unconfirmed` ห้ามปล่อยช่อง                            |
+
+> เพื่อไม่ให้เกิดเหตุการณ์นี้ ระบบตรวจค่า `payment_checkout_expiry_minutes` ต้องอยู่ในช่วงที่ gateway รองรับ
+> (Stripe: 30–1440 นาที) **ก่อนสร้างรายการ** และใช้เวลาหมดอายุชุดเดียวกันทั้งฐานข้อมูลและ gateway
 
 ---
 

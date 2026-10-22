@@ -6,6 +6,8 @@ import {
   CheckoutSessionResult,
   GatewayPaymentEvent,
   GatewayPaymentState,
+  GatewayCheckoutState,
+  GatewayCheckoutStatus,
 } from './paymentGateway.js';
 
 /**
@@ -35,6 +37,8 @@ export const STRIPE_MAX_CHECKOUT_EXPIRY_MINUTES = 24 * 60;
 
 export class StripePaymentGateway implements PaymentGateway {
   readonly name = 'stripe';
+  readonly minCheckoutExpiryMinutes = STRIPE_MIN_CHECKOUT_EXPIRY_MINUTES;
+  readonly maxCheckoutExpiryMinutes = STRIPE_MAX_CHECKOUT_EXPIRY_MINUTES;
   private readonly stripe: Stripe;
   private readonly webhookSecret?: string;
   private readonly timeoutMs: number;
@@ -56,12 +60,28 @@ export class StripePaymentGateway implements PaymentGateway {
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
 
+  /**
+   * ปรับ input ให้อยู่ในช่วงที่ Stripe รองรับ
+   * -------------------------------------------------------------------------
+   * ต้องถูกเรียก **ครั้งเดียวตอนสร้างรายการ** แล้วเก็บผลลัพธ์ไว้ในฐานข้อมูล
+   * ถ้าคำนวณใหม่ตอน retry เวลาอ้างอิงจะเลื่อนตามเวลาจริง
+   * -> Stripe จะปฏิเสธการใช้ idempotency key เดิมเพราะพารามิเตอร์ไม่ตรงกัน
+   */
+  prepareCheckoutSession(input: CreateCheckoutSessionInput): CreateCheckoutSessionInput {
+    this.assertAmount(input.amountSatang);
+    this.assertCurrency(input.currency);
+
+    return {
+      ...input,
+      expiresAt: this.clampExpiry(input.expiresAt),
+    };
+  }
+
   async createCheckoutSession(input: CreateCheckoutSessionInput): Promise<CheckoutSessionResult> {
     this.assertAmount(input.amountSatang);
     this.assertCurrency(input.currency);
 
     const expiresAt = this.clampExpiry(input.expiresAt);
-
     try {
       const session = await this.stripe.checkout.sessions.create(
         {
@@ -104,6 +124,52 @@ export class StripePaymentGateway implements PaymentGateway {
       };
     } catch (error) {
       throw this.toGatewayError(error);
+    }
+  }
+
+  /**
+   * ดึงสถานะจริงของ checkout session จาก Stripe
+   * ใช้ตัดสินว่าจะปิดรายการในฝั่งเราได้หรือยัง
+   * (ห้ามปิดรายการจากเวลาฝั่ง DB อย่างเดียว เพราะ checkout ที่ gateway สร้างไว้
+   *  อาจยังเปิดอยู่แม้เวลาในฐานข้อมูลผ่านไปแล้ว)
+   */
+  async retrieveCheckoutStatus(gatewayRef: string): Promise<GatewayCheckoutStatus> {
+    try {
+      const session = await this.stripe.checkout.sessions.retrieve(gatewayRef, {
+        expand: ['payment_intent'],
+      });
+
+      const object = session as unknown as Record<string, unknown>;
+      const metadata = object['metadata'] as { reference?: string } | undefined;
+
+      let state: GatewayCheckoutState = 'unknown';
+      if (session.status === 'expired') {
+        state = 'expired';
+      } else if (session.status === 'complete') {
+        state = session.payment_status === 'paid' ? 'paid' : 'unknown';
+      } else if (session.status === 'open') {
+        state = 'open';
+      }
+
+      return {
+        state,
+        amountSatang: session.amount_total ?? undefined,
+        currency: session.currency ?? undefined,
+        reference: metadata?.reference,
+        paidAt: this.readPaidAt(object),
+        raw: object,
+      };
+    } catch (error) {
+      const stripeError = error as { statusCode?: number; code?: string; message?: string };
+
+      // Stripe ตอบ 404 = ไม่มี session นี้ (ไม่เคยถูกสร้าง)
+      if (stripeError?.statusCode === 404 || stripeError?.code === 'resource_missing') {
+        return { state: 'not_found', raw: error };
+      }
+
+      // ตรวจสอบไม่ได้ -> ไม่ต้องปิดรายการ (ปลอดภัยกว่า)
+      console.error('[StripePaymentGateway] Could not retrieve checkout status:', error);
+      return { state: 'unknown', raw: error };
     }
   }
 
@@ -231,36 +297,45 @@ export class StripePaymentGateway implements PaymentGateway {
 
   /**
    * อ่านเวลาที่ชำระเงินสำเร็จจริง
-   * - payment_intent.created  : เวลาที่สร้าง payment intent (ใกล้เคียงเวลาจ่ายจริง)
-   * - payment_intent.status    : 'succeeded' เท่านั้นที่ถือว่าจ่ายสำเร็จ
-   * ถ้าไม่มีข้อมูล payment intent (ต้อง expand ตอนเรียก API) -> คืน undefined
-   * เพื่อไม่ให้เกิด timestamp ผิด
+   * -------------------------------------------------------------------------
+   * ใช้ได้เฉพาะ "เวลาที่เกิดการเรียกเก็บเงินจริง" (charge) เท่านั้น
+   * - payment_intent.created  = เวลาสร้าง PaymentIntent ไม่ใช่เวลาจ่าย -> ใช้ไม่ได้
+   * - latest_charge.created    = เวลาที่เกิดการเรียกเก็บเงินจริง -> ใช้ได้
+   *
+   * ถ้าไม่มีข้อมูลที่เชื่อถือได้ -> คืน undefined
+   * ให้ US6-3 ดึงข้อมูลการชำระเงินเพิ่มเติมหรือกำหนดเวลาเปิดใช้ตั๋วตามนโยบายที่ตกลงกัน
+   * (ห้ามใช้เวลาสร้าง session / PaymentIntent แทนเวลาจ่าย)
    */
   private readPaidAt(object: Record<string, unknown>): Date | undefined {
     const paymentIntent = object['payment_intent'] as
-      | { id?: string; created?: number; status?: string; latest_charge?: { created?: number } }
+      | {
+          id?: string;
+          created?: number;
+          status?: string;
+          latest_charge?: { created?: number } | string | null;
+        }
       | string
+      | null
       | undefined;
 
+    // ไม่มี payment intent ที่ expand มา -> ไม่มีเวลาจ่ายจริงที่เชื่อถือได้
     if (!paymentIntent || typeof paymentIntent === 'string') {
-      // ไม่มี object ที่ expand มา -> ไม่มีเวลาจ่ายจริงที่เชื่อถือได้
       return undefined;
     }
 
+    // PaymentIntent ยังไม่สำเร็จ -> ยังไม่มีเวลาจ่าย
     if (paymentIntent.status !== 'succeeded') {
       return undefined;
     }
 
-    const chargeCreated = paymentIntent.latest_charge?.created;
-    if (typeof chargeCreated === 'number') {
-      return new Date(chargeCreated * 1000);
+    // latest_charge ต้องเป็น object ที่มีข้อมูลเวลาจริง
+    // ถ้าเป็นแค่ id (string) หรือไม่มี -> ไม่มีเวลาจ่ายที่เชื่อถือได้
+    const charge = paymentIntent.latest_charge;
+    if (!charge || typeof charge !== 'object' || typeof charge.created !== 'number') {
+      return undefined;
     }
 
-    if (typeof paymentIntent.created === 'number') {
-      return new Date(paymentIntent.created * 1000);
-    }
-
-    return undefined;
+    return new Date(charge.created * 1000);
   }
 
   private assertAmount(amountSatang: number): void {
