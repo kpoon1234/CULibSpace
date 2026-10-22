@@ -1,0 +1,42 @@
+# Reservation hold regression tests
+
+Run `npm test --workspace=apps/frontend` from the repository root (Node 22+).
+These tests use deferred promises and mocked HTTP, not a database or Playwright.
+They run in the PR workflow before the frontend build.
+
+- `reservationSession.test.ts`: acquisition/cleanup ordering, Strict Mode replay,
+  token expiry, duplicate submit, navigation during booking, definitive rejection,
+  and reconciliation of unknown outcomes.
+- `bookings.test.ts`: backend error codes, timeout/5xx classification, exact-match
+  confirmation, and credentials captured before requests enter the queue.
+
+## Manual browser checks
+
+Use disposable test data or mock HTTP responses; do not experiment on live bookings.
+
+1. Open a table and cancel while editing. Its hold should be released. Selecting
+   another table must still work. Cancel during a delayed acquisition should close
+   immediately; the eventual token should be released before the next acquisition.
+2. Delay `POST /api/bookings`. After Confirm, Cancel, date/time inputs and the submit
+   button are disabled; clicking the backdrop must not close the modal or unlock.
+   Repeated submit must not send a second POST.
+3. Force a route change/unmount before resolving the POST. There must be no unlock
+   while it is pending. Resolve success: no unlock afterwards either. Resolve a
+   definitive business-rule rejection: release that attempt's token exactly once.
+   Opening another modal must wait for the old operation, and the old response
+   must not close or mark the new modal successful.
+4. Return `LOCK_EXPIRED`/`INVALID_LOCK`. Try again must acquire a fresh token;
+   a non-null old token must not bypass acquisition. Also test local TTL expiry.
+5. Lose the POST response or return a timeout/502. The UI must say the result is
+   unconfirmed. Check booking status sends only a GET; no automatic unlock or new
+   booking POST. A matching pending/active booking confirms success. An empty,
+   different or failed read remains inconclusive; the server hold TTL is the fallback.
+6. Repeat opening/closing under React Strict Mode in development. Old acquisitions
+   and cleanup must never rotate/release a later attempt's token.
+
+The coordinator is scoped to one authenticated browser tab. It survives modal and
+client-side route unmounts, not a full page reload/tab shutdown. It is not a server
+idempotency mechanism or a cross-tab lock. The existing backend token/owner checks
+and transaction remain authoritative. `my-active` is only positive confirmation:
+it may return a different reservation, so absence is never treated as proof that
+the POST rolled back.

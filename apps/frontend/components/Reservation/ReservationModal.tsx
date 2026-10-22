@@ -9,7 +9,8 @@ import {
   type FloorPlanFilter,
 } from '@/lib/floorPlan'; // Assuming this is an array of time strings, e.g., ['08:00', '09:00', ...]
 import { useBookingLimits } from '@/lib/systemConfig';
-import { createBooking, lockTable, unlockTable } from '@/lib/bookings';
+import { openReservationSession } from '@/lib/bookings';
+import type { ReservationSession } from '@/lib/reservationSession';
 
 interface ReservationModalProps {
   isOpen: boolean;
@@ -25,7 +26,7 @@ interface ReservationModalProps {
   onConfirm: (startTime: string, endTime: string) => void;
 }
 
-type Step = 'form' | 'success' | 'fail';
+type Step = 'form' | 'success' | 'fail' | 'uncertain';
 
 // Mirrors SystemConfig.maxAdvanceBookingDays' default (7). The backend is the
 // real source of truth and will reject anything further out regardless — this
@@ -85,54 +86,33 @@ export default function ReservationModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [denyReason, setDenyReason] = useState('');
-  const [lockToken, setLockToken] = useState<string | null>(null);
   const [locking, setLocking] = useState(true);
-  // Bumped by handleTryAgain to re-run the lock-acquisition effect below.
-  const [retryToken, setRetryToken] = useState(0);
+  const [checking, setChecking] = useState(false);
   // Lazy initializer: React guarantees this runs once at mount, so it's the
   // sanctioned place for a one-time impure Date.now() read (calling it inline
   // during render trips react-hooks/purity).
   const [maxDate] = useState(() => new Date(Date.now() + MAX_ADVANCE_DAYS * 86_400_000));
 
-  // Mirrored into refs so the unmount cleanup below (which closes over stale
-  // state otherwise) always releases the most recently acquired token, and
-  // skips releasing one already consumed by a successful booking.
-  const lockTokenRef = useRef<string | null>(null);
-  const bookedRef = useRef(false);
+  const sessionRef = useRef<ReservationSession | null>(null);
 
   useEffect(() => {
-    bookedRef.current = false;
-    let cancelled = false;
-
-    const acquireLock = async () => {
-      setLocking(true);
-      const result = await lockTable({ tableId });
-      if (cancelled) {
-        if (result.ok && result.lockToken) {
-          unlockTable({ tableId, lockToken: result.lockToken });
-        }
-        return;
-      }
-      setLocking(false);
-      if (result.ok && result.lockToken) {
-        lockTokenRef.current = result.lockToken;
-        setLockToken(result.lockToken);
-      } else {
-        setDenyReason(result.reason || 'This table is currently on hold by another user.');
-        setStep('fail');
-      }
-    };
-
-    acquireLock();
-
+    if (!isOpen) return;
+    const session = openReservationSession(tableId, (state) => {
+      setLocking(state.phase === 'holding');
+      setSubmitting(state.phase === 'submitting');
+      setChecking(state.phase === 'checking');
+      setDenyReason(state.reason ?? '');
+      if (state.phase === 'success') setStep('success');
+      else if (state.phase === 'failed') setStep('fail');
+      else if (state.phase === 'uncertain' || state.phase === 'checking') setStep('uncertain');
+      else setStep('form');
+    });
+    sessionRef.current = session;
     return () => {
-      cancelled = true;
-      if (lockTokenRef.current && !bookedRef.current) {
-        unlockTable({ tableId, lockToken: lockTokenRef.current });
-      }
-      lockTokenRef.current = null;
+      if (sessionRef.current === session) sessionRef.current = null;
+      session.dispose();
     };
-  }, [tableId, retryToken]);
+  }, [tableId, isOpen]);
 
   if (!isOpen) return null;
 
@@ -140,6 +120,8 @@ export default function ReservationModal({
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const session = sessionRef.current;
+    if (!session || session.state.phase !== 'ready') return;
     setError(null);
 
     // Time validation check
@@ -153,42 +135,29 @@ export default function ReservationModal({
       return;
     }
 
-    if (!lockToken) {
-      setError('Still holding this table for you — please wait a moment and try again.');
-      return;
-    }
-
-    setSubmitting(true);
-    const result = await createBooking({
-      tableId,
+    await session.submit({
       startDateTime: combineDateAndTime(selectedDate, startTime).toISOString(),
       endDateTime: combineDateAndTime(selectedDate, endTime).toISOString(),
-      lockToken,
     });
-    setSubmitting(false);
-
-    if (result.ok) {
-      // The backend clears the hold lock as part of creating the booking.
-      bookedRef.current = true;
+    if (sessionRef.current === session && !session.disposed && session.succeeded) {
       onConfirm(startTime, endTime);
-      setStep('success');
-    } else {
-      setDenyReason(result.reason || 'the reservation could not be validated.');
-      setStep('fail');
     }
   };
 
   const handleClose = () => {
+    if (sessionRef.current?.submitting) return;
+    // Release an idle hold immediately, not just when the parent unmounts us.
+    sessionRef.current?.dispose();
     onClose();
-    setStep('form');
-    setError(null);
   };
 
-  const handleTryAgain = () => {
-    setStep('form');
+  const handleTryAgain = async () => {
+    const session = sessionRef.current;
+    if (!session) return;
     setError(null);
-    if (!lockToken) {
-      setRetryToken((c) => c + 1);
+    await session.retry();
+    if (sessionRef.current === session && !session.disposed && session.succeeded) {
+      onConfirm(startTime, endTime);
     }
   };
 
@@ -227,7 +196,7 @@ export default function ReservationModal({
               Back to main menu
             </button>
           </div>
-        ) : step === 'fail' ? (
+        ) : step === 'fail' || step === 'uncertain' ? (
           <div className="flex flex-col items-center py-4 text-center">
             <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500 to-red-700 shadow-md">
               <svg
@@ -240,17 +209,24 @@ export default function ReservationModal({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </span>
-            <h2 className="mt-4 text-2xl font-semibold text-gray-900">Reservation Fail</h2>
-            <p className="mt-2 text-sm text-gray-500">
-              Your table reservation on {formatDateLabel(selectedDate)} from {startTime} to{' '}
-              {endTime} was denied because {denyReason}
-            </p>
+            <h2 className="mt-4 text-2xl font-semibold text-gray-900">
+              {step === 'uncertain' ? 'Reservation not yet confirmed' : 'Reservation unsuccessful'}
+            </h2>
+            <p className="mt-2 text-sm text-gray-500">{denyReason}</p>
             <button
               type="button"
               onClick={handleTryAgain}
+              disabled={checking}
               className="mt-8 w-full rounded-full bg-rose-400 px-6 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2"
             >
-              Try again
+              {checking ? 'Checking…' : step === 'uncertain' ? 'Check booking status' : 'Try again'}
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="mt-3 text-sm text-gray-600 underline"
+            >
+              Close
             </button>
           </div>
         ) : (
@@ -269,6 +245,7 @@ export default function ReservationModal({
                 <label className="block text-sm text-gray-500 mb-1.5 ml-1">Date</label>
                 <input
                   type="date"
+                  disabled={submitting}
                   value={toDateInputValue(selectedDate)}
                   min={toDateInputValue(new Date())}
                   max={toDateInputValue(maxDate)}
@@ -288,6 +265,7 @@ export default function ReservationModal({
                 <div>
                   <label className="block text-sm text-gray-500 mb-1.5 ml-1">Start time</label>
                   <select
+                    disabled={submitting}
                     value={startTime}
                     onChange={(e) => {
                       setStartTime(e.target.value);
@@ -306,6 +284,7 @@ export default function ReservationModal({
                 <div>
                   <label className="block text-sm text-gray-500 mb-1.5 ml-1">End time</label>
                   <select
+                    disabled={submitting}
                     value={endTime}
                     onChange={(e) => {
                       setEndTime(e.target.value);
@@ -341,7 +320,8 @@ export default function ReservationModal({
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="rounded-full border border-gray-300 bg-white px-6 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none"
+                  disabled={submitting}
+                  className="rounded-full border border-gray-300 bg-white px-6 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Cancel
                 </button>

@@ -60,6 +60,9 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/culibspace_test
 
+      - name: Test Frontend Reservation Lifecycle
+        run: npm test --workspace=apps/frontend
+
       - name: Build Frontend
         run: npm run build --workspace=apps/frontend
         env:
