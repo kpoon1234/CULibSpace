@@ -171,7 +171,9 @@ function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}
     nextPaymentId: 100,
     nextTicketId: 500,
     calls: { ticketCreate: 0, paymentCreate: 0 },
-    // ใช้จำลอง P2002 (unique violation) เพื่อทดสอบ race condition
+    // ใช้จำลองการเขียน payload ล้มเหลว เพื่อทดสอบว่า transaction rollback หมด
+    failPayloadWrite: false,
+    // ใช้จำลอง unique violation
     throwP2002OnCreate: false,
   };
 
@@ -197,6 +199,21 @@ function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}
       },
     },
     payment: {
+      findUnique: async ({ where }: any) => {
+        if (where?.paymentId !== undefined) {
+          return state.payments.find((p) => p.paymentId === where.paymentId) ?? null;
+        }
+        if (where?.idempotencyKey !== undefined) {
+          return state.payments.find((p) => p.idempotencyKey === where.idempotencyKey) ?? null;
+        }
+        if (where?.uid !== undefined && where?.clientKey !== undefined) {
+          return (
+            state.payments.find((p) => p.uid === where.uid && p.clientKey === where.clientKey) ??
+            null
+          );
+        }
+        return null;
+      },
       findFirst: async ({ where }: any) => {
         const list = state.payments
           .filter((p) => {
@@ -255,6 +272,9 @@ function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}
               return false;
             }
           }
+          if (where.gatewayRef !== undefined && p.gatewayRef !== where.gatewayRef) {
+            return false;
+          }
           return true;
         });
         targets.forEach((t) => applyData(t, data));
@@ -302,6 +322,16 @@ function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}
             return payment;
           },
           findFirst: (args: any) => client.payment.findFirst(args),
+          findUnique: (args: any) => client.payment.findUnique(args),
+          update: async (args: any) => {
+            if (state.failPayloadWrite) {
+              const error: any = new Error('could not write the checkout payload');
+              error.code = 'P2010';
+              throw error;
+            }
+            return client.payment.update(args);
+          },
+          updateMany: (args: any) => client.payment.updateMany(args),
         },
       };
 
@@ -680,13 +710,20 @@ test('concurrent purchases with the same key only create one payment', async () 
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
 
-  const [a, b] = await Promise.all([
+  const results = await Promise.allSettled([
     TicketService.purchase({ uid: 7, idempotencyKey: 'same-key' }, gateway as any, client),
     TicketService.purchase({ uid: 7, idempotencyKey: 'same-key' }, gateway as any, client),
   ]);
 
-  // ทั้งสองคำขอต้องได้ payment เดียวกัน และต้องมี payment เพียงรายการเดียว
-  assert.equal(a.paymentId, b.paymentId);
+  // คำขอแรกได้รายการ คำขอที่สองอาจได้ replay หรือได้ 409 ตอนรายการเดิมยังอยู่ระหว่างเรียก gateway
+  // (ทั้งสองกรณีต้องชี้ไปที่ payment เดียวกัน)
+  const paymentIds = results.map((r) =>
+    r.status === 'fulfilled' ? r.value.paymentId : (r.reason as any)?.paymentId
+  );
+  assert.ok(paymentIds[0], 'the first request must return a payment id');
+  assert.equal(paymentIds[0], paymentIds[1], 'both requests must point at the same payment');
+
+  // เทสต์นี้ผ่านแล้ว ต้องมี payment และ ticket เพียงอันเดียว
   assert.equal(state.payments.length, 1);
   assert.equal(state.tickets.length, 1);
 });
@@ -1247,6 +1284,283 @@ test('a completed session that is not paid is not reported as a successful payme
   // session.completed ไม่ได้แปลว่าจ่ายสำเร็จเสมอ
   assert.equal(event.type, 'payment.unknown');
   assert.equal(event.paymentState, 'unpaid');
+});
+
+// ---------------------------------------------------------------------------
+// Regression: [1] the real Stripe adapter must not re-clamp the expiry
+// ---------------------------------------------------------------------------
+
+/**
+ * Mock เฉพาะ Stripe SDK (ใช้ StripePaymentGateway ตัวจริง)
+ * - จำลอง response timeout ครั้งแรก (สร้าง session ไปแล้วแต่ตอบกลับไม่ถึง)
+ * - ครั้งถัดไปคืน session เดิม (เหมือน Stripe ที่เก็บผลลัพธ์ของ idempotency key)
+ */
+function mockStripeSdk(options: { timeoutOnFirstCall?: boolean } = {}) {
+  const createCalls: any[] = [];
+  const sessions = new Map<string, any>();
+  let callCount = 0;
+
+  return {
+    createCalls,
+    client: {
+      checkout: {
+        sessions: {
+          async create(params: any, opts?: any) {
+            callCount++;
+            createCalls.push({ params, opts });
+
+            const key = opts?.idempotencyKey;
+            if (sessions.has(key)) {
+              return sessions.get(key);
+            }
+
+            const session = {
+              id: 'cs_test_1',
+              url: 'https://checkout.stripe.com/c/pay/cs_test_1',
+              expires_at: params.expires_at,
+            };
+            sessions.set(key, session);
+
+            if (options.timeoutOnFirstCall && callCount === 1) {
+              const error: any = new Error('Request aborted due to timeout being reached');
+              error.type = 'StripeTimeoutError';
+              throw error;
+            }
+
+            return session;
+          },
+          async retrieve() {
+            return { id: 'cs_test_1', status: 'open', payment_status: 'unpaid' };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent() {
+          throw new Error('not used in this test');
+        },
+      },
+    } as any,
+  };
+}
+
+test('the Stripe adapter sends the same expiry on a retry after a timeout', async () => {
+  const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+  const sdk = mockStripeSdk({ timeoutOnFirstCall: true });
+  const gateway = new StripePaymentGateway({ secretKey: 'sk_test_fake', client: sdk.client });
+
+  const baseInput = {
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    reference: '555',
+    description: 'CU LibSpace visitor ticket (7)',
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    idempotencyKey: 'user_7_same-key',
+    customerEmail: 'visitor@example.com',
+    successUrl: 'http://localhost:3000/tickets/success',
+    cancelUrl: 'http://localhost:3000/tickets/cancel',
+  };
+
+  // ครั้งแรก: prepare แล้วเรียก -> timeout
+  const prepared = gateway.prepareCheckoutSession(baseInput);
+  await assert.rejects(
+    () => gateway.createCheckoutSession(prepared),
+    (err: any) => {
+      assert.equal(err.code, 'GATEWAY_TIMEOUT');
+      return true;
+    }
+  );
+
+  // เลื่อนเวลาไป 2 วินาที (จำลองเวลาผ่านไประหว่างรอ)
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
+  // ครั้งที่สอง: ใช้ payload ชุดเดิม (ไม่ผ่าน prepare ซ้ำ) -> ต้องได้ session เดิม
+  const recovered = await gateway.createCheckoutSession(prepared);
+
+  assert.equal(recovered.gatewayRef, 'cs_test_1');
+  assert.equal(sdk.createCalls.length, 2);
+
+  // payload ที่ส่งเข้า SDK ต้องตรงกันทุกค่า
+  const first = sdk.createCalls[0];
+  const second = sdk.createCalls[1];
+
+  assert.deepEqual(second.params, first.params);
+  assert.equal(second.opts.idempotencyKey, first.opts.idempotencyKey);
+  assert.equal(second.params.expires_at, first.params.expires_at);
+  assert.equal(second.params.customer_email, first.params.customer_email);
+  assert.equal(second.params.success_url, first.params.success_url);
+  assert.equal(second.params.cancel_url, first.params.cancel_url);
+  assert.equal(second.params.metadata.reference, first.params.metadata.reference);
+  assert.equal(
+    second.params.payment_intent_data.metadata.reference,
+    first.params.metadata.reference
+  );
+});
+
+test('the Stripe adapter only clamps the expiry in prepareCheckoutSession', async () => {
+  const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+  const sdk = mockStripeSdk();
+  const gateway = new StripePaymentGateway({ secretKey: 'sk_test_fake', client: sdk.client });
+
+  const requested = new Date(Date.now() + 5 * 60 * 1000); // ต่ำกว่าขั้นต่ำของ Stripe
+  const prepared = gateway.prepareCheckoutSession({
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    reference: '1',
+    description: 'test',
+    expiresAt: requested,
+    idempotencyKey: 'k',
+  });
+
+  // prepare จะดันเข้าไปในช่วงที่ Stripe รองรับ
+  assert.ok(prepared.expiresAt.getTime() > requested.getTime());
+
+  // create ต้องใช้ค่าที่ prepare ทำไว้เป๊ะ ๆ ไม่ clamp ซ้ำ
+  await gateway.createCheckoutSession(prepared);
+  const sent = sdk.createCalls[0].params.expires_at;
+  assert.equal(sent, Math.floor(prepared.expiresAt.getTime() / 1000));
+});
+
+// ---------------------------------------------------------------------------
+// Regression: [2] a failed payload write must roll the whole transaction back
+// ---------------------------------------------------------------------------
+
+test('a failed payload write rolls back the ticket and the payment', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  state.failPayloadWrite = true;
+
+  await assert.rejects(() => TicketService.purchase({ uid: 7 }, gateway as any, client));
+
+  // ต้องไม่เหลือรายการใด ๆ (transaction rollback ทั้ง Ticket / Payment)
+  assert.equal(state.tickets.length, 0);
+  assert.equal(state.payments.length, 0);
+  // และไม่มีการเรียก gateway เลย (เพราะยังไม่ได้ commit)
+  assert.equal(gateway.calls.length, 0);
+});
+
+test('a request after a rolled back payload write can start a new purchase', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  state.failPayloadWrite = true;
+  await assert.rejects(() => TicketService.purchase({ uid: 7 }, gateway as any, client));
+
+  state.failPayloadWrite = false;
+  const result = await TicketService.purchase({ uid: 7 }, gateway as any, client);
+
+  assert.equal(result.replayed, false);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 1);
+  assert.equal(state.payments[0].openUid, 7);
+  assert.ok(state.payments[0].checkoutPayload);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: [3] a stale response must not overwrite a finished payment
+// ---------------------------------------------------------------------------
+
+test('a late response does not overwrite a payment that was already paid', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  // คำขอแรก: gateway ตอบช้า เราจะปล่อย response หลังจากเขียน PAID เรียบร้อย
+  let releaseFirst: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const slowGateway = fakeGateway();
+  slowGateway.createCheckoutSession = async (input: any) => {
+    slowGateway.calls.push(input);
+    await gate;
+    return {
+      gatewayRef: 'cs_slow',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_slow',
+      expiresAt: input.expiresAt,
+    };
+  };
+
+  const firstRequest = TicketService.purchase(
+    { uid: 7, idempotencyKey: 'slow-key' },
+    slowGateway as any,
+    client
+  );
+
+  // รอให้ transaction commit แล้วคำขอแรกค้างอยู่ที่ gateway
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(state.payments.length, 1);
+  const paymentId = state.payments[0].paymentId;
+
+  // ระหว่างนั้น webhook ของ US6-3 ยืนยันว่าจ่ายแล้ว (เขียนสถานะ Paid + ปล่อยช่อง)
+  await client.payment.update({
+    where: { paymentId },
+    data: { status: PaymentStatus.PAID, openUid: null, paidAt: new Date() },
+  });
+  assert.equal(state.payments[0].status, PaymentStatus.PAID);
+
+  // ปล่อย response ช้าของคำขอแรกออกมา
+  releaseFirst!();
+  await firstRequest;
+
+  // สถานะสุดท้ายต้องยังเป็น PAID ไม่ถูกเขียนย้อนกลับเป็น PENDING
+  assert.equal(state.payments[0].status, PaymentStatus.PAID);
+  assert.equal(state.payments[0].openUid, null);
+});
+
+test('a late response does not wipe a checkout that was recovered meanwhile', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  let releaseFirst: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const slowGateway = fakeGateway();
+  slowGateway.createCheckoutSession = async (input: any) => {
+    slowGateway.calls.push(input);
+    await gate;
+    return {
+      gatewayRef: 'cs_slow',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_slow',
+      expiresAt: input.expiresAt,
+    };
+  };
+
+  const firstRequest = TicketService.purchase(
+    { uid: 7, idempotencyKey: 'recover-key' },
+    slowGateway as any,
+    client
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const paymentId = state.payments[0].paymentId;
+
+  // อีกคำขอกู้ checkout ไปแล้ว -> ต้องได้ gatewayRef + checkoutUrl
+  const recovery = fakeGateway();
+  recovery.createCheckoutSession = async (input: any) => ({
+    gatewayRef: 'cs_recovered',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_recovered',
+    expiresAt: input.expiresAt,
+  });
+
+  const recovered = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'recover-key' },
+    recovery as any,
+    client
+  );
+  assert.equal(recovered.paymentId, paymentId);
+  assert.equal(state.payments[0].gatewayRef, 'cs_recovered');
+  assert.equal(state.payments[0].checkoutUrl, 'https://checkout.stripe.com/c/pay/cs_recovered');
+
+  // ปล่อย response ช้าของคำขอแรก -> ต้องไม่เขียนทับข้อมูลที่กู้ได้แล้ว
+  releaseFirst!();
+  await firstRequest;
+
+  assert.equal(state.payments[0].gatewayRef, 'cs_recovered');
+  assert.equal(state.payments[0].checkoutUrl, 'https://checkout.stripe.com/c/pay/cs_recovered');
+  assert.equal(state.payments[0].status, PaymentStatus.PENDING);
 });
 
 // ---------------------------------------------------------------------------

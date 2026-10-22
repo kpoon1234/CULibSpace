@@ -22,6 +22,24 @@ import {
  *   - ส่ง webhook มาตอน checkout.session.completed / .expired
  */
 
+/**
+ * ส่วนของ Stripe SDK ที่ adapter ใช้จริง
+ * -------------------------------------------------------------------------
+ * ทำเป็น interface เพื่อให้เทสต์สามารถ mock "เฉพาะ SDK" ได้
+ * โดยที่ยังทดสอบตรรกะของ adapter จริง (การ clamp expiry, การแปลง error, การ map event)
+ */
+export interface StripeCheckoutClient {
+  checkout: {
+    sessions: {
+      create(params: any, options?: any): Promise<any>;
+      retrieve(id: string, params?: any): Promise<any>;
+    };
+  };
+  webhooks: {
+    constructEvent(payload: Buffer | string, header: string, secret: string): any;
+  };
+}
+
 export interface StripeGatewayOptions {
   secretKey: string;
   webhookSecret?: string;
@@ -29,6 +47,8 @@ export interface StripeGatewayOptions {
   apiVersion?: Stripe.LatestApiVersion;
   /** timeout ของการเรียก gateway (มิลลิวินาที) */
   timeoutMs?: number;
+  /** inject ได้สำหรับทดสอบ (ถ้าไม่ระบุจะสร้าง Stripe client จริง) */
+  client?: StripeCheckoutClient;
 }
 
 /** Stripe บังคับให้ expires_at อยู่ระหว่าง 30 นาที ถึง 24 ชั่วโมงนับจากตอนสร้าง */
@@ -39,23 +59,25 @@ export class StripePaymentGateway implements PaymentGateway {
   readonly name = 'stripe';
   readonly minCheckoutExpiryMinutes = STRIPE_MIN_CHECKOUT_EXPIRY_MINUTES;
   readonly maxCheckoutExpiryMinutes = STRIPE_MAX_CHECKOUT_EXPIRY_MINUTES;
-  private readonly stripe: Stripe;
+  private readonly stripe: StripeCheckoutClient;
   private readonly webhookSecret?: string;
   private readonly timeoutMs: number;
 
   constructor(options: StripeGatewayOptions) {
-    if (!options.secretKey) {
+    if (!options.secretKey && !options.client) {
       throw new PaymentGatewayError(
         'GATEWAY_NOT_CONFIGURED',
         'Stripe secret key is not configured'
       );
     }
 
-    this.stripe = new Stripe(options.secretKey, {
-      ...(options.apiVersion ? { apiVersion: options.apiVersion } : {}),
-      timeout: options.timeoutMs ?? 10_000,
-      maxNetworkRetries: 1,
-    });
+    this.stripe =
+      options.client ??
+      (new Stripe(options.secretKey, {
+        ...(options.apiVersion ? { apiVersion: options.apiVersion } : {}),
+        timeout: options.timeoutMs ?? 10_000,
+        maxNetworkRetries: 1,
+      }) as unknown as StripeCheckoutClient);
     this.webhookSecret = options.webhookSecret;
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
@@ -81,7 +103,10 @@ export class StripePaymentGateway implements PaymentGateway {
     this.assertAmount(input.amountSatang);
     this.assertCurrency(input.currency);
 
-    const expiresAt = this.clampExpiry(input.expiresAt);
+    // ใช้ expiresAt ตามที่เตรียมไว้เป๊ะ ๆ ห้าม clamp ซ้ำที่นี่
+    // (ถ้า clamp ซ้ำ ค่าจะเลื่อนตามเวลาที่ retry -> Stripe ปฏิเสธ idempotency key เดิม)
+    const expiresAt = input.expiresAt;
+
     try {
       const session = await this.stripe.checkout.sessions.create(
         {

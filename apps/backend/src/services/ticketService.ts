@@ -161,7 +161,7 @@ export class TicketService {
     // ใช้เวลาหมดอายุชุดเดียวกันทั้งฐานข้อมูลและ gateway
     const preparedExpiresAt = prepared.expiresAt;
 
-    let created: { ticket: any; payment: any };
+    let created: { ticket: any; payment: any; checkoutPayload: StoredCheckoutPayload };
     try {
       created = await prisma.$transaction(async (tx: any) => {
         const ticket = await tx.ticket.create({
@@ -193,7 +193,16 @@ export class TicketService {
           },
         });
 
-        return { ticket, payment };
+        // ประกอบ payload แล้วบันทึก "ภายใน transaction เดียวกัน"
+        // -> ถ้าบันทึกไม่สำเร็จ transaction จะ rollback ทั้ง Ticket/Payment
+        //    ไม่เหลือรายการที่จอง openUid ไว้แต่กู้ไม่ได้
+        const payload = this.buildStoredPayload(prepared, String(payment.paymentId));
+        await tx.payment.update({
+          where: { paymentId: payment.paymentId },
+          data: { checkoutPayload: JSON.stringify(payload) },
+        });
+
+        return { ticket, payment, checkoutPayload: payload };
       });
     } catch (error: any) {
       // ชน unique constraint -> มีคำขอพร้อมกันสร้างรายการเดียวกันไปแล้ว
@@ -205,13 +214,7 @@ export class TicketService {
       throw error;
     }
 
-    // เก็บ payload ที่เตรียมไว้ (พร้อม reference = paymentId จริง) ลงรายการ
-    // เพื่อให้ทุกครั้งที่ retry ใช้พารามิเตอร์ชุดเดิมเป๊ะ ๆ
-    const checkoutPayload = this.buildStoredPayload(prepared, String(created.payment.paymentId));
-    await prisma.payment.update({
-      where: { paymentId: created.payment.paymentId },
-      data: { checkoutPayload: JSON.stringify(checkoutPayload) },
-    });
+    const checkoutPayload = created.checkoutPayload;
 
     // ---------- 5. เรียก gateway ด้วย payload ที่เตรียมไว้ ----------
     let session: CheckoutSessionResult;
@@ -222,8 +225,16 @@ export class TicketService {
     }
 
     // ---------- 6. บันทึกผลจาก gateway ----------
-    const updated = await prisma.payment.update({
-      where: { paymentId: created.payment.paymentId },
+    // ใช้ conditional update: เขียนได้เฉพาะตอนที่รายการยัง "เปิด" อยู่และยังไม่มี gateway reference
+    // - ถ้าระหว่างนี้มีคำขออื่นไปยืนยันว่าจ่ายแล้ว (เช่น US6-3 ประมวลผล webhook)
+    //   สถานะจะเป็น Paid แล้ว -> ห้ามเขียนย้อนกลับเป็น Pending
+    // - ถ้าระหว่างนี้มีอีกคำขอไปกู้ checkout ได้ก่อน -> gateway reference ของรายการนั้นต้องไม่ถูกทับ
+    const applied = await prisma.payment.updateMany({
+      where: {
+        paymentId: created.payment.paymentId,
+        status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        gatewayRef: null,
+      },
       data: {
         gatewayRef: session.gatewayRef,
         checkoutUrl: session.checkoutUrl,
@@ -231,6 +242,29 @@ export class TicketService {
         status: PaymentStatus.PENDING,
       },
     });
+
+    if (applied.count === 0) {
+      // รายการถูกปิดไปแล้วระหว่างที่เราคุยกับ gateway
+      // -> โหลดสถานะล่าสุดมาตอบ ห้ามเขียนทับ
+      const latest = await prisma.payment.findUnique({
+        where: { paymentId: created.payment.paymentId },
+      });
+      if (latest) {
+        return this.handleExistingPayment(latest, prisma, gateway, now);
+      }
+    }
+
+    const updated = await prisma.payment.findUnique({
+      where: { paymentId: created.payment.paymentId },
+    });
+
+    if (!updated) {
+      throw {
+        status: 500,
+        code: 'PAYMENT_NOT_FOUND',
+        message: `Payment ${created.payment.paymentId} disappeared during the checkout call`,
+      } as TicketPurchaseError;
+    }
 
     return {
       ticketId: created.ticket.ticketId,
@@ -240,9 +274,9 @@ export class TicketService {
       currency: updated.currency,
       status: updated.status,
       ticketStatus: created.ticket.status,
-      expiresAt: updated.expiresAt.toISOString(),
-      ticketStartDateTime: created.ticket.startDateTime.toISOString(),
-      ticketEndDateTime: created.ticket.endDateTime.toISOString(),
+      expiresAt: new Date(updated.expiresAt).toISOString(),
+      ticketStartDateTime: new Date(created.ticket.startDateTime).toISOString(),
+      ticketEndDateTime: new Date(created.ticket.endDateTime).toISOString(),
       replayed: false,
     };
   }
@@ -609,8 +643,14 @@ export class TicketService {
       // -> gateway จะคืน session เดิม (ไม่สร้างใหม่ และไม่ปฏิเสธเพราะพารามิเตอร์ตรงกัน)
       const session = await gateway.createCheckoutSession(this.toGatewayInput(payload));
 
-      return await prisma.payment.update({
-        where: { paymentId: payment.paymentId },
+      // conditional update: ห้ามเขียนทับรายการที่ถูกปิดไปแล้ว (เช่น จ่ายแล้ว)
+      // และห้ามทับ gateway reference ที่ถูกกู้มาเรียบร้อยแล้ว
+      const applied = await prisma.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+          gatewayRef: null,
+        },
         data: {
           gatewayRef: session.gatewayRef,
           checkoutUrl: session.checkoutUrl,
@@ -618,13 +658,26 @@ export class TicketService {
           status: PaymentStatus.PENDING,
         },
       });
+
+      if (applied.count === 0) {
+        // รายการถูกปิดไปแล้วระหว่างที่เราคุยกับ gateway -> คืนสถานะล่าสุด
+        return await prisma.payment.findUnique({
+          where: { paymentId: payment.paymentId },
+        });
+      }
+
+      return await prisma.payment.findUnique({
+        where: { paymentId: payment.paymentId },
+      });
     } catch (error) {
       // กู้ไม่ได้ -> เก็บสถานะรอตรวจสอบไว้ ห้ามสร้างรายการใหม่
+      // (ถ้ามี gateway reference แล้ว แปลว่ามีคำขออื่นกู้สำเร็จไปแล้ว -> ไม่ต้องแตะ)
       console.error(`[TicketService] Could not reconcile payment #${payment.paymentId}:`, error);
       await prisma.payment.updateMany({
         where: {
           paymentId: payment.paymentId,
           status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+          gatewayRef: null,
         },
         data: { status: PaymentStatus.UNCONFIRMED },
       });
@@ -659,7 +712,13 @@ export class TicketService {
 
     try {
       await prisma.payment.updateMany({
-        where: { paymentId, status: PaymentStatus.PENDING },
+        where: {
+          paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+          // ถ้ามี gateway reference แล้ว แปลว่ามีคำขออื่นกู้สำเร็จไปแล้ว
+          // -> ไม่ต้องเขียนทับสถานะของมัน
+          gatewayRef: null,
+        },
         data: {
           status: outcomeUnknown ? PaymentStatus.UNCONFIRMED : PaymentStatus.FAILED,
           // ถ้า gateway ปฏิเสธชัดเจน -> ไม่มี checkout ค้าง -> ปล่อยช่องให้ซื้อใหม่ได้

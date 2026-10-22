@@ -74,24 +74,24 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 
 ### ตาราง `payment`
 
-| คอลัมน์                 | ชนิด                           | หมายเหตุ                                                               |
-| ----------------------- | ------------------------------ | ---------------------------------------------------------------------- |
-| `paymentid`             | SERIAL PK                      | ใช้เป็น `reference` ที่ส่งให้ gateway                                  |
-| `ticketid`              | INTEGER FK → `ticket.ticketid` | `ON DELETE CASCADE`                                                    |
-| `uid`                   | INTEGER                        | denormalize จาก ticket เพื่อ query "รายการของฉัน" ไม่ต้อง join         |
-| `amount_satang`         | INTEGER                        | ยอดเงินหน่วยสตางค์                                                     |
-| `currency`              | VARCHAR(3)                     | default `THB`                                                          |
-| `status`                | `payment_status_enum`          | `Pending` / `Unconfirmed` / `Paid` / `Failed` / `Expired` / `Refunded` |
-| `gateway`               | VARCHAR(32)                    | `stripe` — รองรับการมีหลาย provider ในอนาคต                            |
-| `gateway_ref`           | VARCHAR(255)                   | Stripe Checkout Session ID ใช้จับคู่ webhook                           |
-| `client_key`            | VARCHAR(64)                    | key ที่ client ส่งมา (สูงสุด 64 ตัว)                                   |
-| `idempotency_key`       | VARCHAR(128)                   | key เต็ม `user_<uid>_<client_key>` ที่ส่งต่อให้ gateway                |
-| `checkout_url`          | TEXT                           | URL ที่ frontend redirect ไปชำระเงิน                                   |
-| `checkout_payload`      | TEXT (JSON)                    | payload ของ checkout ที่ "เตรียมไว้" ใช้ซ้ำตอน retry (หัวข้อ 4)        |
-| `ticket_validity_hours` | INTEGER                        | snapshot อายุตั๋วตอนซื้อ                                               |
-| `expires_at`            | TIMESTAMP                      | หมดอายุของ **payment attempt** — ค่าเดียวกับที่ส่งให้ gateway          |
-| `open_uid`              | INTEGER UNIQUE                 | ช่อง "รายการที่เปิดอยู่" ของผู้ใช้ (ดูหัวข้อ 4)                        |
-| `paid_at`               | TIMESTAMP                      | เวลาที่ชำระเงินสำเร็จ (US6-3 เป็นคนเขียน)                              |
+| คอลัมน์                 | ชนิด                           | หมายเหตุ                                                                                                          |
+| ----------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `paymentid`             | SERIAL PK                      | ใช้เป็น `reference` ที่ส่งให้ gateway                                                                             |
+| `ticketid`              | INTEGER FK → `ticket.ticketid` | `ON DELETE CASCADE`                                                                                               |
+| `uid`                   | INTEGER                        | denormalize จาก ticket เพื่อ query "รายการของฉัน" ไม่ต้อง join                                                    |
+| `amount_satang`         | INTEGER                        | ยอดเงินหน่วยสตางค์                                                                                                |
+| `currency`              | VARCHAR(3)                     | default `THB`                                                                                                     |
+| `status`                | `payment_status_enum`          | `Pending` / `Unconfirmed` / `Paid` / `Failed` / `Expired` / `Refunded`                                            |
+| `gateway`               | VARCHAR(32)                    | `stripe` — รองรับการมีหลาย provider ในอนาคต                                                                       |
+| `gateway_ref`           | VARCHAR(255)                   | Stripe Checkout Session ID ใช้จับคู่ webhook                                                                      |
+| `client_key`            | VARCHAR(64)                    | key ที่ client ส่งมา (สูงสุด 64 ตัว)                                                                              |
+| `idempotency_key`       | VARCHAR(128)                   | key เต็ม `user_<uid>_<client_key>` ที่ส่งต่อให้ gateway                                                           |
+| `checkout_url`          | TEXT                           | URL ที่ frontend redirect ไปชำระเงิน                                                                              |
+| `checkout_payload`      | TEXT (JSON)                    | payload ของ checkout ที่ "เตรียมไว้" ใช้ซ้ำตอน retry — บันทึกภายใน transaction เดียวกับ Ticket/Payment (หัวข้อ 4) |
+| `ticket_validity_hours` | INTEGER                        | snapshot อายุตั๋วตอนซื้อ                                                                                          |
+| `expires_at`            | TIMESTAMP                      | หมดอายุของ **payment attempt** — ค่าเดียวกับที่ส่งให้ gateway                                                     |
+| `open_uid`              | INTEGER UNIQUE                 | ช่อง "รายการที่เปิดอยู่" ของผู้ใช้ (ดูหัวข้อ 4)                                                                   |
+| `paid_at`               | TIMESTAMP                      | เวลาที่ชำระเงินสำเร็จ (US6-3 เป็นคนเขียน)                                                                         |
 
 **Unique constraints (ตัวตั้งกันรายการซ้ำอยู่ที่ระดับ DB ไม่พึ่งการเช็คในแอปพลิเคชัน):**
 
@@ -218,6 +218,19 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
             -> เจอรายการเดิม -> ยิง gateway ซ้ำด้วย payload ชุดเดิม + key เดิม
             -> ได้ session เดิมกลับมา -> payment = Pending + checkoutUrl (กู้สำเร็จ)
 ```
+
+**ข้อสำคัญ — payload ถูกบันทึก "ภายใน transaction" เดียวกับ Ticket/Payment**
+ทั้ง Ticket, Payment และ `checkout_payload` ถูก commit พร้อมกัน
+ถ้าการเขียน payload ล้มเหลว → transaction rollback ทั้งหมด
+ไม่เหลือรายการที่จองช่อง (`open_uid`) ไว้แต่ไม่มี payload ให้กู้
+และไม่มีการเรียก gateway เลย (เรียกหลัง commit เท่านั้น)
+
+**ข้อสำคัญ — ห้ามเขียนทับรายการที่จบแล้วด้วย response ที่มาช้า**
+ทุกการอัปเดตหลังคุยกับ gateway ใช้ conditional update (`updateMany`) ที่มีเงื่อนไข:
+`paymentId` + สถานะเดิมเป็น `Pending`/`Unconfirmed` + `gateway_ref IS NULL`
+→ response ที่มาช้าไม่สามารถเขียนสถานะ `Paid` กลับเป็น `Pending`
+และไม่ทับ gateway reference ที่ถูกกู้ไปแล้ว
+ถ้าอัปเดตไม่ได้ (count = 0) → โหลดข้อมูลล่าสุดมาตอบแทน
 
 **ข้อสำคัญ — ห้ามปิดรายการจากเวลาฝั่ง DB อย่างเดียว**
 เวลาในฐานข้อมูลอาจผ่านไปแล้ว แต่ checkout ที่ gateway สร้างไว้ยังเปิดอยู่
