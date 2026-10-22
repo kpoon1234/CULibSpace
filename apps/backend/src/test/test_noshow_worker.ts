@@ -97,8 +97,10 @@ async function runTests() {
     let createdManageScore: any = null;
 
     const mockPrisma = {
+      $queryRaw: async () => [],
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
+        findFirst: async () => null,
         update: async ({ where, data }: any) => {
           updatedBooking = { where, data };
           return { bookingId: where.bookingId, status: data.status };
@@ -172,8 +174,10 @@ async function runTests() {
     let tableUpdateCalled = false;
 
     const mockPrisma = {
+      $queryRaw: async () => [],
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
+        findFirst: async () => null,
         update: async () => ({}),
         updateMany: async () => ({ count: 1 }),
       },
@@ -205,14 +209,48 @@ async function runTests() {
     assert(false, 'Preserve CLOSED table status', err?.message);
   }
 
+  // Test 6b: A different booking may already have checked in early on the same table.
+  try {
+    let tableUpdate: any = null;
+    const mockPrisma = {
+      $queryRaw: async () => [],
+      $transaction: async (fn: any) => fn(mockPrisma),
+      booking: {
+        updateMany: async () => ({ count: 1 }),
+        findFirst: async ({ where }: any) =>
+          where.status === BookingStatus.ACTIVE ? { bookingId: 999 } : null,
+      },
+      table: {
+        findUnique: async () => ({ status: TableStatus.OCCUPIED }),
+        update: async ({ data }: any) => {
+          tableUpdate = data;
+        },
+      },
+      user: { findUnique: async () => null },
+    };
+
+    const result = await NoShowService.processNoShowBooking(
+      { bookingId: 105, uid: 42, tableId: 8 },
+      mockPrisma
+    );
+    assert(
+      result && tableUpdate?.status === TableStatus.OCCUPIED,
+      'No-show does not release another checked-in booking’s table'
+    );
+  } catch (err: any) {
+    assert(false, 'Preserve early checked-in booking during no-show', err?.message);
+  }
+
   // Test 7: Score deduction never drops below 0
   try {
     let finalUserScore: number | null = null;
     let auditData: any = null;
 
     const mockPrisma = {
+      $queryRaw: async () => [],
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
+        findFirst: async () => null,
         update: async () => ({}),
         updateMany: async () => ({ count: 1 }),
       },
@@ -253,8 +291,9 @@ async function runTests() {
   // Test 8: An audit write failure must be propagated from the transaction callback.
   try {
     const mockPrisma = {
+      $queryRaw: async () => [],
       $transaction: async (fn: any) => fn(mockPrisma),
-      booking: { updateMany: async () => ({ count: 1 }) },
+      booking: { updateMany: async () => ({ count: 1 }), findFirst: async () => null },
       table: {
         findUnique: async () => ({ status: TableStatus.CLOSED }),
       },

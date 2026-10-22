@@ -13,6 +13,7 @@ import adminRoutes from './routes/adminRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
+import { BookingService } from './services/bookingService.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -26,6 +27,10 @@ app.use(
     credentials: true,
   })
 );
+// [US6-1] หมายเหตุ: webhook ของ Payment Gateway (POST /api/tickets/payment/webhook)
+// อยู่ในขอบเขตของ US6-3 และต้อง mount ก่อน express.json() เพื่อให้ได้ raw body
+// สำหรับตรวจสอบลายเซ็น -> ยังไม่ mount ใน PR นี้
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use((req, _res, next) => {
@@ -69,4 +74,7 @@ app.listen(PORT, () => {
 
   // 3. สั่งเริ่มการทำงานของ No-show Detection Cron Worker (ทุก 1 นาที)
   NoShowService.startNoShowWorker();
+
+  // 4. สั่งเริ่มการทำงานของ Booking Completion Worker (ทุก 30 วินาที เมื่อหมดเวลาจอง เปลี่ยน ACTIVE -> COMPLETED และคืนโต๊ะ)
+  BookingService.startCompletionWorker();
 });
