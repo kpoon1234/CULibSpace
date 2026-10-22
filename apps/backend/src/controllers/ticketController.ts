@@ -125,6 +125,34 @@ export class TicketController {
       handleError(res, error, 'Error purchasing ticket');
     }
   }
+  /**
+   * [US6-2] GET /api/tickets/history
+   * API สำหรับดูรายการตั๋วและประวัติการชำระเงินของผู้เข้าชมภายนอก
+   */
+  static async getHistory(req: Request, res: Response) {
+    try {
+      // ดึง userId จาก JWT Token ที่ผ่านการตรวจสอบแล้ว
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.user?.uid;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, error: 'Unauthorized: User session required' });
+      }
+
+      // ส่ง userId ไปหาประวัติตั๋ว
+      const tickets = await TicketService.getTicketHistory(userId);
+
+      return res.status(200).json({
+        success: true,
+        data: tickets,
+      });
+    } catch (error: any) {
+      console.error('[TicketController] Error fetching ticket history:', error);
+      return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  }
 }
 
 export default TicketController;

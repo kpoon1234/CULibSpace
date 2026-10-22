@@ -8,7 +8,6 @@ import {
 } from './paymentGateway.js';
 
 const defaultPrisma = new PrismaClient();
-
 /** รหัส gateway ที่บันทึกลงฐานข้อมูล */
 export const PAYMENT_GATEWAY_NAME = 'stripe';
 
@@ -804,6 +803,28 @@ export class TicketService {
       retryable: true,
       ...previousPayment,
     } as TicketPurchaseError;
+  }
+  /**
+   * [US6-2] Retrieve ticket details, valid time period, and payment history
+   */
+  static async getTicketHistory(userId: number, prisma: any = defaultPrisma) {
+    // คิวรีหาตั๋วทั้งหมดของ uid นี้ พร้อมดึงประวัติการชำระเงินที่เชื่อมโยงกันอยู่
+    const tickets = await prisma.ticket.findMany({
+      where: {
+        uid: userId,
+      },
+      include: {
+        // ดึงประวัติการจ่ายเงินของตั๋วใบนั้นมาด้วย เรียงจากรายการล่าสุด
+        payment: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc', // เรียงใบสั่งซื้อตั๋วจากล่าสุดขึ้นก่อน
+      },
+    });
+
+    return tickets;
   }
 }
 
