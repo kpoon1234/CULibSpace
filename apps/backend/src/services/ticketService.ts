@@ -8,7 +8,7 @@ import {
 } from './paymentGateway.js';
 
 const defaultPrisma = new PrismaClient();
-
+const prisma = new PrismaClient();
 /** รหัส gateway ที่บันทึกลงฐานข้อมูล */
 export const PAYMENT_GATEWAY_NAME = 'stripe';
 
@@ -804,6 +804,43 @@ export class TicketService {
       retryable: true,
       ...previousPayment,
     } as TicketPurchaseError;
+  }
+  /**
+   * [US6-2] ดึงตั๋วทั้งหมดของผู้ใช้พร้อมประวัติการชำระเงิน
+   */
+  static async getMyTickets(uid: number) {
+    // query ดึงข้อมูลตั๋วพร้อม payment ที่ผูกกับตั๋ว
+    const tickets = await prisma.ticket.findMany({
+      where: { uid: uid },
+      include: {
+        payments: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            paymentId: true,
+            amountSatang: true,
+            currency: true,
+            status: true,
+            gateway: true,
+            ticketValidityHours: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // เนื่องจากดึงมาด้วย include Prisma จะรับรู้ Type ว่า ticket มี payments แล้ว
+    // ถ้ายังติดตัวแดงเรื่อง Type สามารถใส่ any ในวงเล็บได้เป็น (ticket: any)
+    return tickets.map((ticket: any) => ({
+      ticketId: ticket.ticketId,
+      status: ticket.status,
+      startDateTime: ticket.startDateTime,
+      endDateTime: ticket.endDateTime,
+      createdAt: ticket.createdAt,
+      // ใส่ fallback [] กรณีที่ไม่มีประวัติชำระเงิน
+      payments: ticket.payments || [],
+    }));
   }
 }
 

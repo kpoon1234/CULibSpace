@@ -125,6 +125,30 @@ export class TicketController {
       handleError(res, error, 'Error purchasing ticket');
     }
   }
+  /**
+   * GET /api/tickets/my-tickets
+   * [US6-2] ดึงรายละเอียดตั๋วและประวัติการชำระเงินของผู้เข้าชมภายนอก
+   */
+  static async getMyTickets(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const uid = authReq.user?.uid;
+
+      if (!uid) {
+        res.status(401).json({ success: false, error: 'Unauthorized: User session required' });
+        return;
+      }
+
+      const tickets = await TicketService.getMyTickets(uid);
+
+      res.status(200).json({
+        success: true,
+        data: tickets,
+      });
+    } catch (error: any) {
+      handleError(res, error, 'Error fetching user tickets');
+    }
+  }
 }
 
 export default TicketController;
