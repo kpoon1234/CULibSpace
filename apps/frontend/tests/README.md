@@ -40,3 +40,21 @@ idempotency mechanism or a cross-tab lock. The existing backend token/owner chec
 and transaction remain authoritative. `my-active` is only positive confirmation:
 it may return a different reservation, so absence is never treated as proof that
 the POST rolled back.
+
+## Admin score modal: stale-response manual regression
+
+Use mocked adjustment responses (or disposable test data), with the real
+`AdminUsersPage` and `ScoreAdjustmentModal`. Allow switching the selected target
+in the test harness while an older request is deliberately held pending.
+
+1. Submit for A, switch to B and submit for B. Resolve A first: B must remain open
+   and submitting, without an A success notice or refresh. Resolve B: only now
+   should the modal close, display B's success notice and refresh the list.
+2. Submit for A, switch to B, then reopen A and submit a new request. Resolve the
+   old A request first: the new A modal and its pending submission must remain
+   untouched. Resolve the new A request: it should close and refresh normally.
+3. The parent compares the current modal target by identity, not UID alone. Each
+   opening creates a fresh target object, so A -> B -> A cannot accept A's old
+   callback just because the UID matches again.
+
+These browser checks are manual, not part of the automated `npm test` suite.
