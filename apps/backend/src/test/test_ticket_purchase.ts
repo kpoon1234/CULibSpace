@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import express from 'express';
+import type { AddressInfo } from 'node:net';
 import { PaymentStatus, TicketStatus } from '@prisma/client';
 import type { PaymentGatewayErrorCode } from '../services/paymentGateway.js';
 
@@ -14,7 +16,7 @@ const { TicketController } = await import('../controllers/ticketController.js');
 const { PaymentGatewayError } = await import('../services/paymentGateway.js');
 const { getPaymentGateway } = await import('../services/paymentGatewayFactory.js');
 const { default: ticketRoutes } = await import('../routes/ticketRoutes.js');
-const { default: ticketWebhookRoutes } = await import('../routes/ticketWebhookRoutes.js');
+const { signJwt } = await import('../utils/jwt.js');
 
 const PRICE_SATANG = 5000; // 50.00 THB
 const VALIDITY_HOURS = 2;
@@ -36,7 +38,12 @@ function fakeGateway(overrides: Record<string, any> = {}) {
       };
     },
     async parseWebhookEvent() {
-      return { type: 'payment.unknown', gatewayRef: '', raw: {} };
+      return {
+        type: 'payment.unknown',
+        gatewayRef: '',
+        paymentState: 'unknown',
+        raw: {},
+      };
     },
     ...overrides,
   };
@@ -58,13 +65,7 @@ function failingGateway(code: PaymentGatewayErrorCode, retryable: boolean) {
 // ---------------------------------------------------------------------------
 // Mock prisma
 // ---------------------------------------------------------------------------
-function mockPrisma(
-  options: {
-    user?: any;
-    config?: any;
-    payments?: any[];
-  } = {}
-) {
+function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}) {
   const state = {
     user:
       options.user === undefined
@@ -90,11 +91,18 @@ function mockPrisma(
     tickets: [] as any[],
     nextPaymentId: 100,
     nextTicketId: 500,
-    calls: {
-      ticketCreate: 0,
-      paymentCreate: 0,
-      paymentUpdate: 0,
-    },
+    calls: { ticketCreate: 0, paymentCreate: 0 },
+    // ใช้จำลอง P2002 (unique violation) เพื่อทดสอบ race condition
+    throwP2002OnCreate: false,
+  };
+
+  const violatesUnique = (data: any) => {
+    if (!state.throwP2002OnCreate) return false;
+    state.throwP2002OnCreate = false;
+    const error: any = new Error('Unique constraint failed');
+    error.code = 'P2002';
+    error.meta = { target: ['uid', 'client_key'] };
+    return error;
   };
 
   const client: any = {
@@ -102,17 +110,20 @@ function mockPrisma(
       findUnique: async () => state.user,
     },
     systemConfig: {
-      findFirst: async () => state.config,
+      findFirst: async () => {
+        if (state.config === 'THROW') {
+          throw new Error('database connection lost');
+        }
+        return state.config;
+      },
     },
     payment: {
-      findUnique: async ({ where }: any) =>
-        state.payments.find((p) => p.idempotencyKey === where.idempotencyKey) ?? null,
       findFirst: async ({ where }: any) => {
         const list = state.payments
           .filter((p) => {
             if (where.uid !== undefined && p.uid !== where.uid) return false;
-            if (where.status !== undefined && p.status !== where.status) return false;
-            if (where.createdAt?.gte && p.createdAt < where.createdAt.gte) return false;
+            if (where.clientKey !== undefined && p.clientKey !== where.clientKey) return false;
+            if (where.status?.in && !where.status.in.includes(p.status)) return false;
             return true;
           })
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -120,11 +131,28 @@ function mockPrisma(
       },
       create: async ({ data }: any) => {
         state.calls.paymentCreate++;
+        const violation = violatesUnique(data);
+        if (violation) throw violation;
+
+        // emulate openUid unique: ไม่มีผู้ใช้คนนี้มีรายการที่เปิดอยู่พร้อมกัน
+        const hasOpen = state.payments.some(
+          (p) =>
+            p.uid === data.uid &&
+            (p.status === PaymentStatus.PENDING || p.status === PaymentStatus.UNCONFIRMED)
+        );
+        if (data.openUid !== null && data.openUid !== undefined && hasOpen) {
+          const error: any = new Error('Unique constraint failed');
+          error.code = 'P2002';
+          error.meta = { target: ['open_uid'] };
+          throw error;
+        }
+
         const payment = {
           paymentId: state.nextPaymentId++,
           gatewayRef: null,
           checkoutUrl: null,
           paidAt: null,
+          openUid: data.openUid ?? null,
           createdAt: new Date(),
           updatedAt: new Date(),
           ...data,
@@ -133,19 +161,24 @@ function mockPrisma(
         return payment;
       },
       update: async ({ where, data }: any) => {
-        state.calls.paymentUpdate++;
         const payment = state.payments.find((p) => p.paymentId === where.paymentId);
         if (!payment) throw new Error('payment not found');
-        Object.assign(payment, data);
+        applyData(payment, data);
         return payment;
       },
       updateMany: async ({ where, data }: any) => {
-        const targets = state.payments.filter(
-          (p) =>
-            (where.paymentId === undefined || p.paymentId === where.paymentId) &&
-            (where.status === undefined || p.status === where.status)
-        );
-        targets.forEach((t) => Object.assign(t, data));
+        const targets = state.payments.filter((p) => {
+          if (where.paymentId !== undefined && p.paymentId !== where.paymentId) return false;
+          if (where.status !== undefined) {
+            if (where.status.in) {
+              if (!where.status.in.includes(p.status)) return false;
+            } else if (p.status !== where.status) {
+              return false;
+            }
+          }
+          return true;
+        });
+        targets.forEach((t) => applyData(t, data));
         return { count: targets.length };
       },
     },
@@ -163,55 +196,98 @@ function mockPrisma(
       },
       findUnique: async ({ where }: any) =>
         state.tickets.find((t) => t.ticketId === where.ticketId) ?? null,
-      update: async ({ where, data }: any) => {
-        const ticket = state.tickets.find((t) => t.ticketId === where.ticketId);
-        if (!ticket) throw new Error('ticket not found');
-        Object.assign(ticket, data);
-        return ticket;
-      },
-      updateMany: async ({ where, data }: any) => {
-        const targets = state.tickets.filter(
-          (t) =>
-            (where.ticketId === undefined || t.ticketId === where.ticketId) &&
-            (where.status === undefined || t.status === where.status)
-        );
-        targets.forEach((t) => Object.assign(t, data));
-        return { count: targets.length };
-      },
-      findMany: async ({ where }: any) =>
-        state.tickets
-          .filter((t) => t.uid === where.uid)
-          .map((t) => ({
-            ...t,
-            payments: state.payments.filter((p) => p.ticketId === t.ticketId),
-          })),
     },
     $transaction: async (callback: any) => {
-      if (typeof callback === 'function') return await callback(client);
-      return await Promise.all(callback);
+      if (typeof callback !== 'function') {
+        return await Promise.all(callback);
+      }
+
+      // จำลอง rollback ของ transaction จริง:
+      // แต่ละ transaction ย้อนกลับเฉพาะแถวที่ตัวเองสร้าง (ไม่กระทบของ transaction อื่น)
+      const createdTickets: any[] = [];
+      const createdPayments: any[] = [];
+
+      const tx = {
+        ticket: {
+          create: async (args: any) => {
+            const ticket = await client.ticket.create(args);
+            createdTickets.push(ticket);
+            return ticket;
+          },
+          findUnique: (args: any) => client.ticket.findUnique(args),
+        },
+        payment: {
+          create: async (args: any) => {
+            const payment = await client.payment.create(args);
+            createdPayments.push(payment);
+            return payment;
+          },
+          findFirst: (args: any) => client.payment.findFirst(args),
+        },
+      };
+
+      try {
+        return await callback(tx);
+      } catch (error) {
+        state.tickets = state.tickets.filter(
+          (t) => !createdTickets.some((c) => c.ticketId === t.ticketId)
+        );
+        state.payments = state.payments.filter(
+          (p) => !createdPayments.some((c) => c.paymentId === p.paymentId)
+        );
+        throw error;
+      }
     },
   };
 
   return { client, state };
 }
 
-function mockResponse() {
-  return {
-    statusCode: 200,
-    body: null as any,
-    status(code: number) {
-      this.statusCode = code;
-      return this;
-    },
-    json(body: unknown) {
-      this.body = body;
-      return this;
-    },
-  };
+/**
+ * Prisma จะข้าม field ที่ค่าเป็น undefined (แปลว่า "ไม่ได้แก้") -> จำลองพฤติกรรมเดียวกัน
+ */
+function applyData(target: any, data: Record<string, any>) {
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      target[key] = value;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Route level test helper
+// ---------------------------------------------------------------------------
+async function withServer(
+  handler: (app: express.Express) => void,
+  run: (baseUrl: string) => Promise<void>
+) {
+  const app = express();
+  app.use(express.json());
+  handler(app);
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address() as AddressInfo;
+  try {
+    await run(`http://127.0.0.1:${port}`);
+  } finally {
+    server.close();
+  }
+}
+
+function outsiderToken(uid = 7) {
+  return signJwt({
+    uid,
+    email: 'visitor@example.com',
+    firstname: 'Vis',
+    lastname: 'Itor',
+    role: 'OUTSIDER',
+    userType: 'THAI',
+    isProfileComplete: true,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tests: happy path
 // ---------------------------------------------------------------------------
 
 test('purchase creates an UNPAID ticket + PENDING payment and returns the checkout url', async () => {
@@ -227,13 +303,13 @@ test('purchase creates an UNPAID ticket + PENDING payment and returns the checko
   assert.equal(result.currency, 'THB');
   assert.equal(result.replayed, false);
 
-  // มี 1 ticket + 1 payment
   assert.equal(state.calls.ticketCreate, 1);
   assert.equal(state.calls.paymentCreate, 1);
   assert.equal(state.tickets[0].status, TicketStatus.UNPAID);
   assert.equal(state.payments[0].status, PaymentStatus.PENDING);
-  // gateway reference ถูกบันทึกกลับมา
   assert.equal(state.payments[0].gatewayRef, 'cs_test_1');
+  // จองช่องรายการที่เปิดอยู่ของผู้ใช้ไว้
+  assert.equal(state.payments[0].openUid, 7);
 });
 
 test('backend decides the price and the ticket window (client cannot override)', async () => {
@@ -248,16 +324,58 @@ test('backend decides the price and the ticket window (client cannot override)',
 
   const result = await TicketService.purchase({ uid: 7 }, gateway as any, client);
 
-  // gateway ได้รับราคาจาก SystemConfig ไม่ใช่จาก client
   assert.equal(gateway.calls[0].amountSatang, 12345);
   assert.equal(gateway.calls[0].currency, 'THB');
   assert.equal(result.amountSatang, 12345);
 
-  // อายุตั๋ว = validHours นาที... ชั่วโมง นับจากเวลาซื้อ
   const windowMs =
     new Date(result.ticketEndDateTime).getTime() - new Date(result.ticketStartDateTime).getTime();
   assert.equal(windowMs, 4 * 60 * 60 * 1000);
 });
+
+test('the ticket validity window is snapshotted onto the payment at purchase time', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  await TicketService.purchase({ uid: 7 }, gateway as any, client);
+
+  // ค่าที่ snapshot ไว้ จะไม่เปลี่ยนแม้ config จะถูกแก้ทีหลัง
+  assert.equal(state.payments[0].ticketValidityHours, VALIDITY_HOURS);
+});
+
+test('the reference sent to the gateway is the paymentId', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  const result = await TicketService.purchase({ uid: 7 }, gateway as any, client);
+
+  assert.equal(gateway.calls[0].reference, String(result.paymentId));
+  assert.equal(gateway.calls[0].reference, String(state.payments[0].paymentId));
+});
+
+test('the idempotency key sent to the gateway fits the DB column', async () => {
+  const { client } = mockPrisma();
+  const gateway = fakeGateway();
+
+  await TicketService.purchase({ uid: 7, idempotencyKey: 'a'.repeat(64) }, gateway as any, client);
+
+  const key = gateway.calls[0].idempotencyKey;
+  assert.ok(key.length <= 128, `idempotency key too long: ${key.length}`);
+  assert.ok(key.endsWith('a'.repeat(64)));
+});
+
+test('the client key stored in the DB fits the DB column', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  await TicketService.purchase({ uid: 7, idempotencyKey: 'b'.repeat(64) }, gateway as any, client);
+
+  assert.equal(state.payments[0].clientKey.length, 64);
+});
+
+// ---------------------------------------------------------------------------
+// Tests: authorization & validation
+// ---------------------------------------------------------------------------
 
 test('rejects non-outside users with 403 NOT_AN_OUTSIDE_USER', async () => {
   const { client } = mockPrisma({
@@ -322,6 +440,72 @@ test('rejects outside user without identity document with 403 OUTSIDE_PROFILE_IN
   );
 });
 
+// ---------------------------------------------------------------------------
+// Tests: config failures must NOT fall back to a default price
+// ---------------------------------------------------------------------------
+
+test('fails with 503 CONFIG_UNAVAILABLE when the config query errors (no fallback price)', async () => {
+  const { client, state } = mockPrisma({ config: 'THROW' as any });
+  const gateway = fakeGateway();
+
+  await assert.rejects(
+    () => TicketService.purchase({ uid: 7 }, gateway as any, client),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.equal(err.code, 'CONFIG_UNAVAILABLE');
+      return true;
+    }
+  );
+
+  // ไม่มีการสร้าง ticket / payment / เรียก gateway เลย
+  assert.equal(state.calls.ticketCreate, 0);
+  assert.equal(state.calls.paymentCreate, 0);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test('fails with 503 CONFIG_UNAVAILABLE when no config row exists (no fallback price)', async () => {
+  const { client, state } = mockPrisma({ config: null });
+  const gateway = fakeGateway();
+
+  await assert.rejects(
+    () => TicketService.purchase({ uid: 7 }, gateway as any, client),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.equal(err.code, 'CONFIG_UNAVAILABLE');
+      return true;
+    }
+  );
+
+  assert.equal(state.calls.paymentCreate, 0);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test('fails with 503 INVALID_TICKET_PRICE when the configured price is invalid', async () => {
+  const { client } = mockPrisma({
+    config: {
+      ticketPriceSatang: 0,
+      ticketValidityHours: VALIDITY_HOURS,
+      paymentCheckoutExpiryMinutes: 30,
+    },
+  });
+  const gateway = fakeGateway();
+
+  await assert.rejects(
+    () => TicketService.purchase({ uid: 7 }, gateway as any, client),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.equal(err.code, 'INVALID_TICKET_PRICE');
+      return true;
+    }
+  );
+
+  assert.equal(gateway.calls.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Tests: duplicate prevention
+// ---------------------------------------------------------------------------
+
 test('same idempotency key replays the existing purchase instead of creating a new one', async () => {
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
@@ -340,13 +524,12 @@ test('same idempotency key replays the existing purchase instead of creating a n
   assert.equal(first.paymentId, second.paymentId);
   assert.equal(first.ticketId, second.ticketId);
   assert.equal(second.replayed, true);
-  // ไม่มีการสร้าง ticket / payment / เรียก gateway เพิ่ม
   assert.equal(state.calls.ticketCreate, 1);
   assert.equal(state.calls.paymentCreate, 1);
   assert.equal(gateway.calls.length, 1);
 });
 
-test('double click without idempotency key replays the recent pending payment', async () => {
+test('double click without idempotency key replays the open payment', async () => {
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
 
@@ -359,26 +542,100 @@ test('double click without idempotency key replays the recent pending payment', 
   assert.equal(gateway.calls.length, 1);
 });
 
-test('gateway failure marks the payment FAILED and never activates the ticket', async () => {
+test('a second purchase is blocked while the first one is still open', async () => {
   const { client, state } = mockPrisma();
-  const gateway = failingGateway('GATEWAY_UNAVAILABLE', true);
+  const gateway = fakeGateway();
+
+  await TicketService.purchase({ uid: 7 }, gateway as any, client);
+  // คนละ key แต่ผู้ใช้ยังมีรายการที่เปิดอยู่ -> ต้องได้รายการเดิม
+  const second = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'different-key' },
+    gateway as any,
+    client
+  );
+
+  assert.equal(second.replayed, true);
+  assert.equal(state.calls.paymentCreate, 1);
+  assert.equal(gateway.calls.length, 1);
+});
+
+test('P2002 from a concurrent insert is handled and replays the winning record', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  // จำลองว่า request อีกตัวชน unique constraint ตอน insert
+  state.throwP2002OnCreate = true;
+  // ...แต่มีรายการที่ชนะอยู่แล้วใน DB (สร้างไว้ล่วงหน้า)
+  state.payments.push({
+    paymentId: 999,
+    uid: 7,
+    clientKey: 'raced-key',
+    idempotencyKey: 'user_7_raced-key',
+    ticketId: 501,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.PENDING,
+    gateway: 'stripe',
+    gatewayRef: 'cs_existing',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_existing',
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    paidAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'raced-key' },
+    gateway as any,
+    client
+  );
+
+  assert.equal(result.paymentId, 999);
+  assert.equal(result.replayed, true);
+  assert.equal(result.checkoutUrl, 'https://checkout.stripe.com/c/pay/cs_existing');
+});
+
+test('concurrent purchases with the same key only create one payment', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  const [a, b] = await Promise.all([
+    TicketService.purchase({ uid: 7, idempotencyKey: 'same-key' }, gateway as any, client),
+    TicketService.purchase({ uid: 7, idempotencyKey: 'same-key' }, gateway as any, client),
+  ]);
+
+  // ทั้งสองคำขอต้องได้ payment เดียวกัน และต้องมี payment เพียงรายการเดียว
+  assert.equal(a.paymentId, b.paymentId);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Tests: gateway failure handling
+// ---------------------------------------------------------------------------
+
+test('a definitive gateway rejection marks the payment FAILED and frees the open slot', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = failingGateway('GATEWAY_REJECTED', false);
 
   await assert.rejects(
     () => TicketService.purchase({ uid: 7 }, gateway as any, client),
     (err: any) => {
-      assert.equal(err.status, 503);
-      assert.equal(err.code, 'GATEWAY_UNAVAILABLE');
-      assert.equal(err.retryable, true);
+      assert.equal(err.status, 502);
+      assert.equal(err.code, 'GATEWAY_REJECTED');
       return true;
     }
   );
 
-  // payment ถูกทำเครื่องหมาย FAILED, ticket ยังเป็น UNPAID
   assert.equal(state.payments[0].status, PaymentStatus.FAILED);
+  // ไม่มี checkout ค้าง -> ปล่อยช่องให้ซื้อใหม่ได้
+  assert.equal(state.payments[0].openUid, null);
   assert.equal(state.tickets[0].status, TicketStatus.UNPAID);
 });
 
-test('gateway timeout surfaces 504 GATEWAY_TIMEOUT and is retryable', async () => {
+test('a gateway timeout keeps the payment UNCONFIRMED (never FAILED)', async () => {
   const { client, state } = mockPrisma();
   const gateway = failingGateway('GATEWAY_TIMEOUT', true);
 
@@ -392,148 +649,281 @@ test('gateway timeout surfaces 504 GATEWAY_TIMEOUT and is retryable', async () =
     }
   );
 
-  assert.equal(state.payments[0].status, PaymentStatus.FAILED);
+  // gateway อาจสร้าง checkout สำเร็จแล้ว -> ห้ามตัดเป็น FAILED
+  assert.equal(state.payments[0].status, PaymentStatus.UNCONFIRMED);
+  // ยังค้องช่องไว้ ห้ามให้ซื้อใหม่จนกว่าจะ reconcile
+  assert.equal(state.payments[0].openUid, 7);
   assert.equal(state.tickets[0].status, TicketStatus.UNPAID);
 });
 
-test('payment webhook activates the ticket and shifts the validity window to the paid time', async () => {
+test('a retry after timeout reconciles the original payment instead of creating a new one', async () => {
+  const { client, state } = mockPrisma();
+
+  // ครั้งแรก timeout -> เก็บเป็น UNCONFIRMED
+  const failing = failingGateway('GATEWAY_TIMEOUT', true);
+  await assert.rejects(() =>
+    TicketService.purchase({ uid: 7, idempotencyKey: 'retry-key' }, failing as any, client)
+  );
+  assert.equal(state.payments[0].status, PaymentStatus.UNCONFIRMED);
+
+  // ครั้งที่สอง gateway ทำงานได้ -> ต้องกู้รายการเดิม ไม่ใช่สร้างใหม่
+  const working = fakeGateway();
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'retry-key' },
+    working as any,
+    client
+  );
+
+  assert.equal(result.paymentId, state.payments[0].paymentId);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 1);
+  assert.equal(state.payments[0].status, PaymentStatus.PENDING);
+  // เรียก gateway ด้วย idempotency key เดิม เพื่อให้ gateway คืน session เดิม
+  assert.equal(working.calls[0].idempotencyKey, state.payments[0].idempotencyKey);
+  assert.ok(result.checkoutUrl);
+});
+
+test('an expired open payment is closed and a new purchase is allowed', async () => {
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
 
-  const purchase = await TicketService.purchase({ uid: 7 }, gateway as any, client);
-  const paidAt = new Date('2026-11-01T10:00:00.000Z');
-
-  const result = await TicketService.confirmPayment(
-    'cs_test_1',
-    String(purchase.paymentId),
-    paidAt,
-    'succeeded',
-    client
-  );
-
-  assert.equal(result.applied, true);
-  assert.equal(state.payments[0].status, PaymentStatus.PAID);
-  assert.equal(state.payments[0].paidAt?.toISOString(), paidAt.toISOString());
-  assert.equal(state.tickets[0].status, TicketStatus.PAID);
-  assert.equal(state.tickets[0].startDateTime.toISOString(), paidAt.toISOString());
-  assert.equal(
-    state.tickets[0].endDateTime.getTime() - state.tickets[0].startDateTime.getTime(),
-    VALIDITY_HOURS * 60 * 60 * 1000
-  );
-  assert.equal(state.tickets[0].paymentDetail, 'cs_test_1');
-});
-
-test('duplicate webhook does not apply the payment twice', async () => {
-  const { client, state } = mockPrisma();
-  const gateway = fakeGateway();
-  const purchase = await TicketService.purchase({ uid: 7 }, gateway as any, client);
-
-  const first = await TicketService.confirmPayment(
-    'cs_test_1',
-    String(purchase.paymentId),
-    new Date(),
-    'succeeded',
-    client
-  );
-  const second = await TicketService.confirmPayment(
-    'cs_test_1',
-    String(purchase.paymentId),
-    new Date(),
-    'succeeded',
-    client
-  );
-
-  assert.equal(first.applied, true);
-  assert.equal(second.applied, false);
-  assert.equal(state.payments[0].status, PaymentStatus.PAID);
-});
-
-test('failed / expired webhook keeps the ticket unusable', async () => {
-  const { client, state } = mockPrisma();
-  const gateway = fakeGateway();
-  const purchase = await TicketService.purchase({ uid: 7 }, gateway as any, client);
-
-  await TicketService.confirmPayment(
-    'cs_test_1',
-    String(purchase.paymentId),
-    undefined,
-    'expired',
-    client
-  );
-
-  assert.equal(state.payments[0].status, PaymentStatus.EXPIRED);
-  assert.equal(state.tickets[0].status, TicketStatus.UNPAID);
-});
-
-test('controller rejects a malformed idempotency key with 400', async () => {
-  const response = mockResponse();
-  await TicketController.purchase(
-    { user: { uid: 7 }, body: { idempotencyKey: 'bad key with spaces!!' } } as any,
-    response as any
-  );
-
-  assert.equal(response.statusCode, 400);
-  assert.equal(response.body.success, false);
-  assert.equal(response.body.code, 'INVALID_IDEMPOTENCY_KEY');
-});
-
-test('controller returns the purchase payload for a valid request', async () => {
-  const { client } = mockPrisma();
-  const originalService = TicketService.purchase;
-  (TicketService as any).purchase = async () => ({
-    ticketId: 501,
-    paymentId: 101,
-    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
+  const past = new Date(Date.now() - 60 * 1000);
+  state.payments.push({
+    paymentId: 800,
+    uid: 7,
+    clientKey: 'old-key',
+    idempotencyKey: 'user_7_old-key',
+    ticketId: 502,
     amountSatang: PRICE_SATANG,
     currency: 'THB',
     status: PaymentStatus.PENDING,
-    ticketStatus: TicketStatus.UNPAID,
-    expiresAt: '2026-11-01T10:30:00.000Z',
-    ticketStartDateTime: '2026-11-01T10:00:00.000Z',
-    ticketEndDateTime: '2026-11-01T12:00:00.000Z',
-    replayed: false,
+    gateway: 'stripe',
+    gatewayRef: 'cs_old',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_old',
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: past,
+    paidAt: null,
+    createdAt: past,
+    updatedAt: past,
   });
 
-  try {
-    const response = mockResponse();
-    await TicketController.purchase(
-      { user: { uid: 7 }, body: { idempotencyKey: 'ok-123' } } as any,
-      response as any
-    );
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'fresh-key' },
+    gateway as any,
+    client
+  );
 
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.body.success, true);
-    assert.equal(response.body.data.ticketId, 501);
-    assert.equal(response.body.data.paymentId, 101);
-    assert.equal(response.body.data.checkoutUrl, 'https://checkout.stripe.com/c/pay/cs_test_1');
-    assert.equal(response.body.data.amountSatang, PRICE_SATANG);
+  assert.notEqual(result.paymentId, 800);
+  assert.equal(result.replayed, false);
+  assert.equal(state.payments[0].status, PaymentStatus.EXPIRED);
+  assert.equal(state.payments[0].openUid, null);
+});
+
+test('an unconfirmed payment blocks a new purchase with 409 PAYMENT_AWAITING_CONFIRMATION', async () => {
+  const { client, state } = mockPrisma();
+  const gateway = fakeGateway();
+
+  // สร้างรายการ UNCONFIRMED ที่ยังกู้ไม่ได้
+  state.payments.push({
+    paymentId: 801,
+    uid: 7,
+    clientKey: 'stuck',
+    idempotencyKey: 'user_7_stuck',
+    ticketId: 503,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.UNCONFIRMED,
+    gateway: 'stripe',
+    gatewayRef: null,
+    checkoutUrl: null,
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    paidAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  // gateway ล้มเหลวตอนพยายามกู้ -> ยังกู้ไม่ได้
+  const broken = failingGateway('GATEWAY_UNAVAILABLE', true);
+
+  await assert.rejects(
+    () => TicketService.purchase({ uid: 7, idempotencyKey: 'another-key' }, broken as any, client),
+    (err: any) => {
+      assert.equal(err.status, 409);
+      assert.equal(err.code, 'PAYMENT_AWAITING_CONFIRMATION');
+      return true;
+    }
+  );
+
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.tickets.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Tests: controller + real Express route
+// ---------------------------------------------------------------------------
+
+test('the purchase route works end-to-end through Express (no broken this binding)', async () => {
+  const original = TicketService.purchase;
+  const seen: any[] = [];
+
+  (TicketService as any).purchase = async (input: any) => {
+    seen.push(input);
+    return {
+      ticketId: 501,
+      paymentId: 101,
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
+      amountSatang: PRICE_SATANG,
+      currency: 'THB',
+      status: PaymentStatus.PENDING,
+      ticketStatus: TicketStatus.UNPAID,
+      expiresAt: '2026-10-21T18:00:00.000Z',
+      ticketStartDateTime: '2026-10-21T17:30:00.000Z',
+      ticketEndDateTime: '2026-10-21T19:30:00.000Z',
+      replayed: false,
+    };
+  };
+
+  try {
+    await withServer(
+      (app) => {
+        app.use('/api/tickets', ticketRoutes);
+      },
+      async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/tickets/purchase`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${outsiderToken()}`,
+          },
+          body: JSON.stringify({ idempotencyKey: 'route-test-1' }),
+        });
+
+        const body = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.data.ticketId, 501);
+        assert.equal(body.data.paymentId, 101);
+        assert.equal(body.data.checkoutUrl, 'https://checkout.stripe.com/c/pay/cs_test_1');
+        assert.equal(seen.length, 1);
+        assert.equal(seen[0].idempotencyKey, 'route-test-1');
+      }
+    );
   } finally {
-    (TicketService as any).purchase = originalService;
+    (TicketService as any).purchase = original;
   }
 });
 
-test('purchase route is restricted to OUTSIDER role and requires a token', () => {
-  const purchaseRoute = (ticketRoutes as any).stack.find(
-    (layer: any) => layer.route?.path === '/purchase'
-  );
-  assert.ok(purchaseRoute);
-  assert.equal(purchaseRoute.route.methods.post, true);
-  // authenticateToken + requireRoles('OUTSIDER') + controller
-  assert.equal(purchaseRoute.route.stack.length, 3);
+test('the purchase route rejects a malformed idempotency key through Express', async () => {
+  await withServer(
+    (app) => {
+      app.use('/api/tickets', ticketRoutes);
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/tickets/purchase`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${outsiderToken()}`,
+        },
+        body: JSON.stringify({ idempotencyKey: 'bad key with spaces!!' }),
+      });
 
-  const myTicketsRoute = (ticketRoutes as any).stack.find(
-    (layer: any) => layer.route?.path === '/my-tickets'
-  );
-  assert.ok(myTicketsRoute);
-  assert.equal(myTicketsRoute.route.methods.get, true);
+      const body = await response.json();
 
-  // webhook router ต้องใช้ raw body
-  const webhookRoute = (ticketWebhookRoutes as any).stack.find(
-    (layer: any) => layer.route?.path === '/'
+      assert.equal(response.status, 400);
+      assert.equal(body.success, false);
+      assert.equal(body.code, 'INVALID_IDEMPOTENCY_KEY');
+    }
   );
-  assert.ok(webhookRoute);
-  assert.equal(webhookRoute.route.methods.post, true);
 });
+
+test('the purchase route rejects an over-long idempotency key through Express', async () => {
+  await withServer(
+    (app) => {
+      app.use('/api/tickets', ticketRoutes);
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/tickets/purchase`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${outsiderToken()}`,
+        },
+        body: JSON.stringify({ idempotencyKey: 'x'.repeat(65) }),
+      });
+
+      const body = await response.json();
+
+      assert.equal(response.status, 400);
+      assert.equal(body.code, 'INVALID_IDEMPOTENCY_KEY');
+    }
+  );
+});
+
+test('the purchase route rejects a missing token with 401', async () => {
+  await withServer(
+    (app) => {
+      app.use('/api/tickets', ticketRoutes);
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/tickets/purchase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      assert.equal(response.status, 401);
+    }
+  );
+});
+
+test('the purchase route rejects a non-outsider with 403', async () => {
+  const studentToken = signJwt({
+    uid: 3,
+    email: 'student@chula.ac.th',
+    firstname: 'Stu',
+    lastname: 'Dent',
+    role: 'STUDENT',
+    userType: 'UNIVERSITY',
+    isProfileComplete: true,
+  });
+
+  await withServer(
+    (app) => {
+      app.use('/api/tickets', ticketRoutes);
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/tickets/purchase`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${studentToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      assert.equal(response.status, 403);
+    }
+  );
+});
+
+test('only the purchase route is exposed in this PR', () => {
+  const paths = (ticketRoutes as any).stack
+    .filter((layer: any) => layer.route)
+    .map(
+      (layer: any) => `${Object.keys(layer.route.methods)[0].toUpperCase()} ${layer.route.path}`
+    );
+
+  assert.deepEqual(paths, ['POST /purchase']);
+});
+
+// ---------------------------------------------------------------------------
+// Tests: gateway factory
+// ---------------------------------------------------------------------------
 
 test('gateway factory fails fast when STRIPE_SECRET_KEY is missing', () => {
   const previous = process.env.STRIPE_SECRET_KEY;

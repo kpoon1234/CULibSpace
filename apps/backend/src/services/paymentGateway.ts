@@ -56,14 +56,35 @@ export interface GatewayPaymentEvent {
   type: GatewayPaymentEventType;
   /** รหัสอ้างอิงฝั่ง gateway เพื่อจับคู่กับ payment */
   gatewayRef: string;
-  /** อ้างอิงกลับเข้าระบบ (paymentId) ถ้า gateway ส่งมาให้ */
+  /**
+   * อ้างอิงกลับเข้าระบบ = paymentId (รูปแบบ string)
+   * ใช้ค้นหารายการในฐานข้อมูลได้โดยตรง แม้ยังไม่ได้บันทึก gateway_ref
+   */
   reference?: string;
+  /** ยอดเงินที่เรียกเก็บจริง (หน่วยสตางค์) ต้องเอาไปเทียบกับ payment.amount_satang */
   amountSatang?: number;
+  /** สกุลเงินที่เรียกเก็บจริง ต้องเทียบกับ payment.currency */
   currency?: string;
+  /** สถานะการจ่ายเงินจริงจาก gateway (ไม่ใช่แค่ "session completed") */
+  paymentState: GatewayPaymentState;
+  /**
+   * เวลาที่ชำระเงินสำเร็จจริง
+   * หมายเหตุ: ค่านี้ไม่ควรเป็นเวลาที่สร้าง checkout session
+   * (เวลาสร้าง session คือเวลาที่ผู้ใช้ยังกำลังกรอกข้อมูลอยู่)
+   */
   paidAt?: Date;
   /** payload ดิบ ไว้ debug / audit */
   raw: unknown;
 }
+
+/**
+ * สถานะการจ่ายเงินตาม gateway
+ * - paid                : ชำระเงินสำเร็จแล้ว (ยืนยันได้)
+ * - unpaid              : ยังไม่ได้ชำระเงิน (เช่น วิธีชำระเงินที่ต้องรอ) -> ยังเปิดใช้ตั๋วไม่ได้
+ * - no_payment_required : ไม่ต้องชำระเงิน (เช่น 0 บาท)
+ * - unknown             : gateway ไม่ได้ระบุ
+ */
+export type GatewayPaymentState = 'paid' | 'unpaid' | 'no_payment_required' | 'unknown';
 
 export type PaymentGatewayErrorCode =
   /** ยังไม่ได้ตั้งค่า key ของ gateway (เช่น STRIPE_SECRET_KEY) */
@@ -105,9 +126,22 @@ export interface PaymentGateway {
   /** ชื่อ gateway เก็บลง DB (เช่น 'stripe') เพื่อรองรับการมีหลาย provider */
   readonly name: string;
 
-  /** สร้าง checkout session ให้ผู้ใช้ไปชำระเงิน */
+  /**
+   * สร้าง checkout session ให้ผู้ใช้ไปชำระเงิน
+   *
+   * สัญญาเรื่อง idempotency (สำคัญมาก):
+   *   การเรียกด้วย `idempotencyKey` เดิม ต้องได้ผลลัพธ์เดิมเสมอ
+   *   และต้อง "ไม่สร้าง" checkout ซ้ำ
+   *   -> ใช้กู้รายการเดิมได้ ในกรณีที่ gateway สร้าง checkout สำเร็จ
+   *      แต่ response ของเรา timeout กลางทาง
+   */
   createCheckoutSession(input: CreateCheckoutSessionInput): Promise<CheckoutSessionResult>;
 
-  /** ตรวจสอบลายเซ็นและแปลง webhook payload เป็น event ที่ระบบเข้าใจ */
+  /**
+   * ตรวจสอบลายเซ็นและแปลง webhook payload เป็น event ที่ระบบเข้าใจ
+   *
+   * หมายเหตุ: การ "ยืนยันผลชำระเงินและเปิดใช้ตั๋ว" เป็นหน้าที่ของ US6-3
+   * ฟังก์ชันนี้แค่แปลงข้อมูลดิบให้เป็นรูปแบบที่ตรวจสอบได้
+   */
   parseWebhookEvent(rawBody: Buffer, signature: string): Promise<GatewayPaymentEvent>;
 }

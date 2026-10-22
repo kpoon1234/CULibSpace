@@ -7,16 +7,8 @@ const defaultPrisma = new PrismaClient();
 /** รหัส gateway ที่บันทึกลงฐานข้อมูล */
 export const PAYMENT_GATEWAY_NAME = 'stripe';
 
-/** ค่า default เมื่อ SystemConfig อ่านไม่ได้ */
-const DEFAULT_TICKET_PRICE_SATANG = 5000; // 50.00 THB
-const DEFAULT_TICKET_VALIDITY_HOURS = 2;
-const DEFAULT_CHECKOUT_EXPIRY_MINUTES = 30;
-
-/**
- * ช่วงเวลาที่ถือว่า "เพิ่งกดซื้อ" และให้ถือว่าเป็นการกดซ้ำ (double click)
- * ใช้เฉพาะกรณี client ไม่ได้ส่ง idempotency key มา
- */
-const DUPLICATE_PURCHASE_WINDOW_MS = 2 * 60 * 1000;
+/** ความยาวสูงสุดของ client key ที่ API รับได้ (ตรงกับคอลัมน์ client_key) */
+export const MAX_CLIENT_KEY_LENGTH = 64;
 
 export interface TicketPurchaseError {
   status: number;
@@ -49,19 +41,34 @@ export interface TicketPurchaseInput {
   now?: Date;
 }
 
+/** ค่าจาก SystemConfig ที่ Backend ใช้กำหนดราคาและอายุตั๋วเอง */
+interface TicketPricingConfig {
+  ticketPriceSatang: number;
+  ticketValidityHours: number;
+  paymentCheckoutExpiryMinutes: number;
+}
+
+/**
+ * [US6-1] ซื้อตั๋วผู้เข้าชมภายนอก
+ * -------------------------------------------------------------------------
+ * ขอบเขตงานนี้จบที่: สร้าง Ticket (UNPAID) + Payment (PENDING) -> สร้าง checkout
+ * กับ gateway -> ส่ง ticketId / paymentId / checkoutUrl ให้ frontend
+ * (การยืนยันผลชำระเงินและการเปิดใช้ตั๋วเป็นของ US6-3)
+ *
+ * หลักการสำคัญ:
+ *   1. Backend อ่านราคา + อายุใช้งานตั๋วจาก SystemConfig เท่านั้น
+ *      ถ้าอ่าน config ไม่ได้หรือค่าไม่ถูกต้อง -> ต้องหยุด ไม่ใช่ fallback ไปเก็บราคาผิด
+ *   2. ป้องกันรายการซ้ำ 3 ชั้น (ทั้งหมดบังคับด้วย unique constraint ที่ DB)
+ *      - (uid, client_key)  -> retry คำขอเดิมคืนรายการเดิม
+ *      - open_uid           -> ผู้ใช้มีรายการที่ยัง "เปิด" ได้แค่รายการเดียว
+ *      - กู้รายการเดิมก่อนเสมอ ไม่สร้าง checkout ซ้ำ
+ *   3. gateway อาจสร้าง checkout สำเร็จแต่ response ไม่ถึง (timeout)
+ *      -> เก็บสถานะ UNCONFIRMED ไว้ (ไม่ตัดเป็น FAILED)
+ *      -> ครั้งถัดไปที่ยิงด้วย idempotency key เดิม จะกู้ checkout เดิมกลับมาได้
+ *         เพราะ gateway เก็บผลลัพธ์ของ idempotency key เดิมไว้
+ *   4. ตั๋วจะยังไม่ถูกเปิดใช้งานจนกว่าจะได้รับ webhook ยืนยันการชำระเงินสำเร็จ
+ */
 export class TicketService {
-  /**
-   * [US6-1] ซื้อตั๋วผู้เข้าชมภายนอก
-   * -------------------------------------------------------------------------
-   * สรุป flow:
-   *   1. Backend อ่านราคา + อายุใช้งานตั๋วจาก SystemConfig เท่านั้น (client ส่งมาไม่ได้)
-   *   2. กันรายการซ้ำด้วย idempotency key (retry คำขอเดิม) และหน้วย double-click
-   *   3. สร้าง Ticket (UNPAID) + Payment (PENDING) ใน transaction เดียวกัน
-   *   4. เรียก gateway เพื่อสร้าง checkout session -> ได้ checkoutUrl
-   *   5. คืน ticketId / paymentId / checkoutUrl ให้ frontend ไป redirect
-   *
-   * หมายเหตุ: ตั๋วจะยังไม่ถูกเปิดใช้งานจนกว่าจะได้รับ webhook ยืนยันการชำระเงินสำเร็จ
-   */
   static async purchase(
     input: TicketPurchaseInput,
     gateway: PaymentGateway,
@@ -71,15 +78,151 @@ export class TicketService {
     const uid = input.uid;
 
     // ---------- 1. ตรวจสิทธิ์และโปรไฟล์ผู้ซื้อ ----------
+    await this.assertPurchasableUser(uid, prisma);
+
+    // ---------- 2. Backend กำหนดราคาและอายุใช้งานตั๋วเอง ----------
+    // ถ้าอ่าน config ไม่ได้ -> โยน error ทันที (ห้าม fallback ไปเก็บราคาผิด)
+    const config = await this.readPricingConfig(prisma);
+    const amountSatang = config.ticketPriceSatang;
+    const currency = 'THB';
+    const validityMs = config.ticketValidityHours * 60 * 60 * 1000;
+    const checkoutExpiryMs = config.paymentCheckoutExpiryMinutes * 60 * 1000;
+    const expiresAt = new Date(now.getTime() + checkoutExpiryMs);
+
+    // ---------- 3. กันรายการซ้ำ ----------
+    const clientKey = input.idempotencyKey ?? `auto_${randomUUID()}`;
+
+    // 3.1 retry คำขอเดิม (client key เดิม)
+    const byClientKey = await prisma.payment.findFirst({
+      where: { uid, clientKey },
+    });
+    if (byClientKey) {
+      const outcome = await this.resolveExisting(byClientKey, gateway, prisma, now);
+      if (outcome) {
+        return this.handleExistingPayment(outcome, prisma, gateway, now);
+      }
+      // รายการเดิมหมดอายุและถูกปิดแล้ว -> ทำรายการใหม่ต่อได้
+    }
+
+    // 3.2 ผู้ใช้มีรายการที่ยัง "เปิด" อยู่ไหม (PENDING / UNCONFIRMED)
+    //     ถ้ามี -> ต้องกู้รายการเดิมก่อน จึงจะเริ่มรายการใหม่ได้
+    const openPayment = await this.findOpenPayment(uid, prisma);
+    if (openPayment) {
+      const outcome = await this.resolveExisting(openPayment, gateway, prisma, now);
+      if (outcome) {
+        return this.handleExistingPayment(outcome, prisma, gateway, now);
+      }
+      // รายการเดิมหมดอายุและถูกปิดแล้ว -> ทำรายการใหม่ต่อได้
+    }
+
+    // ---------- 4. สร้าง Ticket + Payment (transaction) ----------
+    const ticketStart = now;
+    const ticketEnd = new Date(now.getTime() + validityMs);
+    const idempotencyKey = this.buildIdempotencyKey(uid, clientKey);
+
+    let created: { ticket: any; payment: any };
+    try {
+      created = await prisma.$transaction(async (tx: any) => {
+        const ticket = await tx.ticket.create({
+          data: {
+            uid,
+            status: TicketStatus.UNPAID,
+            startDateTime: ticketStart,
+            endDateTime: ticketEnd,
+          },
+        });
+
+        const payment = await tx.payment.create({
+          data: {
+            ticketId: ticket.ticketId,
+            uid,
+            amountSatang,
+            currency,
+            status: PaymentStatus.PENDING,
+            gateway: gateway.name,
+            clientKey,
+            idempotencyKey,
+            // snapshot อายุใช้งานตั๋วไว้ตอนซื้อ เพื่อไม่ให้ config ที่แก้ระหว่างรอจ่าย
+            // เปลี่ยนอายุตั๋วของผู้ใช้
+            ticketValidityHours: config.ticketValidityHours,
+            expiresAt,
+            // จองช่อง "รายการที่เปิดอยู่" ของผู้ใช้ไว้ 1 ช่อง (unique)
+            // -> กันไม่ให้มีรายการเปิดพร้อมกันมากกว่า 1 รายการ
+            openUid: uid,
+          },
+        });
+
+        return { ticket, payment };
+      });
+    } catch (error: any) {
+      // ชน unique constraint -> มีคำขอพร้อมกันสร้างรายการเดียวกันไปแล้ว
+      // ให้ดึงรายการที่มีอยู่แล้วมาตอบแทน (idempotent)
+      const raced = await this.resolveRacedPayment(uid, clientKey, prisma);
+      if (raced) {
+        return this.handleExistingPayment(raced, prisma, gateway, now);
+      }
+      throw error;
+    }
+
+    // ---------- 5. เรียก gateway ----------
+    let session: CheckoutSessionResult;
+    try {
+      session = await gateway.createCheckoutSession({
+        amountSatang,
+        currency,
+        // reference ที่ส่งให้ gateway ต้องเป็น paymentId เสมอ
+        // (US6-3 ใช้ค่านี้ค้นหารายการ จะได้เจอแม้ยังไม่ได้บันทึก gateway_ref)
+        reference: String(created.payment.paymentId),
+        description: `CU LibSpace visitor ticket (${uid})`,
+        expiresAt,
+        idempotencyKey,
+        customerEmail: (await this.getUserEmail(uid, prisma)) ?? undefined,
+        successUrl: process.env.TICKET_CHECKOUT_SUCCESS_URL,
+        cancelUrl: process.env.TICKET_CHECKOUT_CANCEL_URL,
+      });
+    } catch (error) {
+      throw await this.handleGatewayFailure(created.payment.paymentId, error, prisma);
+    }
+
+    // ---------- 6. บันทึกผลจาก gateway ----------
+    const updated = await prisma.payment.update({
+      where: { paymentId: created.payment.paymentId },
+      data: {
+        gatewayRef: session.gatewayRef,
+        checkoutUrl: session.checkoutUrl,
+        expiresAt: session.expiresAt,
+        status: PaymentStatus.PENDING,
+      },
+    });
+
+    return {
+      ticketId: created.ticket.ticketId,
+      paymentId: updated.paymentId,
+      checkoutUrl: updated.checkoutUrl,
+      amountSatang: updated.amountSatang,
+      currency: updated.currency,
+      status: updated.status,
+      ticketStatus: created.ticket.status,
+      expiresAt: updated.expiresAt.toISOString(),
+      ticketStartDateTime: created.ticket.startDateTime.toISOString(),
+      ticketEndDateTime: created.ticket.endDateTime.toISOString(),
+      replayed: false,
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // ภายใน
+  // ------------------------------------------------------------------
+
+  /**
+   * ตรวจสิทธิ์ผู้ซื้อ: ต้องเป็นบุคคลภายนอก มีโปรไฟล์ครบ และมีเอกสารยืนยันตัวตน
+   */
+  private static async assertPurchasableUser(uid: number, prisma: any): Promise<void> {
     const user = await prisma.user.findUnique({
       where: { uid },
       select: {
         uid: true,
-        email: true,
-        firstname: true,
-        lastname: true,
         isProfileComplete: true,
-        userType: true,
         outsideUser: {
           select: {
             uid: true,
@@ -122,286 +265,273 @@ export class TicketService {
           'Please complete your visitor identity (citizen ID or passport) before purchasing a ticket',
       } as TicketPurchaseError;
     }
-
-    // ---------- 2. Backend กำหนดราคาและอายุใช้งานตั๋วเอง ----------
-    const config = await this.readConfig(prisma);
-    const amountSatang = config.ticketPriceSatang;
-    const currency = 'THB';
-    const validityMs = config.ticketValidityHours * 60 * 60 * 1000;
-    const checkoutExpiryMs = config.paymentCheckoutExpiryMinutes * 60 * 1000;
-    const expiresAt = new Date(now.getTime() + checkoutExpiryMs);
-
-    // ---------- 3. กันรายการซ้ำ ----------
-    const scopedKey = input.idempotencyKey ? `user_${uid}_${input.idempotencyKey}` : undefined;
-
-    const existing = scopedKey
-      ? await prisma.payment.findUnique({ where: { idempotencyKey: scopedKey } })
-      : await this.findRecentPendingPayment(uid, now, prisma);
-
-    if (existing) {
-      return this.handleExistingPayment(existing, prisma, config);
-    }
-
-    // ---------- 4. สร้าง Ticket + Payment (transaction) ----------
-    const ticketStart = now;
-    const ticketEnd = new Date(now.getTime() + validityMs);
-    const idempotencyKey = scopedKey ?? `user_${uid}_${randomUUID()}`;
-
-    const created = await prisma.$transaction(async (tx: any) => {
-      const ticket = await tx.ticket.create({
-        data: {
-          uid,
-          status: TicketStatus.UNPAID,
-          startDateTime: ticketStart,
-          endDateTime: ticketEnd,
-        },
-      });
-
-      const payment = await tx.payment.create({
-        data: {
-          ticketId: ticket.ticketId,
-          uid,
-          amountSatang,
-          currency,
-          status: PaymentStatus.PENDING,
-          gateway: gateway.name,
-          idempotencyKey,
-          expiresAt,
-        },
-      });
-
-      return { ticket, payment };
-    });
-
-    // ---------- 5. เรียก gateway ----------
-    let session: CheckoutSessionResult;
-    try {
-      session = await gateway.createCheckoutSession({
-        amountSatang,
-        currency,
-        reference: String(created.payment.paymentId),
-        description: `CU LibSpace visitor ticket (${uid})`,
-        expiresAt,
-        idempotencyKey,
-        customerEmail: user.email,
-        successUrl: process.env.TICKET_CHECKOUT_SUCCESS_URL,
-        cancelUrl: process.env.TICKET_CHECKOUT_CANCEL_URL,
-      });
-    } catch (error) {
-      // gateway ล้มเหลว -> ทำเครื่องหมายรายการว่า FAILED และ "ไม่" เปิดใช้ตั๋ว
-      await this.markPaymentFailed(created.payment.paymentId, error, prisma);
-      throw this.toGatewayResponseError(error);
-    }
-
-    // ---------- 6. บันทึกผลจาก gateway ----------
-    const updated = await prisma.payment.update({
-      where: { paymentId: created.payment.paymentId },
-      data: {
-        gatewayRef: session.gatewayRef,
-        checkoutUrl: session.checkoutUrl,
-        expiresAt: session.expiresAt,
-      },
-    });
-
-    return {
-      ticketId: created.ticket.ticketId,
-      paymentId: updated.paymentId,
-      checkoutUrl: updated.checkoutUrl,
-      amountSatang: updated.amountSatang,
-      currency: updated.currency,
-      status: updated.status,
-      ticketStatus: created.ticket.status,
-      expiresAt: updated.expiresAt.toISOString(),
-      ticketStartDateTime: created.ticket.startDateTime.toISOString(),
-      ticketEndDateTime: created.ticket.endDateTime.toISOString(),
-      replayed: false,
-    };
   }
 
-  /**
-   * [US6-1] ยืนยันการชำระเงินจาก webhook ของ gateway
-   * -------------------------------------------------------------------------
-   * เป็นจุดเดียวที่ตั๋วถูก "เปิดใช้งาน" (Ticket.status = PAID)
-   * และเลื่อนช่วงเวลาใช้งานตั๋วให้เริ่มนับจากเวลาที่จ่ายเงินจริง
-   */
-  static async confirmPayment(
-    gatewayRef: string,
-    reference: string | undefined,
-    paidAt: Date | undefined,
-    outcome: 'succeeded' | 'failed' | 'expired',
-    prisma: any = defaultPrisma
-  ): Promise<{ applied: boolean; paymentId: number | null; ticketId: number | null }> {
-    const payment = await prisma.payment.findFirst({
-      where: reference ? { OR: [{ idempotencyKey: reference }, { gatewayRef }] } : { gatewayRef },
-    });
-
-    if (!payment) {
-      return { applied: false, paymentId: null, ticketId: null };
-    }
-
-    // เคยจัดการไปแล้ว -> ไม่ต้องทำซ้ำ (Stripe ส่ง webhook ซ้ำได้)
-    if (payment.status !== PaymentStatus.PENDING) {
-      return { applied: false, paymentId: payment.paymentId, ticketId: payment.ticketId };
-    }
-
-    if (outcome === 'succeeded') {
-      const config = await this.readConfig(prisma);
-      const validityMs = config.ticketValidityHours * 60 * 60 * 1000;
-      const start = paidAt ?? new Date();
-      const end = new Date(start.getTime() + validityMs);
-
-      await prisma.$transaction(async (tx: any) => {
-        const claimed = await tx.payment.updateMany({
-          where: { paymentId: payment.paymentId, status: PaymentStatus.PENDING },
-          data: { status: PaymentStatus.PAID, paidAt: start },
-        });
-        if (claimed.count === 0) return;
-
-        await tx.ticket.update({
-          where: { ticketId: payment.ticketId },
-          data: {
-            status: TicketStatus.PAID,
-            startDateTime: start,
-            endDateTime: end,
-            paymentDetail: gatewayRef,
-          },
-        });
-      });
-    } else {
-      const failedStatus = outcome === 'expired' ? PaymentStatus.EXPIRED : PaymentStatus.FAILED;
-
-      await prisma.payment.updateMany({
-        where: { paymentId: payment.paymentId, status: PaymentStatus.PENDING },
-        data: { status: failedStatus },
-      });
-      // Ticket คงสถานะ UNPAID -> ใช้งานไม่ได้จนกว่าจะจ่ายเงินใหม่
-    }
-
-    return { applied: true, paymentId: payment.paymentId, ticketId: payment.ticketId };
-  }
-
-  /**
-   * [US6-1] ดูรายการตั๋วของผู้ใช้ (ใช้ในหน้า "ตั๋วของฉัน")
-   */
-  static async myTickets(uid: number, prisma: any = defaultPrisma) {
-    const tickets = await prisma.ticket.findMany({
+  private static async getUserEmail(uid: number, prisma: any): Promise<string | null> {
+    const user = await prisma.user.findUnique({
       where: { uid },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        payments: {
-          orderBy: { createdAt: 'desc' },
-          select: {
-            paymentId: true,
-            amountSatang: true,
-            currency: true,
-            status: true,
-            gateway: true,
-            checkoutUrl: true,
-            paidAt: true,
-            expiresAt: true,
-            createdAt: true,
-          },
-        },
-      },
+      select: { email: true },
     });
-
-    return tickets.map((ticket: any) => ({
-      ticketId: ticket.ticketId,
-      status: ticket.status,
-      startDateTime: ticket.startDateTime.toISOString(),
-      endDateTime: ticket.endDateTime.toISOString(),
-      createdAt: ticket.createdAt.toISOString(),
-      payments: (ticket.payments ?? []).map((payment: any) => ({
-        paymentId: payment.paymentId,
-        amountSatang: payment.amountSatang,
-        currency: payment.currency,
-        status: payment.status,
-        gateway: payment.gateway,
-        checkoutUrl: payment.checkoutUrl,
-        paidAt: payment.paidAt ? payment.paidAt.toISOString() : null,
-        expiresAt: payment.expiresAt.toISOString(),
-        createdAt: payment.createdAt.toISOString(),
-      })),
-    }));
+    return user?.email ?? null;
   }
 
-  // ------------------------------------------------------------------
-  // ภายใน
-  // ------------------------------------------------------------------
-
-  private static async readConfig(prisma: any) {
-    let config: any = null;
+  /**
+   * อ่านราคา/อายุตั๋วจาก SystemConfig
+   * ------------------------------------------------------------------
+   * ห้าม fallback เป็นค่า default เมื่ออ่านไม่ได้หรือค่าไม่ถูกต้อง
+   * เพราะจะทำให้เรียกเก็บเงินผิดราคา (เช่นเก็บ 50 บาท แทนราคาจริง)
+   */
+  private static async readPricingConfig(prisma: any): Promise<TicketPricingConfig> {
+    let config: any;
     try {
       config = await prisma.systemConfig.findFirst();
-    } catch {
-      // ใช้ค่า default ถ้าอ่าน config ไม่ได้
+    } catch (error) {
+      console.error('[TicketService] Failed to read system config:', error);
+      throw {
+        status: 503,
+        code: 'CONFIG_UNAVAILABLE',
+        message:
+          'Ticket pricing is temporarily unavailable. Please try again in a moment. (No charge was made.)',
+        retryable: true,
+      } as TicketPurchaseError;
     }
 
-    const ticketPriceSatang = Number(config?.ticketPriceSatang ?? DEFAULT_TICKET_PRICE_SATANG);
-    const ticketValidityHours = Number(
-      config?.ticketValidityHours ?? DEFAULT_TICKET_VALIDITY_HOURS
-    );
-    const paymentCheckoutExpiryMinutes = Number(
-      config?.paymentCheckoutExpiryMinutes ?? DEFAULT_CHECKOUT_EXPIRY_MINUTES
-    );
+    if (!config) {
+      throw {
+        status: 503,
+        code: 'CONFIG_UNAVAILABLE',
+        message:
+          'Ticket pricing has not been configured yet. Please contact the library staff. (No charge was made.)',
+        retryable: false,
+      } as TicketPurchaseError;
+    }
+
+    const price = Number(config.ticketPriceSatang);
+    const validityHours = Number(config.ticketValidityHours);
+    const expiryMinutes = Number(config.paymentCheckoutExpiryMinutes);
+
+    if (!Number.isInteger(price) || price <= 0) {
+      throw {
+        status: 503,
+        code: 'INVALID_TICKET_PRICE',
+        message: 'Ticket price is not configured correctly. (No charge was made.)',
+        retryable: false,
+      } as TicketPurchaseError;
+    }
+
+    if (!Number.isInteger(validityHours) || validityHours <= 0) {
+      throw {
+        status: 503,
+        code: 'INVALID_TICKET_VALIDITY',
+        message: 'Ticket validity is not configured correctly. (No charge was made.)',
+        retryable: false,
+      } as TicketPurchaseError;
+    }
+
+    if (!Number.isInteger(expiryMinutes) || expiryMinutes <= 0) {
+      throw {
+        status: 503,
+        code: 'INVALID_CHECKOUT_EXPIRY',
+        message: 'Checkout expiry is not configured correctly. (No charge was made.)',
+        retryable: false,
+      } as TicketPurchaseError;
+    }
 
     return {
-      ticketPriceSatang:
-        Number.isInteger(ticketPriceSatang) && ticketPriceSatang > 0
-          ? ticketPriceSatang
-          : DEFAULT_TICKET_PRICE_SATANG,
-      ticketValidityHours:
-        Number.isInteger(ticketValidityHours) && ticketValidityHours > 0
-          ? ticketValidityHours
-          : DEFAULT_TICKET_VALIDITY_HOURS,
-      paymentCheckoutExpiryMinutes:
-        Number.isInteger(paymentCheckoutExpiryMinutes) && paymentCheckoutExpiryMinutes > 0
-          ? paymentCheckoutExpiryMinutes
-          : DEFAULT_CHECKOUT_EXPIRY_MINUTES,
+      ticketPriceSatang: price,
+      ticketValidityHours: validityHours,
+      paymentCheckoutExpiryMinutes: expiryMinutes,
     };
   }
 
   /**
-   * หา payment ที่ค้างอยู่ (PENDING) และยังไม่หมดอายุ ที่สร้างเมื่อชั่งโมงที่ผ่านมา
-   * ใช้กันกรณี client ไม่ได้ส่ง idempotency key แล้วกดซื้อซ้ำ (double click)
+   * key เต็มที่ส่งให้ gateway
+   * ความยาวสูงสุด = MAX_CLIENT_KEY_LENGTH (64) + prefix -> ต้องไม่เกิน 128 ตัว (ขนาดคอลัมน์)
    */
-  private static async findRecentPendingPayment(uid: number, now: Date, prisma: any) {
-    const since = new Date(now.getTime() - DUPLICATE_PURCHASE_WINDOW_MS);
+  private static buildIdempotencyKey(uid: number, clientKey: string): string {
+    return `user_${uid}_${clientKey}`.slice(0, 128);
+  }
+
+  /**
+   * หารายการที่ยัง "เปิด" อยู่ของผู้ใช้ (PENDING = สร้าง checkout แล้วรอจ่าย,
+   * UNCONFIRMED = gateway ตอบไม่ชัดเจน ต้องกู้)
+   */
+  private static async findOpenPayment(uid: number, prisma: any) {
     return prisma.payment.findFirst({
       where: {
         uid,
-        status: PaymentStatus.PENDING,
-        createdAt: { gte: since },
+        status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  private static async markPaymentFailed(
-    paymentId: number,
-    error: unknown,
+  /**
+   * กรณีชน unique constraint (มีคำขอพร้อมกันสร้างรายการเดียวกัน)
+   * -> ดึงรายการที่มีอยู่แล้วมาตอบแทน
+   */
+  private static async resolveRacedPayment(
+    uid: number,
+    clientKey: string,
     prisma: any
-  ): Promise<void> {
+  ): Promise<any | null> {
     try {
-      await prisma.payment.updateMany({
-        where: { paymentId, status: PaymentStatus.PENDING },
-        data: { status: PaymentStatus.FAILED },
-      });
-    } catch (updateError) {
-      console.error(`[TicketService] Failed to mark payment #${paymentId} as FAILED:`, updateError);
-    }
-    if (error) {
-      console.error(`[TicketService] Payment #${paymentId} gateway call failed:`, error);
+      const byKey = await prisma.payment.findFirst({ where: { uid, clientKey } });
+      if (byKey) return byKey;
+
+      return await this.findOpenPayment(uid, prisma);
+    } catch {
+      return null;
     }
   }
 
   /**
-   * จัดการกรณีที่พบรายการเดิมอยู่แล้ว (idempotent replay)
+   * ตัดสินใจกับรายการที่มีอยู่แล้ว
+   * ------------------------------------------------------------------
+   * @returns รายการที่ควรนำไปตอบ client (replay) หรือ null เมื่อรายการนั้นหมดอายุ
+   *          และปิดแล้ว (จึงเริ่มรายการใหม่ได้)
+   */
+  private static async resolveExisting(
+    payment: any,
+    gateway: PaymentGateway,
+    prisma: any,
+    now: Date
+  ): Promise<any | null> {
+    const isOpen =
+      payment.status === PaymentStatus.PENDING || payment.status === PaymentStatus.UNCONFIRMED;
+
+    if (!isOpen) {
+      // รายการปิดแล้ว (Paid / Failed / Expired) -> ตอบรายการเดิมตามสถานะ
+      return payment;
+    }
+
+    return await this.reconcileOpenPayment(payment, gateway, prisma, now);
+  }
+
+  /**
+   * กู้รายการเดิมก่อนอนุญาตให้ซื้อใหม่
+   * ------------------------------------------------------------------
+   * - ถ้าหมดอายุแล้ว -> ปิดรายการ (EXPIRED) แล้วคืน null เพื่อให้ caller ไปสร้างรายการใหม่
+   * - ถ้ายังไม่หมดอายุและมี checkoutUrl -> ใช้รายการเดิมต่อ
+   * - ถ้ายังไม่หมดอายุและไม่มี checkoutUrl (เคย timeout) -> ยิง gateway ซ้ำด้วย
+   *   idempotency key เดิม เพื่อกู้ checkout เดิม (gateway คืน session เดิม ไม่สร้างซ้ำ)
+   */
+  private static async reconcileOpenPayment(
+    payment: any,
+    gateway: PaymentGateway,
+    prisma: any,
+    now: Date
+  ): Promise<any | null> {
+    // หมดอายุแล้ว -> ปิดรายการ แล้วคืน null เพื่อให้ caller ไปสร้างรายการใหม่
+    if (payment.expiresAt && new Date(payment.expiresAt).getTime() <= now.getTime()) {
+      await prisma.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: { status: PaymentStatus.EXPIRED, openUid: null },
+      });
+      return null;
+    }
+
+    // มี checkoutUrl แล้ว -> ใช้รายการเดิมต่อ ไม่ต้องยิง gateway ซ้ำ
+    if (payment.checkoutUrl) {
+      return payment;
+    }
+
+    // ยังไม่มี checkoutUrl -> พยายามกู้ด้วย idempotency key เดิม
+    try {
+      const session = await gateway.createCheckoutSession({
+        amountSatang: payment.amountSatang,
+        currency: payment.currency,
+        reference: String(payment.paymentId),
+        description: `CU LibSpace visitor ticket (${payment.uid})`,
+        expiresAt: payment.expiresAt,
+        idempotencyKey: payment.idempotencyKey,
+      });
+
+      return await prisma.payment.update({
+        where: { paymentId: payment.paymentId },
+        data: {
+          gatewayRef: session.gatewayRef,
+          checkoutUrl: session.checkoutUrl,
+          expiresAt: session.expiresAt,
+          status: PaymentStatus.PENDING,
+        },
+      });
+    } catch (error) {
+      // กู้ไม่ได้ -> เก็บสถานะรอตรวจสอบไว้ ห้ามสร้างรายการใหม่
+      console.error(`[TicketService] Could not reconcile payment #${payment.paymentId}:`, error);
+      await prisma.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: { status: PaymentStatus.UNCONFIRMED },
+      });
+      return payment;
+    }
+  }
+
+  /**
+   * จัดการ error จาก gateway
+   * ------------------------------------------------------------------
+   * - GATEWAY_REJECTED (gateway ปฏิเสธชัดเจน) -> ปิดรายการเป็น FAILED ได้เลย
+   *   เพราะ gateway ไม่ได้สร้าง checkout
+   * - GATEWAY_TIMEOUT / GATEWAY_UNAVAILABLE (ผลไม่ชัดเจน) -> ห้ามตัดเป็น FAILED!
+   *   เพราะอาจสร้าง checkout สำเร็จแล้ว response มาไม่ถึง
+   *   -> เก็บเป็น UNCONFIRMED เพื่อรอ reconcile ในคำขอครั้งถัดไป
+   */
+  private static async handleGatewayFailure(
+    paymentId: number,
+    error: unknown,
+    prisma: any
+  ): Promise<TicketPurchaseError> {
+    const gatewayError =
+      error instanceof PaymentGatewayError
+        ? error
+        : new PaymentGatewayError('GATEWAY_UNAVAILABLE', 'Payment gateway is unavailable', {
+            retryable: true,
+            status: 503,
+            cause: error,
+          });
+
+    const outcomeUnknown = gatewayError.retryable;
+
+    try {
+      await prisma.payment.updateMany({
+        where: { paymentId, status: PaymentStatus.PENDING },
+        data: {
+          status: outcomeUnknown ? PaymentStatus.UNCONFIRMED : PaymentStatus.FAILED,
+          // ถ้า gateway ปฏิเสธชัดเจน -> ไม่มี checkout ค้าง -> ปล่อยช่องให้ซื้อใหม่ได้
+          openUid: outcomeUnknown ? undefined : null,
+        },
+      });
+    } catch (updateError) {
+      console.error(
+        `[TicketService] Failed to update payment #${paymentId} after gateway error:`,
+        updateError
+      );
+    }
+
+    console.error(`[TicketService] Payment #${paymentId} gateway call failed:`, error);
+
+    return {
+      status: gatewayError.status,
+      code: gatewayError.code,
+      message: gatewayError.message,
+      retryable: gatewayError.retryable,
+    } as TicketPurchaseError;
+  }
+
+  /**
+   * จัดการกรณีพบรายการเดิมอยู่แล้ว (idempotent replay)
    */
   private static async handleExistingPayment(
     payment: any,
     prisma: any,
-    config: { ticketValidityHours: number }
+    gateway: PaymentGateway,
+    now: Date
   ): Promise<TicketPurchaseResult> {
     const ticket = await prisma.ticket.findUnique({
       where: { ticketId: payment.ticketId },
@@ -414,24 +544,13 @@ export class TicketService {
       currency: payment.currency,
       status: payment.status,
       ticketStatus: ticket?.status ?? TicketStatus.UNPAID,
-      expiresAt: payment.expiresAt.toISOString(),
-      ticketStartDateTime: ticket?.startDateTime.toISOString() ?? '',
-      ticketEndDateTime: ticket?.endDateTime.toISOString() ?? '',
+      expiresAt: new Date(payment.expiresAt).toISOString(),
+      ticketStartDateTime: ticket ? new Date(ticket.startDateTime).toISOString() : '',
+      ticketEndDateTime: ticket ? new Date(ticket.endDateTime).toISOString() : '',
       replayed: true,
     };
 
-    if (payment.status === PaymentStatus.PENDING) {
-      if (!payment.checkoutUrl) {
-        // gateway ยังกำลังทำงาน (หรือค้าง) -> ให้ client retry
-        throw {
-          status: 409,
-          code: 'PAYMENT_IN_PROGRESS',
-          message:
-            'A purchase for this request is still being processed. Please retry in a moment.',
-          retryable: true,
-        } as TicketPurchaseError;
-      }
-
+    if (payment.status === PaymentStatus.PENDING && payment.checkoutUrl) {
       return { ...base, checkoutUrl: payment.checkoutUrl };
     }
 
@@ -439,35 +558,35 @@ export class TicketService {
       return { ...base, checkoutUrl: payment.checkoutUrl };
     }
 
+    if (
+      payment.status === PaymentStatus.UNCONFIRMED ||
+      (payment.status === PaymentStatus.PENDING && !payment.checkoutUrl)
+    ) {
+      // ยังไม่รู้ว่า gateway สร้าง checkout หรือไม่ -> ห้ามสร้างรายการใหม่
+      // ให้ client retry ด้วย key เดิม เพื่อให้ระบบ reconcile ให้
+      throw {
+        status: 409,
+        code: 'PAYMENT_AWAITING_CONFIRMATION',
+        message:
+          'A previous purchase is still awaiting payment confirmation. Please retry with the same idempotency key.',
+        retryable: true,
+        paymentId: payment.paymentId,
+        ticketId: payment.ticketId,
+      } as TicketPurchaseError;
+    }
+
     // FAILED / EXPIRED -> คำขอเดิมถือว่าจบแล้ว client ต้องใช้ key ใหม่เพื่อซื้อใหม่
     const { status: _previousStatus, ...previousPayment } = base;
     throw {
       status: 409,
       code: 'PAYMENT_NOT_COMPLETED',
-      message: `The previous payment attempt for this request is ${payment.status.toLowerCase()}. Use a new idempotency key to start a new purchase.`,
+      message: `The previous payment attempt for this request is ${String(
+        payment.status
+      ).toLowerCase()}. Use a new idempotency key to start a new purchase.`,
       retryable: true,
       ...previousPayment,
     } as TicketPurchaseError;
   }
-
-  private static toGatewayResponseError(error: unknown): TicketPurchaseError {
-    if (error instanceof PaymentGatewayError) {
-      return {
-        status: error.status,
-        code: error.code,
-        message: error.message,
-        retryable: error.retryable,
-      } as TicketPurchaseError;
-    }
-
-    return {
-      status: 502,
-      code: 'GATEWAY_UNAVAILABLE',
-      message: 'Payment gateway is temporarily unavailable. Please try again.',
-      retryable: true,
-    } as TicketPurchaseError;
-  }
 }
 
-// helper แยกไว้เพื่อให้อ่านง่าย (ใช้ prisma ที่ถูก inject เข้ามา)
 export default TicketService;

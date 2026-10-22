@@ -5,6 +5,7 @@ import {
   CreateCheckoutSessionInput,
   CheckoutSessionResult,
   GatewayPaymentEvent,
+  GatewayPaymentState,
 } from './paymentGateway.js';
 
 /**
@@ -142,21 +143,44 @@ export class StripePaymentGateway implements PaymentGateway {
       (event.data?.object as { id?: string } | undefined)?.id ??
       '';
 
-    const reference = (object['metadata'] as { reference?: string } | undefined)?.reference;
+    const metadata = object['metadata'] as { reference?: string } | undefined;
+    const reference = metadata?.reference;
     const amountSatang = (object['amount_total'] as number | undefined) ?? undefined;
     const currency = (object['currency'] as string | undefined) ?? undefined;
-    const paidAtValue = (object['created'] as number | undefined) ?? undefined;
+
+    // สถานะการจ่ายเงินจริงจาก gateway (ไม่เท่ากับ "session completed")
+    const paymentState = this.readPaymentState(object);
+
+    // เวลาที่ชำระเงินสำเร็จจริง
+    // ต้องมาจาก payment intent (จ่ายสำเร็จเมื่อไร) ไม่ใช่ session.created
+    // เพราะ session.created คือเวลาที่ผู้ใช้ยังกำลังกรอกข้อมูลอยู่
+    const paidAt = this.readPaidAt(object);
 
     switch (event.type) {
       case 'checkout.session.completed':
       case 'checkout.session.async_payment_succeeded':
+        // session completed ไม่ได้แปลว่าจ่ายสำเร็จเสมอ (เช่น จ่ายด้วยวิธีที่ต้องรอ)
+        // ต้องเช็ค payment_state จริงด้วย
+        if (paymentState === 'paid' || paymentState === 'no_payment_required') {
+          return {
+            type: 'payment.succeeded',
+            gatewayRef,
+            reference,
+            amountSatang,
+            currency,
+            paymentState,
+            paidAt,
+            raw: event,
+          };
+        }
         return {
-          type: 'payment.succeeded',
+          type: 'payment.unknown',
           gatewayRef,
           reference,
           amountSatang,
           currency,
-          paidAt: paidAtValue ? new Date(paidAtValue * 1000) : undefined,
+          paymentState,
+          paidAt,
           raw: event,
         };
       case 'checkout.session.async_payment_failed':
@@ -167,6 +191,7 @@ export class StripePaymentGateway implements PaymentGateway {
           reference,
           amountSatang,
           currency,
+          paymentState,
           raw: event,
         };
       case 'checkout.session.expired':
@@ -176,6 +201,7 @@ export class StripePaymentGateway implements PaymentGateway {
           reference,
           amountSatang,
           currency,
+          paymentState,
           raw: event,
         };
       default:
@@ -184,9 +210,57 @@ export class StripePaymentGateway implements PaymentGateway {
           type: 'payment.unknown',
           gatewayRef,
           reference,
+          amountSatang,
+          currency,
+          paymentState,
           raw: event,
         };
     }
+  }
+
+  /**
+   * อ่านสถานะการจ่ายเงินจริงจาก payload
+   */
+  private readPaymentState(object: Record<string, unknown>): GatewayPaymentState {
+    const raw = object['payment_status'];
+    if (raw === 'paid') return 'paid';
+    if (raw === 'unpaid') return 'unpaid';
+    if (raw === 'no_payment_required') return 'no_payment_required';
+    return 'unknown';
+  }
+
+  /**
+   * อ่านเวลาที่ชำระเงินสำเร็จจริง
+   * - payment_intent.created  : เวลาที่สร้าง payment intent (ใกล้เคียงเวลาจ่ายจริง)
+   * - payment_intent.status    : 'succeeded' เท่านั้นที่ถือว่าจ่ายสำเร็จ
+   * ถ้าไม่มีข้อมูล payment intent (ต้อง expand ตอนเรียก API) -> คืน undefined
+   * เพื่อไม่ให้เกิด timestamp ผิด
+   */
+  private readPaidAt(object: Record<string, unknown>): Date | undefined {
+    const paymentIntent = object['payment_intent'] as
+      | { id?: string; created?: number; status?: string; latest_charge?: { created?: number } }
+      | string
+      | undefined;
+
+    if (!paymentIntent || typeof paymentIntent === 'string') {
+      // ไม่มี object ที่ expand มา -> ไม่มีเวลาจ่ายจริงที่เชื่อถือได้
+      return undefined;
+    }
+
+    if (paymentIntent.status !== 'succeeded') {
+      return undefined;
+    }
+
+    const chargeCreated = paymentIntent.latest_charge?.created;
+    if (typeof chargeCreated === 'number') {
+      return new Date(chargeCreated * 1000);
+    }
+
+    if (typeof paymentIntent.created === 'number') {
+      return new Date(paymentIntent.created * 1000);
+    }
+
+    return undefined;
   }
 
   private assertAmount(amountSatang: number): void {

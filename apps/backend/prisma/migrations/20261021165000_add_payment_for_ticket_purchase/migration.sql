@@ -6,11 +6,20 @@
 --   2. `system_config` เพิ่มราคาตั๋วและอายุใช้งานตั๋ว เพื่อให้ Backend เป็นผู้กำหนดเอง
 --      (client ส่งราคาหรือช่วงเวลามาใช้ไม่ได้)
 --
+-- หมายเหตุเรื่องกันรายการซ้ำ:
+--   - `client_key` คือ key ที่ client ส่งมา (สูงสุด 64 ตัว) เก็บเป็นคู่ (uid, client_key)
+--     ด้วย UNIQUE constraint ตัวตั้งกันรายการซ้ำอยู่ที่ระดับฐานข้อมูล ไม่พึ่งการเช็คในโค้ดอย่างเดียว
+--     (ป้องกันกรณี request ซ้ำที่ทำพร้อมกันจนเช็คในแอปพลิเคชันไม่ทัน)
+--   - `idempotency_key` คือ key เต็มที่ผูก uid + client_key แล้ว ส่งต่อให้ gateway เพื่อกู้รายการเดิม
+--     ในกรณีที่ gateway สร้าง checkout สำเร็จแต่ response มาไม่ถึง (timeout)
+--   - `ticket_validity_hours` เป็น snapshot ค่าอายุตั๋วตอนซื้อ เพื่อไม่ให้ config ที่แก้ระหว่าง
+--     ที่ผู้ใช้กำลังกรอกข้อมูลในหน้า checkout เปลี่ยนอายุตั๋วของผู้ใช้
+--
 -- หมายเหตุ: `uid` ถูก denormalize มาไว้บน `payment` เพื่อให้ query "รายการชำระเงินของฉัน"
 -- ไม่ต้อง join ผ่าน `ticket` (สอดคล้องกับรูปแบบเดียวกับ booking / issue_report)
 
 -- CreateEnum
-CREATE TYPE "payment_status_enum" AS ENUM ('Pending', 'Paid', 'Failed', 'Expired', 'Refunded');
+CREATE TYPE "payment_status_enum" AS ENUM ('Pending', 'Unconfirmed', 'Paid', 'Failed', 'Expired', 'Refunded');
 
 -- CreateTable
 CREATE TABLE "payment" (
@@ -22,9 +31,12 @@ CREATE TABLE "payment" (
     "status" "payment_status_enum" NOT NULL DEFAULT 'Pending',
     "gateway" VARCHAR(32) NOT NULL,
     "gateway_ref" VARCHAR(255),
-    "idempotency_key" VARCHAR(64) NOT NULL,
+    "client_key" VARCHAR(64) NOT NULL,
+    "idempotency_key" VARCHAR(128) NOT NULL,
     "checkout_url" TEXT,
+    "ticket_validity_hours" INTEGER NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
+    "open_uid" INTEGER,
     "paid_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -33,7 +45,12 @@ CREATE TABLE "payment" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "payment_idempotency_key_key" ON "payment"("idempotency_key");
+CREATE UNIQUE INDEX "uq_payment_user_client_key" ON "payment"("uid", "client_key");
+
+-- CreateIndex
+-- ช่อง "รายการที่เปิดอยู่" ของผู้ใช้ -> บังคับว่าผู้ใช้มีรายการที่ยังเปิดอยู่ได้แค่รายการเดียว
+-- (NULL ไม่ชนกันใน unique index จึงปล่อยให้มีรายการที่ปิดแล้วได้หลายรายการ)
+CREATE UNIQUE INDEX "payment_open_uid_key" ON "payment"("open_uid");
 
 -- CreateIndex
 CREATE INDEX "idx_payment_user_status" ON "payment"("uid", "status");
