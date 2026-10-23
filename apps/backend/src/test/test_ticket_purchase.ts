@@ -109,7 +109,7 @@ function fakeGateway(overrides: Record<string, any> = {}) {
         state: gateway.checkoutState,
         amountSatang: PRICE_SATANG,
         currency: 'THB',
-        reference: undefined,
+        reference: gateway.reference,
         paidAt: gateway.paidAt,
         raw: {},
       };
@@ -282,6 +282,12 @@ function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}
       },
     },
     ticket: {
+      update: async ({ where, data }: any) => {
+        const ticket = state.tickets.find((t) => t.ticketId === where.ticketId);
+        if (!ticket) throw new Error('ticket not found');
+        applyData(ticket, data);
+        return ticket;
+      },
       create: async ({ data }: any) => {
         state.calls.ticketCreate++;
         const ticket = {
@@ -307,7 +313,9 @@ function mockPrisma(options: { user?: any; config?: any; payments?: any[] } = {}
       const createdPayments: any[] = [];
 
       const tx = {
+        $queryRaw: async () => [],
         ticket: {
+          update: (args: any) => client.ticket.update(args),
           create: async (args: any) => {
             const ticket = await client.ticket.create(args);
             createdTickets.push(ticket);
@@ -1132,11 +1140,13 @@ test('a checkout the gateway never created is closed so a new purchase is possib
   assert.equal(state.payments[0].openUid, null);
 });
 
-test('a checkout the gateway reports as paid is recorded as paid for US6-3 to activate', async () => {
+test('recovery confirms the paid checkout and activates the ticket through US6-3', async () => {
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
   gateway.checkoutState = 'paid';
   gateway.paidAt = new Date('2026-10-22T10:00:00.000Z');
+  gateway.reference = '813';
+  state.tickets.push({ ticketId: 513, uid: 7, status: TicketStatus.UNPAID });
 
   const past = new Date(Date.now() - 60 * 1000);
   state.payments.push({
@@ -1170,8 +1180,8 @@ test('a checkout the gateway reports as paid is recorded as paid for US6-3 to ac
   assert.equal(state.payments[0].status, PaymentStatus.PAID);
   assert.equal(state.payments[0].paidAt?.toISOString(), '2026-10-22T10:00:00.000Z');
   assert.equal(state.payments[0].openUid, null);
-  // ตั๋วยังไม่ถูกเปิดใช้ -> เป็นหน้าที่ของ US6-3
-  assert.equal(state.tickets[0]?.status, undefined);
+  assert.equal(state.tickets[0]?.status, TicketStatus.PAID);
+  assert.equal(state.tickets[0]?.startDateTime.toISOString(), '2026-10-22T10:00:00.000Z');
 });
 
 // ---------------------------------------------------------------------------

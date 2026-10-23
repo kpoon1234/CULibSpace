@@ -61,7 +61,6 @@ export class StripePaymentGateway implements PaymentGateway {
   readonly maxCheckoutExpiryMinutes = STRIPE_MAX_CHECKOUT_EXPIRY_MINUTES;
   private readonly stripe: StripeCheckoutClient;
   private readonly webhookSecret?: string;
-  private readonly timeoutMs: number;
 
   constructor(options: StripeGatewayOptions) {
     if (!options.secretKey && !options.client) {
@@ -79,7 +78,6 @@ export class StripePaymentGateway implements PaymentGateway {
         maxNetworkRetries: 1,
       }) as unknown as StripeCheckoutClient);
     this.webhookSecret = options.webhookSecret;
-    this.timeoutMs = options.timeoutMs ?? 10_000;
   }
 
   /**
@@ -161,7 +159,7 @@ export class StripePaymentGateway implements PaymentGateway {
   async retrieveCheckoutStatus(gatewayRef: string): Promise<GatewayCheckoutStatus> {
     try {
       const session = await this.stripe.checkout.sessions.retrieve(gatewayRef, {
-        expand: ['payment_intent'],
+        expand: ['payment_intent.latest_charge'],
       });
 
       const object = session as unknown as Record<string, unknown>;
@@ -178,6 +176,7 @@ export class StripePaymentGateway implements PaymentGateway {
 
       return {
         state,
+        livemode: session.livemode,
         amountSatang: session.amount_total ?? undefined,
         currency: session.currency ?? undefined,
         reference: metadata?.reference,
@@ -193,7 +192,8 @@ export class StripePaymentGateway implements PaymentGateway {
       }
 
       // ตรวจสอบไม่ได้ -> ไม่ต้องปิดรายการ (ปลอดภัยกว่า)
-      console.error('[StripePaymentGateway] Could not retrieve checkout status:', error);
+      // Stripe error messages may include part of an API key. Never log the raw error.
+      console.error('[StripePaymentGateway] Could not retrieve checkout status.');
       return { state: 'unknown', raw: error };
     }
   }
@@ -226,6 +226,12 @@ export class StripePaymentGateway implements PaymentGateway {
   }
 
   private mapEvent(event: Stripe.Event): GatewayPaymentEvent {
+    if (event.livemode === true) {
+      throw new PaymentGatewayError('GATEWAY_REJECTED', 'Live payment events are disabled.', {
+        status: 400,
+      });
+    }
+    const identity = { eventId: event.id, livemode: event.livemode };
     const raw = event as unknown as { data?: { object?: Record<string, unknown> } };
     const object = raw.data?.object ?? {};
 
@@ -254,6 +260,7 @@ export class StripePaymentGateway implements PaymentGateway {
         // ต้องเช็ค payment_state จริงด้วย
         if (paymentState === 'paid' || paymentState === 'no_payment_required') {
           return {
+            ...identity,
             type: 'payment.succeeded',
             gatewayRef,
             reference,
@@ -265,6 +272,7 @@ export class StripePaymentGateway implements PaymentGateway {
           };
         }
         return {
+          ...identity,
           type: 'payment.unknown',
           gatewayRef,
           reference,
@@ -277,6 +285,7 @@ export class StripePaymentGateway implements PaymentGateway {
       case 'checkout.session.async_payment_failed':
       case 'payment_intent.payment_failed':
         return {
+          ...identity,
           type: 'payment.failed',
           gatewayRef,
           reference,
@@ -287,6 +296,7 @@ export class StripePaymentGateway implements PaymentGateway {
         };
       case 'checkout.session.expired':
         return {
+          ...identity,
           type: 'payment.expired',
           gatewayRef,
           reference,
@@ -298,6 +308,7 @@ export class StripePaymentGateway implements PaymentGateway {
       default:
         // event อื่นที่เรายังไม่สนใจ -> ให้ caller จัดการแบบ no-op
         return {
+          ...identity,
           type: 'payment.unknown',
           gatewayRef,
           reference,
@@ -404,7 +415,7 @@ export class StripePaymentGateway implements PaymentGateway {
     const message = stripeError?.message || 'Unknown payment gateway error';
 
     if (stripeError?.type === 'StripeConnectionError' || stripeError?.type === 'StripeAPIError') {
-      return new PaymentGatewayError('GATEWAY_UNAVAILABLE', message, {
+      return new PaymentGatewayError('GATEWAY_UNAVAILABLE', 'Stripe is temporarily unavailable.', {
         retryable: true,
         status: 503,
         cause: error,
@@ -412,7 +423,7 @@ export class StripePaymentGateway implements PaymentGateway {
     }
 
     if (stripeError?.type === 'StripeTimeoutError' || /timeout/i.test(message)) {
-      return new PaymentGatewayError('GATEWAY_TIMEOUT', message, {
+      return new PaymentGatewayError('GATEWAY_TIMEOUT', 'Stripe request timed out.', {
         retryable: true,
         status: 504,
         cause: error,
@@ -420,14 +431,16 @@ export class StripePaymentGateway implements PaymentGateway {
     }
 
     if (typeof stripeError?.statusCode === 'number' && stripeError.statusCode >= 500) {
-      return new PaymentGatewayError('GATEWAY_UNAVAILABLE', message, {
+      return new PaymentGatewayError('GATEWAY_UNAVAILABLE', 'Stripe is temporarily unavailable.', {
         retryable: true,
         status: 503,
         cause: error,
       });
     }
 
-    return new PaymentGatewayError('GATEWAY_REJECTED', message, {
+    // Stripe's authentication error can include part of the supplied secret.
+    // Do not expose its raw message to purchase API callers.
+    return new PaymentGatewayError('GATEWAY_REJECTED', 'Stripe rejected the checkout request.', {
       retryable: false,
       status: 502,
       cause: error,

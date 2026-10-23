@@ -1,63 +1,44 @@
-# US6-1: Payment Gateway Integration — Ticket Purchase API
+# Ticket Payment API — Purchase, Confirmation และคู่มือ Stripe Test Mode
 
-> สถานะ: Backend พร้อมใช้งาน (test mode) · ต้องรอทีม Frontend + US6-2/US6-3 ยืนยัน
-> Gateway: **Stripe (test mode)** · สกุลเงิน: **THB**
+> ครอบคลุม US6-1 (ซื้อ/เชื่อม gateway) และ US6-3 (ยืนยันการจ่ายสำเร็จ/เปิดใช้ตั๋ว)
+> Gateway: **Stripe (test mode เท่านั้น)** · สกุลเงิน: **THB**
+> ตรวจ Stripe test key และสร้าง/retrieve Checkout ผ่าน adapter จริงสำเร็จแล้ว (23 ต.ค. 2026)
+> รายการทดสอบถูก expire โดยไม่ชำระเงิน; ยังไม่ใช่หลักฐานว่าการจ่าย → webhook → เปิดใช้ตั๋วผ่านครบ flow
 
 ---
 
 ## 0. ขอบเขตงานนี้ (Scope)
 
-| ✅ อยู่ในขอบเขต US6-1                                | ❌ อยู่ในขอบเขต US6-2 / US6-3                                           |
-| ---------------------------------------------------- | ----------------------------------------------------------------------- |
-| ตาราง `payment` + migration                          | `GET /api/tickets/my-tickets` (ดูตั๋ว + ประวัติการชำระเงิน) → **US6-2** |
-| `POST /api/tickets/purchase`                         | webhook endpoint + การยืนยันผลชำระเงิน → **US6-3**                      |
-| Backend validation (สิทธิ์, โปรไฟล์, ราคา, อายุตั๋ว) | เปิดใช้ตั๋ว (`Ticket.status = PAID`) → **US6-3**                        |
-| ป้องกันคำขอซ้ำ + กู้รายการเดิม                       | ตั้ง Payment เป็น `Failed` / `Expired` จาก webhook → **US6-3**          |
-| Error handling ตอนเรียก gateway                      |                                                                         |
-| Payment gateway adapter (โค้ดกลาง)                   |                                                                         |
+| งาน                                                             | เจ้าของ / สถานะ                                              |
+| --------------------------------------------------------------- | ------------------------------------------------------------ |
+| Purchase API, Payment, gateway adapter, validation และ recovery | US6-1 Poom/Kaopoon — มีโค้ดแล้ว                              |
+| Verified successful webhook และเปิดใช้ตั๋ว                      | US6-3 Hill/Kaopoon — มีโค้ดแล้ว ใช้ service ร่วมกับ recovery |
+| Pending/failed/expired handling และ error/UI ที่เกี่ยวข้อง      | US6-3 Poom/Punt — ไม่ทำซ้ำในงานยืนยันสำเร็จ                  |
+| ฟอร์มซื้อ/validation/return pages                               | ทีม frontend US6-1                                           |
+| API และ UI ดูตั๋ว/ประวัติการจ่าย                                | ทีม US6-2                                                    |
 
-**สิ่งที่ทีม US6-3 ต้องทำต่อ (สำคัญ):**
+ใช้ webhook entry point **เดียว**; handler ของ pending/failed/expired ต้องต่อใน dispatcher เดิม
+ตอนนี้ event ที่ตรวจ signature ผ่านแต่ไม่ใช่ success จะตอบ `200, handled: false`
+โดยไม่แก้ DB และไม่บันทึก success receipt หากต้องการเติมสถานะย้อนหลังหลังเพิ่ม handler
+ต้อง resend event เหล่านั้นเอง ไม่ใช่ถือว่าตอบ 200 แล้วประมวลผลเสร็จทั้งหมด
 
-1. สร้าง `POST /api/tickets/payment/webhook` โดย mount **ก่อน `express.json()`** เพื่อให้ได้ raw body
-   (Stripe คำนวณ signature จาก byte ดิบ) — ดูหมายเหตุใน `src/server.ts`
-2. เรียก `gateway.parseWebhookEvent(rawBody, signature)` แล้วตรวจสอบ **ทุกอย่างก่อนเปิดใช้ตั๋ว**:
-   - `event.paymentState === 'paid'` (ไม่ใช่แค่ `session.completed`)
-   - `event.amountSatang === payment.amount_satang`
-   - `event.currency === payment.currency`
-   - `event.reference` → ค้นหา payment ด้วย `paymentId` (ดูหมายเหตุด้านล่าง)
-3. เมื่อยืนยันสำเร็จ: อัปเดต `payment.status = Paid`, `payment.paidAt = event.paidAt`,
-   `payment.openUid = null` (สำคัญ — ล้างช่องรายการที่เปิดอยู่ ไม่งั้นผู้ใช้จะซื้อตั๋วใหม่ไม่ได้)
-   และ `ticket.status = Paid` พร้อมเลื่อนช่วงเวลาใช้งานเป็น `paidAt` → `paidAt + payment.ticketValidityHours`
-   (ใช้ค่าที่ snapshot ไว้ ไม่ใช่ config ปัจจุบัน)
-
-> **เรื่อง identifier:** ตอนสร้าง checkout เราส่ง `reference = String(paymentId)` ให้ gateway
-> (ทั้งใน `session.metadata.reference` และ `payment_intent_data.metadata.reference`)
-> → ให้ค้นหา payment ด้วย **paymentId** เสมอ จะได้เจอแม้ยังไม่ได้บันทึก `gateway_ref`
-> (เช่นกรณี gateway สร้าง checkout สำเร็จแต่ response timeout — ดูหัวข้อ 4)
->
-> **เรื่องเวลาที่ชำระเงินสำเร็จ (`paidAt`):** ระบบจะคืน `paidAt` **เฉพาะเมื่อมีเวลาที่เกิดการเรียกเก็บเงินจริง**
-> (`charge.created`) เท่านั้น — ห้ามใช้เวลาสร้าง session หรือเวลาสร้าง PaymentIntent แทน
-> ถ้าต้องการเวลาที่ชำระสำเร็จที่แน่นอน ให้ดึงข้อมูลการชำระเงินเพิ่มเติม (เช่น expand `latest_charge`)
-> หรือกำหนดเวลาเปิดใช้ตั๋วตามนโยบายที่ทีมตกลงกัน
->
-> **กรณี gateway ยืนยันว่าจ่ายแล้ว แต่ตั๋วยังไม่ถูกเปิดใช้:**
-> ฝั่งเราบันทึก `payment.status = Paid` และปล่อยช่อง (`open_uid = null`) แต่ **ไม่** เปิดใช้ตั๋ว
-> → US6-3 ต้อง activate ตั๋วเมื่อได้รับ webhook ที่ยืนยันการจ่าย โดยตรวจ **สถานะของตั๋ว**
-> (ถ้า `ticket.status` ยังเป็น `Unpaid` ให้เปลี่ยนเป็น `Paid`) ไม่ใช่ตรวจเฉพาะสถานะของ payment
-> เพื่อให้ flow นี้ทำงานได้ทั้งกรณีที่ webhook มาก่อนและหลังที่เรา reconcile รายการ
+**ไม่เพิ่ม enum `ACTIVE`:** ใช้ `Ticket.status = PAID` และช่วง `startDateTime–endDateTime`
+ตาม booking entitlement เดิม ส่วน US6-2/UI แสดงคำว่า “Active” เมื่อตั๋วอยู่ในช่วงใช้งานได้
 
 ---
 
 ## 1. ข้อสรุปราคาและอายุใช้งานตั๋ว
 
-| หัวข้อ                 | ค่า                                                     | ที่มา / หมายเหตุ                                                                      |
-| ---------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Gateway                | **Stripe Checkout Sessions** (test mode)                | รองรับ THB, มี idempotency key ระดับ request, hosted checkout page + webhook          |
-| **ราคาตั๋ว**           | **50.00 THB** (5,000 satang)                            | `SystemConfig.ticketPriceSatang` — Backend อ่านจาก config เท่านั้น client ส่งมาไม่ได้ |
-| **อายุใช้งานตั๋ว**     | **2 ชั่วโมง** นับจากเวลาที่ชำระเงินสำเร็จ               | `SystemConfig.ticketValidityHours` — **snapshot ไว้ใน payment ตอนซื้อ**               |
-| อายุ Checkout Session  | 30 นาที                                                 | `SystemConfig.paymentCheckoutExpiryMinutes` — Stripe บังคับขั้นต่ำ 30 นาที            |
-| หน่วยเงินที่เก็บใน DB  | **สตางค์ (satang)** — จำนวนเต็ม                         | 1 THB = 100 satang เลี่ยง floating point                                              |
-| ตั๋วเริ่มใช้งานเมื่อไร | เมื่อได้รับ **webhook ยืนยันการชำระเงินสำเร็จ** (US6-3) | ไม่เปิดใช้ตั๋วก่อนยืนยันผล                                                            |
+| หัวข้อ                 | ค่า                                                             | ที่มา / หมายเหตุ                                                                      |
+| ---------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Gateway                | **Stripe Checkout Sessions** (test mode)                        | รองรับ THB, มี idempotency key ระดับ request, hosted checkout page + webhook          |
+| **ราคาตั๋ว**           | **50.00 THB** (5,000 satang)                                    | `SystemConfig.ticketPriceSatang` — Backend อ่านจาก config เท่านั้น client ส่งมาไม่ได้ |
+| **อายุใช้งานตั๋ว**     | **2 ชั่วโมง** นับจากเวลาที่ชำระเงินสำเร็จ                       | `SystemConfig.ticketValidityHours` — **snapshot ไว้ใน payment ตอนซื้อ**               |
+| อายุ Checkout Session  | 30 นาที                                                         | `SystemConfig.paymentCheckoutExpiryMinutes` — Stripe บังคับขั้นต่ำ 30 นาที            |
+| หน่วยเงินที่เก็บใน DB  | **สตางค์ (satang)** — จำนวนเต็ม                                 | 1 THB = 100 satang เลี่ยง floating point                                              |
+| ตั๋วเริ่มใช้งานเมื่อไร | เมื่อ backend ยืนยันการชำระเงินสำเร็จผ่าน webhook หรือ recovery | ไม่เปิดใช้จาก redirect หรือข้อมูลที่ผู้ใช้ส่งมาเอง                                    |
+
+ค่าราคา/อายุในตารางเป็น defaults ของ migration ไม่ใช่การยืนยันค่าของ DB ที่กำลังใช้งานจริง
 
 > **ทำไมต้อง snapshot อายุตั๋ว:** ถ้าอ่าน `ticketValidityHours` ใหม่ตอนยืนยันการจ่ายเงิน
 > แอดมินอาจแก้ config ระหว่างที่ผู้ใช้กำลังกรอกข้อมูลในหน้า checkout
@@ -68,7 +49,7 @@
 
 ---
 
-## 2. Schema ที่เพิ่ม (migration กลางชุดเดียว)
+## 2. Schema และ migrations
 
 Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket_purchase/migration.sql`
 
@@ -111,15 +92,27 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 | `ticket_validity_hours`           | `2`         | อายุใช้งานตั๋ว (ชั่วโมง)     |
 | `payment_checkout_expiry_minutes` | `30`        | อายุ Checkout Session (นาที) |
 
-### เรื่องที่ต้องทีม US6-2 / US6-3 ช่วยยืนยัน
+### ตาราง `payment_webhook_event` (US6-3)
 
-1. **ราคาตั๋ว 50 THB / 2 ชม.** ถูกต้องตามนโยบายห้องสมุดหรือไม่?
-2. ต้องมี **ตั๋วแบบเป็นรายวัน / รายครึ่งวัน** เพิ่มไหม? ถ้าต้อง จะเพิ่ม `ticketType` ลง `payment`
-3. `ManageScore.adminId` เป็น NOT NULL — ถ้าจะมีการตัดคะแนนจาก no-show ของตั๋ว จะใช้ admin คนไหนเป็นผู้บันทึก?
-4. จะมี **refund** flow ใน US6-2 หรือไม่? (enum `Refunded` เตรียมไว้แล้ว)
-5. เก็บ `uid` ซ้ำใน `payment` (denormalize) ยืนยันว่าโอเคกับทีม (ตอนนี้ทำแบบ denormalize ตามรูปแบบ `booking` / `issue_report`)
-6. **US6-3 ต้องล้าง `payment.open_uid` เป็น NULL** เมื่อ payment ออกจากสถานะเปิด (Paid/Expired/Failed)
-   ไม่งั้นผู้ใช้จะซื้อตั๋วใหม่ไม่ได้ (ระบบจะคืนรายการเก่าให้ตลอด)
+Migration เพิ่มใหม่: `20261023090000_add_payment_webhook_receipts`
+
+| คอลัมน์               | หน้าที่                                               |
+| --------------------- | ----------------------------------------------------- |
+| `gateway`, `event_id` | Compound primary key กัน event เดิมซ้ำ                |
+| `paymentid`           | FK ไป Payment พร้อม index; ลบตาม Payment ด้วย cascade |
+| `gateway_ref`         | Session ID ที่ยืนยันแล้ว                              |
+| `processed_at`        | เวลาบันทึก receipt (ไม่ใช่เวลาจ่ายเงิน)               |
+
+เก็บเฉพาะ identifiers ไม่เก็บ raw payload/ข้อมูลบัตร เป็นหลักฐานว่า success event ถูกประมวลผลแล้ว
+แม้ backend restart และเขียนใน transaction เดียวกับ Payment/Ticket
+ส่วน event คนละ ID ที่อ้างถึง payment เดียวกันป้องกันด้วย row lock และสถานะตั๋วอีกชั้น
+
+ต้อง apply migrations ก่อนเปิดใช้ webhook ไม่แก้หรือรัน migration ซื้อเดิมซ้ำ
+เครื่องพัฒนานี้ apply ทั้ง purchase และ webhook receipt migrations แล้ว (23 ต.ค. 2026)
+เครื่องอื่นยังต้องรัน `npx prisma migrate deploy` จาก `apps/backend` กับ DB ของเครื่องนั้น
+
+เรื่องที่ทีมต้องยืนยันก่อน demo: ราคา/อายุตั๋วจริง, ความพร้อมของ return pages, และการต่อ handler ของ Poom/Punt
+เมื่อรายการจบต้องล้าง `payment.open_uid` เพื่อให้ซื้อรายการใหม่ได้; success service ทำส่วน Paid แล้ว
 
 ---
 
@@ -201,7 +194,7 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 ### การกู้รายการเดิม (Recovery)
 
 **สถานการณ์:** gateway สร้าง checkout สำเร็จ แต่ response ของเรา timeout กลางทาง
-→ ถ้าตัดเป็น `Failed` ทันที ผู้ใช้จะถูกห้ามซื้อใหม่ และ webhook ที่มาสำเร็จภายหลังจะถูกข้าม (เพราะสถานะไม่ใช่ `Pending`)
+→ ถ้าตัดเป็น `Failed` และปล่อยช่องทันที ผู้ใช้อาจซื้อ checkout ใหม่ทั้งที่รายการเก่ายังจ่ายได้
 
 **วิธีแก้:**
 
@@ -236,12 +229,12 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 เวลาในฐานข้อมูลอาจผ่านไปแล้ว แต่ checkout ที่ gateway สร้างไว้ยังเปิดอยู่
 → ต้องถาม gateway ก่อนเสมอด้วย `retrieveCheckoutStatus()`:
 
-| ผลจาก gateway           | การกระทำ                                                               |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `open`                  | ยังจ่ายได้ → เก็บช่องไว้ คืนรายการเดิม                                 |
-| `paid`                  | จ่ายแล้ว → บันทึก `Paid` + ปล่อยช่อง (เปิดใช้ตั๋วเป็นหน้าที่ของ US6-3) |
-| `expired` / `not_found` | ใช้ไม่ได้แล้ว → ปิดรายการ ปล่อยให้ซื้อใหม่ได้                          |
-| `unknown`               | ตรวจไม่ได้ → คง `Unconfirmed` ห้ามปล่อยช่อง                            |
+| ผลจาก gateway           | การกระทำ                                                                          |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `open`                  | ยังจ่ายได้ → เก็บช่องไว้ คืนรายการเดิม                                            |
+| `paid`                  | ใช้ confirmation service ร่วมกัน → Payment/Ticket เป็น Paid + ปล่อยช่องแบบ atomic |
+| `expired` / `not_found` | ใช้ไม่ได้แล้ว → ปิดรายการ ปล่อยให้ซื้อใหม่ได้                                     |
+| `unknown`               | ตรวจไม่ได้ → คง `Unconfirmed` ห้ามปล่อยช่อง                                       |
 
 > เพื่อไม่ให้เกิดเหตุการณ์นี้ ระบบตรวจค่า `payment_checkout_expiry_minutes` ต้องอยู่ในช่วงที่ gateway รองรับ
 > (Stripe: 30–1440 นาที) **ก่อนสร้างรายการ** และใช้เวลาหมดอายุชุดเดียวกันทั้งฐานข้อมูลและ gateway
@@ -286,30 +279,149 @@ curl -X POST http://localhost:8080/api/tickets/purchase \
 ### ทดสอบด้วย Stripe test card
 
 ใช้ test card `4242 4242 4242 4242`, วันหมดอายุ `12/34`, CVC `123`
-เมื่อชำระเงินสำเร็จ Stripe จะยิง webhook มาที่ `/api/tickets/payment/webhook` (US6-3 ต้อง mount + `stripe listen`)
+เมื่อชำระเงินสำเร็จ Stripe จะยิง webhook มาที่ `/api/tickets/payment/webhook`
+route mount แล้ว แต่การรันบน localhost ยังต้องตั้ง `stripe listen` และ signing secret ตามหัวข้อ 10
 
 ---
 
 ## 7. โครงสร้างโค้ดที่เพิ่ม
 
-| ไฟล์                                    | หน้าที่                                                                                                 |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `src/services/paymentGateway.ts`        | Interface (สัญญา) + `PaymentGatewayError` — ไม่ผูกกับ SDK ใด + โค้ดกลางที่ทีม US6-3 ใช้ต่อ              |
-| `src/services/stripePaymentGateway.ts`  | การ implement จริงด้วย Stripe SDK (Checkout Session + webhook verify)                                   |
-| `src/services/paymentGatewayFactory.ts` | เลือก gateway จาก env — จุดเดียวที่ต้องแก้เพื่อเพิ่ม provider ใหม่                                      |
-| `src/services/ticketService.ts`         | Business logic: ราคา/อายุจาก config, idempotency, กันรายการซ้ำ, กู้รายการเดิม, จัดการ error จาก gateway |
-| `src/controllers/ticketController.ts`   | HTTP layer: validate input, map error → status code                                                     |
-| `src/routes/ticketRoutes.ts`            | `POST /purchase` (OUTSIDER only)                                                                        |
-| `src/test/test_ticket_purchase.ts`      | 29 unit tests (รวม route-level test ผ่าน Express จริง)                                                  |
+| ไฟล์                                                | หน้าที่                                                                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/services/paymentGateway.ts`                    | Interface (สัญญา) + `PaymentGatewayError` — ไม่ผูกกับ SDK ใด + โค้ดกลางที่ทีม US6-3 ใช้ต่อ              |
+| `src/services/stripePaymentGateway.ts`              | การ implement จริงด้วย Stripe SDK (Checkout Session + webhook verify)                                   |
+| `src/services/paymentGatewayFactory.ts`             | เลือก gateway จาก env — จุดเดียวที่ต้องแก้เพื่อเพิ่ม provider ใหม่                                      |
+| `src/services/ticketService.ts`                     | Business logic: ราคา/อายุจาก config, idempotency, กันรายการซ้ำ, กู้รายการเดิม, จัดการ error จาก gateway |
+| `src/controllers/ticketController.ts`               | HTTP layer: validate input, map error → status code                                                     |
+| `src/routes/ticketRoutes.ts`                        | `POST /purchase` (OUTSIDER only)                                                                        |
+| `src/routes/paymentWebhookRoutes.ts`                | รับ raw webhook, verify signature และแปลงผลเป็น HTTP response                                           |
+| `src/services/paymentConfirmationService.ts`        | ตรวจผลที่ยืนยันแล้วและอัปเดต Payment/Ticket/receipt ใน transaction                                      |
+| `src/test/test_ticket_purchase.ts`                  | 46 purchase tests รวม route-level tests                                                                 |
+| `src/test/test_payment_confirmation.ts`             | Confirmation/HTTP signature tests และ live-key guard ไม่เรียก Stripe network                            |
+| `src/test/test_payment_confirmation_integration.ts` | PostgreSQL rollback/concurrency tests บน DB ทดสอบแยก                                                    |
 
 ---
 
 ## 8. สิ่งที่ยังไม่ได้ทำ (รอทีมอื่น / US ถัดไป)
 
-- ❌ ยืนยันตั๋วด้วย QR code / NFC ที่จุดเช็คอิน (น่าจะเป็น US6-2)
-- ❌ Webhook endpoint + การยืนยันผลชำระเงิน + เปิดใช้ตั๋ว (US6-3)
-- ❌ ดูรายการตั๋ว + ประวัติการชำระเงิน (US6-2)
+- ทดสอบร่วมกับฟอร์มซื้อ/return pages ของ frontend (ทีมยืนยันว่าสอง return pages พร้อมแล้ว)
+- ดูรายการตั๋ว + ประวัติการชำระเงิน รวมถึง UI แสดง Active (US6-2)
+- Handler ของ pending/failed/expired บน dispatcher เดียวกัน (US6-3 Poom/Punt)
 - ❌ Worker ที่ mark payment เป็น `Expired` เมื่อ Checkout Session หมดอายุ
   (ตอนนี้ปิดรายการเก่าตอนผู้ใช้มาซื้อใหม่แทน — แต่ถ้าผู้ใช้ไม่กลับมาอีก รายการจะค้างเป็น `Pending`)
 - ❌ Refund flow (enum `Refunded` เตรียมไว้แล้ว)
-- ❌ Integration test กับ Stripe test mode จริง (ต้องมี test card + `stripe listen`)
+- ทดสอบจ่ายด้วย Stripe test card จน webhook เปิดใช้ตั๋วจริง (สร้าง/retrieve Checkout ทดสอบแล้ว แต่ยังไม่จ่าย)
+
+## 9. ยืนยันการชำระเงินและเปิดใช้ตั๋ว (US6-3)
+
+### `POST /api/tickets/payment/webhook`
+
+- Mount **ก่อน `express.json()`** ใน `server.ts`; รับ raw body สูงสุด 256 KB
+- ยืนยันด้วย `Stripe-Signature` ไม่ใช้ JWT; return URL และ `paid: true` จาก browser ไม่ใช่หลักฐานการจ่าย
+- รับ `checkout.session.completed` และ `checkout.session.async_payment_succeeded`
+  แต่ completed ที่ยัง unpaid และ `no_payment_required` ไม่เปิดใช้ตั๋วราคามากกว่า 0
+- หลัง verify signed event จะ retrieve Checkout Session อิสระอีกครั้ง โดย expand `payment_intent.latest_charge`
+  ตรวจ paid state, metadata payment ID, gateway/session binding, ยอดจำนวนเต็ม, currency และเจ้าของตั๋ว
+- ค้นจาก `metadata.reference = String(paymentId)` เพื่อรองรับ webhook มาก่อนบันทึก `gatewayRef`
+- Adapter ปัจจุบันใช้ `latest_charge.created` เป็น `paidAt`; ไม่ใช้ Session/PaymentIntent creation หรือเวลารับ webhook แทน
+  หากข้อมูลเวลาไม่ครบจะตอบ retryable failure ไม่กำหนดเวลาใหม่เอง
+
+ภายใน **transaction เดียว**: lock Payment ก่อน Ticket (`FOR UPDATE`) → บันทึก receipt ที่ไม่ซ้ำ
+→ Payment PAID + ล้าง openUid → Ticket PAID พร้อมช่วง `paidAt .. paidAt + payment.ticketValidityHours`
+ใช้ validity ที่ snapshot ตอนซื้อ ไม่อ่าน config ปัจจุบันมาทับ และ event ซ้ำไม่ยืดอายุตั๋ว
+หากขั้นใดล้มเหลว การเปลี่ยนสถานะ/ช่วงใช้งานและ receipt จะ rollback ทั้งหมด
+
+Purchase recovery เรียก service เดียวกัน และซ่อมกรณีเก่า Payment PAID แต่ Ticket UNPAID ได้
+การจ่ายที่ยืนยันแล้วมาช้ายังเปิดใช้จากสถานะ local FAILED/EXPIRED ได้ แต่ไม่เปิดใช้รายการ REFUNDED
+handler ของ failure/refund ในอนาคตต้องใช้ locking/conditional transitions ที่สอดคล้องกัน
+และไม่ลด Paid กลับเพราะ failure event เก่ามาถึงช้า
+
+| HTTP / ผล          | ความหมาย                                                                |
+| ------------------ | ----------------------------------------------------------------------- |
+| 200, handled=true  | ยืนยัน/เปิดใช้แล้ว หรือ event เดิมประมวลผลแล้ว; commit ก่อนตอบ          |
+| 200, handled=false | ไม่รองรับ event หรือ signed event มี business mismatch ถาวร; ไม่เปิดใช้ |
+| 400                | signature/raw body ไม่ถูกต้อง หรือ live event ถูกปฏิเสธ                 |
+| 503                | gateway/เวลา/DB/config มีปัญหาชั่วคราว ให้ Stripe retry                 |
+
+Business mismatch บันทึกเฉพาะ safe code/identifier ให้ผู้ดูแลตรวจ ไม่ log raw payload, secrets หรือ raw gateway errors
+อย่าถือว่า HTTP 200 หรือ `received: true` แปลว่าจ่ายเงินหรือเปิดใช้สำเร็จ
+
+## 10. ตั้งค่า Stripe Sandbox สำหรับ demo
+
+1. สร้าง/เลือก sandbox ของทีม แล้วใส่ test API key (`sk_test_...` หรือ `rk_test_...` ที่สิทธิ์เพียงพอ)
+   ใน `apps/backend/.env` เป็น `STRIPE_SECRET_KEY` โดยตรง ไม่ส่ง key ในแชต/Git/`NEXT_PUBLIC_*`
+   gateway factory ปฏิเสธ live key และ webhook ปฏิเสธ live event
+2. ตั้ง return URLs ใน `apps/backend/.env` ตามที่ตกลงกับ frontend:
+
+   ```dotenv
+   TICKET_CHECKOUT_SUCCESS_URL="http://localhost:3000/tickets/success"
+   TICKET_CHECKOUT_CANCEL_URL="http://localhost:3000/tickets/cancel"
+   ```
+
+   ทีม frontend ยืนยันว่าสองหน้านี้พร้อมแล้ว ต้องทดสอบร่วมกับ branch ที่มีหน้าเหล่านี้
+   URL ใช้พาผู้ใช้กลับ ไม่ใช่ endpoint ยืนยันการจ่าย
+   การกลับหน้า cancel ไม่ได้ยกเลิกรายการใน DB อัตโนมัติ
+
+   Flow นี้เป็น **Stripe-hosted Checkout**: frontend เรียก purchase API แล้วเปิด `data.checkoutUrl`
+   ด้วย `window.location.assign(...)` ไม่จำเป็นต้องใช้ `STRIPE_PUBLISHABLE_KEY` หรือ Stripe.js
+   Publishable key ใช้เมื่อ frontend เรียก Stripe.js/Elements/embedded checkout เอง
+   ห้ามส่ง `STRIPE_SECRET_KEY` หรือ `STRIPE_WEBHOOK_SECRET` ให้ frontend
+
+3. ติดตั้ง Stripe CLI แล้วเชื่อม sandbox เดียวกัน:
+
+   ```bash
+   stripe login
+   stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to http://localhost:8080/api/tickets/payment/webhook
+   ```
+
+   นำ `whsec_...` ที่ listener แสดงไปใส่ `STRIPE_WEBHOOK_SECRET` แล้ว restart backend และเปิด listener ค้างไว้
+   secret ของ CLI และ secret ของ deployed HTTPS webhook เป็นคนละชุด ต้องใช้ให้ตรง endpoint
+
+4. เปิด application DB และ apply migrations ตามกระบวนการ deploy ของทีม ตรวจ SystemConfig:
+   `ticketPriceSatang` และ `ticketValidityHours` ต้องเป็นจำนวนเต็มบวก,
+   `paymentCheckoutExpiryMinutes` อยู่ในช่วง 30–1440 นาที ค่า defaults คือ 5000 สตางค์/2 ชั่วโมง/30 นาที
+
+คู่มือ provider: [API keys](https://docs.stripe.com/keys), [Webhooks](https://docs.stripe.com/webhooks),
+[Test cards](https://docs.stripe.com/testing)
+
+## 11. Tests และเกณฑ์รับงาน
+
+รันจาก repository root โดยไม่ต้องมีบัญชี Stripe:
+
+```bash
+npm ci
+npx prisma generate --schema apps/backend/prisma/schema.prisma
+npm run test:payment --workspace=apps/backend
+```
+
+HTTP tests ใช้ real Stripe signature verifier กับ local test-only signing secret และ mock SDK retrieval
+จึงไม่เรียก Stripe network และไม่ใช่หลักฐานว่า checkout sandbox จริงทำงานครบแล้ว
+
+สำหรับ PostgreSQL integration tests ให้สร้าง DB **ทิ้งได้** ชื่อลงท้าย `_test` และคนละ URL กับ application DB
+apply migrations ที่ DB นั้น แล้วตั้ง `TEST_DATABASE_URL` เพื่อรัน:
+
+```bash
+npm run test:payment:integration --workspace=apps/backend
+```
+
+Tests ใช้ generated fixture IDs และลบเฉพาะแถวที่สร้างเอง อยู่ใน `test:integration`/PR checks ด้วย
+ครอบคลุม event ID เดียวพร้อมกัน 8 คำขอ, success ต่าง ID พร้อมกัน 8 คำขอ,
+DB rollback เมื่อ final payment write ล้มเหลวและ retry, webhook แข่งกับ purchase recovery,
+ซ่อม PAID/UNPAID เดิม และ webhook มาก่อน checkout response
+
+### Demo กับ Stripe test mode หลังตั้งค่าครบ
+
+1. Login เป็น outside visitor ที่ profile ครบ เรียก purchase API แล้วเปิด `checkoutUrl` ที่ตอบกลับ
+2. ใช้ test card เท่านั้น ห้ามใช้บัตรจริง
+3. ตรวจ webhook delivery และ DB: Payment PAID, openUid null, Ticket PAID, ช่วงใช้งานตรง validity snapshot
+4. Resend event เดิม: receipt count/ช่วงใช้งานไม่เพิ่ม ตรวจ delayed success และ completed-but-unpaid ด้วย
+   Pending/failed ต้องไม่ให้สิทธิ์ใช้งาน ส่วน negative status/error UI เป็นอีก task
+5. ตรวจ booking ของ outside visitor ว่าต้องมี paid ticket ครอบคลุมช่วงจอง
+   หากต้องเห็นสถานะเปลี่ยนอัตโนมัติบนหน้าเว็บ ต้องมี read API/UI ของ US6-2 และ refresh/poll บน return page
+
+อย่าใช้ generic `stripe trigger checkout.session.completed` เป็นหลักฐาน end-to-end
+เพราะปกติไม่มี reference ของ Payment ในระบบนี้ ต้องเริ่มจาก purchase API เพื่อให้ตรวจ metadata/ยอดได้
+
+สิ่งที่ยังต้องยืนยันสำหรับ demo ครบ flow: webhook secret ต้องตรงกับ CLI listener หรือ public HTTPS endpoint/tunnel
+ที่ส่งเข้า backend; จากนั้นใช้ frontend branch ที่มี return pages ทดลองจ่ายด้วย test card และตรวจการเปิดใช้ตั๋ว
+ไม่มี fake-payment endpoint หรือ runtime mock fallback; mock SDK ใน tests มีไว้ทดสอบโดยไม่พึ่ง network และควรเก็บไว้

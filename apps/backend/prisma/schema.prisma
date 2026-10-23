@@ -306,6 +306,7 @@ model Payment {
 
   // Relations
   ticket         Ticket        @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  webhookEvents  PaymentWebhookEvent[]
 
   // หนึ่งผู้ใช้ + หนึ่ง client key = หนึ่งรายการซื้อ (ตัวตั้งกันรายการซ้ำอยู่ที่ระดับ DB)
   // map: ต้องตรงกับชื่อ index ที่ migration สร้างจริง ไม่งั้น Prisma จะคิดว่ามี diff
@@ -314,6 +315,21 @@ model Payment {
   @@index([status, expiresAt], name: "idx_payment_expiry")
   @@index([gatewayRef], name: "idx_payment_gateway_ref")
   @@map("payment")
+}
+
+// Successful confirmation receipts only. Unhandled failed/expired events belong
+// to the other US6-3 task and must NOT be marked processed here.
+model PaymentWebhookEvent {
+  gateway     String   @db.VarChar(32) @map("gateway")
+  eventId     String   @db.VarChar(255) @map("event_id")
+  paymentId   Int      @map("paymentid")
+  gatewayRef  String   @db.VarChar(255) @map("gateway_ref")
+  processedAt DateTime @default(now()) @map("processed_at")
+  payment     Payment  @relation(fields: [paymentId], references: [paymentId], onDelete: Cascade)
+
+  @@id([gateway, eventId])
+  @@index([paymentId], map: "idx_payment_webhook_payment")
+  @@map("payment_webhook_event")
 }
 
 // ==========================================
