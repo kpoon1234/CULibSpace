@@ -1722,6 +1722,7 @@ test('ticket routes are properly mounted', () => {
 
   assert.ok(paths.includes('POST /purchase'));
   assert.ok(paths.includes('GET /my-tickets'));
+  assert.ok(paths.includes('GET /:ticketId'));
 });
 
 // ---------------------------------------------------------------------------

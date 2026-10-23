@@ -8,7 +8,6 @@ import {
 } from './paymentGateway.js';
 
 const defaultPrisma = new PrismaClient();
-const prisma = new PrismaClient();
 /** รหัส gateway ที่บันทึกลงฐานข้อมูล */
 export const PAYMENT_GATEWAY_NAME = 'stripe';
 
@@ -805,13 +804,17 @@ export class TicketService {
       ...previousPayment,
     } as TicketPurchaseError;
   }
+
   /**
-   * [US6-2] ดึงตั๋วทั้งหมดของผู้ใช้พร้อมประวัติการชำระเงิน
+   * [US6-2] ดึงตั๋วทั้งหมดของผู้ใช้พร้อมประวัติการชำระเงินและช่วงเวลาที่ใช้งานได้
    */
-  static async getMyTickets(uid: number) {
-    // query ดึงข้อมูลตั๋วพร้อม payment ที่ผูกกับตั๋ว
+  static async getMyTickets(
+    uid: number,
+    prisma: any = defaultPrisma,
+    now: Date = new Date()
+  ): Promise<FormattedTicket[]> {
     const tickets = await prisma.ticket.findMany({
-      where: { uid: uid },
+      where: { uid },
       include: {
         payments: {
           orderBy: { createdAt: 'desc' },
@@ -830,18 +833,127 @@ export class TicketService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // เนื่องจากดึงมาด้วย include Prisma จะรับรู้ Type ว่า ticket มี payments แล้ว
-    // ถ้ายังติดตัวแดงเรื่อง Type สามารถใส่ any ในวงเล็บได้เป็น (ticket: any)
-    return tickets.map((ticket: any) => ({
-      ticketId: ticket.ticketId,
-      status: ticket.status,
-      startDateTime: ticket.startDateTime,
-      endDateTime: ticket.endDateTime,
-      createdAt: ticket.createdAt,
-      // ใส่ fallback [] กรณีที่ไม่มีประวัติชำระเงิน
-      payments: ticket.payments || [],
-    }));
+    return tickets.map((ticket: any) => formatTicket(ticket, now));
   }
+
+  /**
+   * [US6-2] ดึงรายละเอียดตั๋วรายใบพร้อมประวัติการชำระเงินและสิทธิ์การเข้าถึง
+   */
+  static async getTicketById(
+    ticketId: number,
+    user: { uid: number; role?: string },
+    prisma: any = defaultPrisma,
+    now: Date = new Date()
+  ): Promise<FormattedTicket> {
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketId },
+      include: {
+        payments: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            paymentId: true,
+            amountSatang: true,
+            currency: true,
+            status: true,
+            gateway: true,
+            ticketValidityHours: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!ticket) {
+      const error: any = new Error('Ticket not found');
+      error.status = 404;
+      error.code = 'TICKET_NOT_FOUND';
+      throw error;
+    }
+
+    const isAdmin = user.role === 'ADMIN';
+    if (!isAdmin && ticket.uid !== user.uid) {
+      const error: any = new Error('You are not authorized to view this ticket');
+      error.status = 403;
+      error.code = 'FORBIDDEN';
+      throw error;
+    }
+
+    return formatTicket(ticket, now);
+  }
+}
+
+export interface FormattedTicketPayment {
+  paymentId: number;
+  amountSatang: number;
+  amountBaht: number;
+  currency: string;
+  status: PaymentStatus;
+  gateway: string;
+  ticketValidityHours: number;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface FormattedTicket {
+  ticketId: number;
+  uid: number;
+  status: TicketStatus | 'EXPIRED';
+  startDateTime: string;
+  endDateTime: string;
+  createdAt: string;
+  validTimePeriod: {
+    startDateTime: string;
+    endDateTime: string;
+    isValidNow: boolean;
+    isExpired: boolean;
+    remainingSeconds: number;
+  };
+  payments: FormattedTicketPayment[];
+}
+
+export function formatTicket(ticket: any, now: Date = new Date()): FormattedTicket {
+  const start = new Date(ticket.startDateTime);
+  const end = new Date(ticket.endDateTime);
+  const nowMs = now.getTime();
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+
+  const isExpired = nowMs > endMs;
+  let effectiveStatus: TicketStatus | 'EXPIRED' = ticket.status;
+  if (ticket.status === TicketStatus.PAID && isExpired) {
+    effectiveStatus = 'EXPIRED';
+  }
+
+  const isValidNow = ticket.status === TicketStatus.PAID && nowMs >= startMs && nowMs <= endMs;
+  const remainingSeconds = isValidNow ? Math.max(0, Math.floor((endMs - nowMs) / 1000)) : 0;
+
+  return {
+    ticketId: ticket.ticketId,
+    uid: ticket.uid,
+    status: effectiveStatus,
+    startDateTime: start.toISOString(),
+    endDateTime: end.toISOString(),
+    createdAt: new Date(ticket.createdAt).toISOString(),
+    validTimePeriod: {
+      startDateTime: start.toISOString(),
+      endDateTime: end.toISOString(),
+      isValidNow,
+      isExpired,
+      remainingSeconds,
+    },
+    payments: (ticket.payments || []).map((p: any) => ({
+      paymentId: p.paymentId,
+      amountSatang: p.amountSatang,
+      amountBaht: (p.amountSatang ?? 0) / 100,
+      currency: p.currency,
+      status: p.status,
+      gateway: p.gateway,
+      ticketValidityHours: p.ticketValidityHours,
+      paidAt: p.paidAt ? new Date(p.paidAt).toISOString() : null,
+      createdAt: new Date(p.createdAt).toISOString(),
+    })),
+  };
 }
 
 export default TicketService;
