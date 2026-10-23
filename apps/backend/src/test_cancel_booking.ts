@@ -749,7 +749,9 @@ async function runTests() {
   {
     const mockNow = new Date('2026-10-05T15:30:00Z');
     const mockPrisma = {
-      systemConfig: { findFirst: async () => ({ earlyCheckInMinutes: 15 }) },
+      systemConfig: {
+        findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 7 }),
+      },
       booking: {
         findFirst: async () => ({
           bookingId: 801,
@@ -772,6 +774,11 @@ async function runTests() {
     assert(
       activeBooking?.cancellation?.deadline === '2026-10-05T15:45:00.000Z',
       'Case 6.1: Deadline aligns with early check-in window (15:45:00)'
+    );
+    assert(
+      activeBooking?.checkInWindow?.earlyMinutes === 15 &&
+        activeBooking?.checkInWindow?.lateMinutes === 7,
+      'Case 6.1: Active booking exposes the DB-configured check-in window'
     );
   }
 
