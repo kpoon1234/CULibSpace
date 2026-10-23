@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, FormEvent } from 'react';
+import Link from 'next/link';
 import {
   TIME_SLOTS,
   filterTimeRange,
@@ -86,6 +87,7 @@ export default function ReservationModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [denyReason, setDenyReason] = useState('');
+  const [denyCode, setDenyCode] = useState<string | undefined>();
   const [locking, setLocking] = useState(true);
   const [checking, setChecking] = useState(false);
   // Lazy initializer: React guarantees this runs once at mount, so it's the
@@ -102,6 +104,7 @@ export default function ReservationModal({
       setSubmitting(state.phase === 'submitting');
       setChecking(state.phase === 'checking');
       setDenyReason(state.reason ?? '');
+      setDenyCode(state.code);
       if (state.phase === 'success') setStep('success');
       else if (state.phase === 'failed') setStep('fail');
       else if (state.phase === 'uncertain' || state.phase === 'checking') setStep('uncertain');
@@ -213,14 +216,29 @@ export default function ReservationModal({
               {step === 'uncertain' ? 'Reservation not yet confirmed' : 'Reservation unsuccessful'}
             </h2>
             <p className="mt-2 text-sm text-gray-500">{denyReason}</p>
-            <button
-              type="button"
-              onClick={handleTryAgain}
-              disabled={checking}
-              className="mt-8 w-full rounded-full bg-rose-400 px-6 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2"
-            >
-              {checking ? 'Checking…' : step === 'uncertain' ? 'Check booking status' : 'Try again'}
-            </button>
+            {denyCode === 'TICKET_REQUIRED' && (
+              <Link
+                href="/visitor/ticket"
+                onClick={handleClose}
+                className="mt-6 w-full rounded-full bg-rose-500 px-6 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                Buy visitor ticket
+              </Link>
+            )}
+            {denyCode !== 'TICKET_REQUIRED' && (
+              <button
+                type="button"
+                onClick={handleTryAgain}
+                disabled={checking}
+                className="mt-8 w-full rounded-full bg-rose-400 px-6 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2"
+              >
+                {checking
+                  ? 'Checking…'
+                  : step === 'uncertain'
+                    ? 'Check booking status'
+                    : 'Try again'}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleClose}
