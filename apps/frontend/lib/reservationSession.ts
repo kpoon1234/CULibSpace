@@ -8,6 +8,7 @@ import type {
 export type ReservationState = {
   phase: 'holding' | 'ready' | 'submitting' | 'success' | 'failed' | 'uncertain' | 'checking';
   reason?: string;
+  code?: string;
 };
 
 export interface ReservationTransport {
@@ -154,7 +155,11 @@ export function createReservationCoordinator(api: ReservationTransport, now = Da
               // Never release on an unknown outcome, even after unmount.
             } else {
               if (result.code && INVALID_LOCK_CODES.has(result.code)) token = null;
-              emit({ phase: 'failed', reason: result.reason || 'The reservation was rejected.' });
+              emit({
+                phase: 'failed',
+                reason: result.reason || 'The reservation was rejected.',
+                code: result.code,
+              });
               if (disposed) await release();
             }
           });
