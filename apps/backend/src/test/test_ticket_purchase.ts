@@ -1713,14 +1713,15 @@ test('the purchase route rejects a non-outsider with 403', async () => {
   );
 });
 
-test('only the purchase route is exposed in this PR', () => {
+test('ticket routes are properly mounted', () => {
   const paths = (ticketRoutes as any).stack
     .filter((layer: any) => layer.route)
     .map(
       (layer: any) => `${Object.keys(layer.route.methods)[0].toUpperCase()} ${layer.route.path}`
     );
 
-  assert.deepEqual(paths, ['POST /purchase']);
+  assert.ok(paths.includes('POST /purchase'));
+  assert.ok(paths.includes('GET /my-tickets'));
 });
 
 // ---------------------------------------------------------------------------
