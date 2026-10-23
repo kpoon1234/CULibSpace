@@ -13,9 +13,6 @@ import {
 
 const defaultPrisma = new PrismaClient();
 
-/** รหัส gateway ที่บันทึกลงฐานข้อมูล */
-export const PAYMENT_GATEWAY_NAME = 'stripe';
-
 /** ความยาวสูงสุดของ client key ที่ API รับได้ (ตรงกับคอลัมน์ client_key) */
 export const MAX_CLIENT_KEY_LENGTH = 64;
 
@@ -92,7 +89,7 @@ interface StoredCheckoutPayload {
  *      -> เก็บสถานะ UNCONFIRMED ไว้ (ไม่ตัดเป็น FAILED)
  *      -> ครั้งถัดไปที่ยิงด้วย idempotency key เดิม จะกู้ checkout เดิมกลับมาได้
  *         เพราะ gateway เก็บผลลัพธ์ของ idempotency key เดิมไว้
- *   4. ตั๋วจะยังไม่ถูกเปิดใช้งานจนกว่าจะได้รับ webhook ยืนยันการชำระเงินสำเร็จ
+ *   4. เปิดใช้ตั๋วหลังยืนยันกับ gateway ผ่าน webhook หรือ recovery เท่านั้น
  */
 export class TicketService {
   static async purchase(
@@ -574,7 +571,7 @@ export class TicketService {
    *
    * - มี gatewayRef -> ดึงสถานะจริงจาก gateway
    *   - open      : ยังจ่ายได้ -> เก็บช่องไว้ คืนรายการเดิม
-   *   - paid      : จ่ายแล้ว -> บันทึกสถานะ (การเปิดใช้ตั๋วเป็นหน้าที่ของ US6-3)
+   *   - paid      : ใช้ confirmation service ยืนยันและเปิดใช้ตั๋วใน transaction เดียวกัน
    *   - expired   : หมดอายุ -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
    *   - not_found : gateway ไม่เคยสร้าง -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
    *   - unknown   : ตรวจไม่ได้ -> คงสถานะรอตรวจสอบ ห้ามปล่อยช่อง

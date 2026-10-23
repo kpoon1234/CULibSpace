@@ -33,7 +33,7 @@
 | ---------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Gateway                | **Stripe Checkout Sessions** (test mode)                        | รองรับ THB, มี idempotency key ระดับ request, hosted checkout page + webhook          |
 | **ราคาตั๋ว**           | **50.00 THB** (5,000 satang)                                    | `SystemConfig.ticketPriceSatang` — Backend อ่านจาก config เท่านั้น client ส่งมาไม่ได้ |
-| **อายุใช้งานตั๋ว**     | **2 ชั่วโมง** นับจากเวลาที่ชำระเงินสำเร็จ                       | `SystemConfig.ticketValidityHours` — **snapshot ไว้ใน payment ตอนซื้อ**               |
+| **อายุใช้งานตั๋ว**     | **2 ชั่วโมง** นับจาก backend ยืนยันและเปิดใช้ตั๋วครั้งแรก       | `SystemConfig.ticketValidityHours` — **snapshot ไว้ใน payment ตอนซื้อ**               |
 | อายุ Checkout Session  | 30 นาที                                                         | `SystemConfig.paymentCheckoutExpiryMinutes` — Stripe บังคับขั้นต่ำ 30 นาที            |
 | หน่วยเงินที่เก็บใน DB  | **สตางค์ (satang)** — จำนวนเต็ม                                 | 1 THB = 100 satang เลี่ยง floating point                                              |
 | ตั๋วเริ่มใช้งานเมื่อไร | เมื่อ backend ยืนยันการชำระเงินสำเร็จผ่าน webhook หรือ recovery | ไม่เปิดใช้จาก redirect หรือข้อมูลที่ผู้ใช้ส่งมาเอง                                    |
@@ -72,7 +72,7 @@ Migration: `apps/backend/prisma/migrations/20261021165000_add_payment_for_ticket
 | `ticket_validity_hours` | INTEGER                        | snapshot อายุตั๋วตอนซื้อ                                                                                          |
 | `expires_at`            | TIMESTAMP                      | หมดอายุของ **payment attempt** — ค่าเดียวกับที่ส่งให้ gateway                                                     |
 | `open_uid`              | INTEGER UNIQUE                 | ช่อง "รายการที่เปิดอยู่" ของผู้ใช้ (ดูหัวข้อ 4)                                                                   |
-| `paid_at`               | TIMESTAMP                      | เวลาที่ชำระเงินสำเร็จ (US6-3 เป็นคนเขียน)                                                                         |
+| `paid_at`               | TIMESTAMP                      | เวลา backend ยืนยันและเปิดใช้ตั๋วครั้งแรก ไม่ใช่เวลาสร้าง Stripe object                                           |
 
 **Unique constraints (ตัวตั้งกันรายการซ้ำอยู่ที่ระดับ DB ไม่พึ่งการเช็คในแอปพลิเคชัน):**
 
@@ -320,16 +320,19 @@ route mount แล้ว แต่การรันบน localhost ยัง�
 - ยืนยันด้วย `Stripe-Signature` ไม่ใช้ JWT; return URL และ `paid: true` จาก browser ไม่ใช่หลักฐานการจ่าย
 - รับ `checkout.session.completed` และ `checkout.session.async_payment_succeeded`
   แต่ completed ที่ยัง unpaid และ `no_payment_required` ไม่เปิดใช้ตั๋วราคามากกว่า 0
-- หลัง verify signed event จะ retrieve Checkout Session อิสระอีกครั้ง โดย expand `payment_intent.latest_charge`
+- หลัง verify signed event จะ retrieve Checkout Session อิสระอีกครั้ง
   ตรวจ paid state, metadata payment ID, gateway/session binding, ยอดจำนวนเต็ม, currency และเจ้าของตั๋ว
 - ค้นจาก `metadata.reference = String(paymentId)` เพื่อรองรับ webhook มาก่อนบันทึก `gatewayRef`
-- Adapter ปัจจุบันใช้ `latest_charge.created` เป็น `paidAt`; ไม่ใช้ Session/PaymentIntent creation หรือเวลารับ webhook แทน
-  หากข้อมูลเวลาไม่ครบจะตอบ retryable failure ไม่กำหนดเวลาใหม่เอง
+- นโยบายอายุตั๋ว: หลังยืนยัน paid state และข้อมูลทั้งหมดแล้ว ใช้เวลา backend เปิดใช้ครั้งแรกเป็น `paidAt`
+  ไม่อ้างอิง `created` ของ Session, PaymentIntent หรือ Charge และไม่ต้อง expand ข้อมูล Charge
+  เวลารับ webhook ที่ยังไม่ผ่านการยืนยันไม่เปิดใช้ตั๋ว
 
 ภายใน **transaction เดียว**: lock Payment ก่อน Ticket (`FOR UPDATE`) → บันทึก receipt ที่ไม่ซ้ำ
 → Payment PAID + ล้าง openUid → Ticket PAID พร้อมช่วง `paidAt .. paidAt + payment.ticketValidityHours`
 ใช้ validity ที่ snapshot ตอนซื้อ ไม่อ่าน config ปัจจุบันมาทับ และ event ซ้ำไม่ยืดอายุตั๋ว
 หากขั้นใดล้มเหลว การเปลี่ยนสถานะ/ช่วงใช้งานและ receipt จะ rollback ทั้งหมด
+`paidAt` ใน API/DB จึงหมายถึงเวลายืนยันและเปิดใช้ในระบบเรา ไม่ใช่เวลาจ่ายสำเร็จที่รับรองจากธนาคาร
+Ticket ที่ PAID อยู่แล้วคงช่วงใช้งานเดิมแม้หมดอายุ หาก Payment เก่าไม่มี `paidAt` ใช้เวลาเริ่มของ Ticket เดิม
 
 Purchase recovery เรียก service เดียวกัน และซ่อมกรณีเก่า Payment PAID แต่ Ticket UNPAID ได้
 การจ่ายที่ยืนยันแล้วมาช้ายังเปิดใช้จากสถานะ local FAILED/EXPIRED ได้ แต่ไม่เปิดใช้รายการ REFUNDED
@@ -341,7 +344,7 @@ handler ของ failure/refund ในอนาคตต้องใช้ lock
 | 200, handled=true  | ยืนยัน/เปิดใช้แล้ว หรือ event เดิมประมวลผลแล้ว; commit ก่อนตอบ          |
 | 200, handled=false | ไม่รองรับ event หรือ signed event มี business mismatch ถาวร; ไม่เปิดใช้ |
 | 400                | signature/raw body ไม่ถูกต้อง หรือ live event ถูกปฏิเสธ                 |
-| 503                | gateway/เวลา/DB/config มีปัญหาชั่วคราว ให้ Stripe retry                 |
+| 503                | gateway/DB มีปัญหาชั่วคราว ให้ Stripe retry                             |
 
 Business mismatch บันทึกเฉพาะ safe code/identifier ให้ผู้ดูแลตรวจ ไม่ log raw payload, secrets หรือ raw gateway errors
 อย่าถือว่า HTTP 200 หรือ `received: true` แปลว่าจ่ายเงินหรือเปิดใช้สำเร็จ

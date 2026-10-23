@@ -299,7 +299,7 @@ model Payment {
   //    (กันสร้าง checkout ซ้ำ และบังคับให้กู้รายการเดิมก่อนซื้อใหม่)
   // หมายเหตุ: US6-3 ต้องล้าง openUid เมื่อ payment เปลี่ยนเป็น Paid/Expired/Failed
   openUid        Int?          @unique(map: "payment_open_uid_key") @map("open_uid")
-  // เวลาที่ชำระเงินสำเร็จ
+  // เวลา backend ยืนยันและเปิดใช้ตั๋วครั้งแรก ไม่ใช่เวลาสร้าง Stripe Charge
   paidAt         DateTime?     @map("paid_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")

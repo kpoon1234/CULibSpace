@@ -24,7 +24,7 @@ const { TicketService } = await import('../services/ticketService.js');
 const prisma = new PrismaClient();
 const run = randomUUID();
 const users: number[] = [];
-const paidAt = new Date(Date.now() - 10_000);
+const testStartedAt = Date.now();
 let configId: number | undefined;
 let number = 0;
 
@@ -43,7 +43,6 @@ function gateway(paymentId: number): PaymentGateway {
       reference: String(paymentId),
       amountSatang: 5000,
       currency: 'THB',
-      paidAt,
       raw: {},
     }),
     parseWebhookEvent: async () => {
@@ -129,16 +128,18 @@ async function assertActivated(ticketId: number, paymentId: number) {
   assert.equal(payment.status, PaymentStatus.PAID);
   assert.equal(payment.openUid, null);
   assert.equal(ticket.status, TicketStatus.PAID);
-  assert.equal(ticket.startDateTime.getTime(), paidAt.getTime());
-  assert.equal(ticket.endDateTime.getTime(), paidAt.getTime() + 2 * 3_600_000);
+  assert.ok(ticket.startDateTime.getTime() >= testStartedAt);
+  assert.ok(ticket.startDateTime.getTime() <= Date.now());
+  assert.equal(payment.paidAt?.getTime(), ticket.startDateTime.getTime());
+  assert.equal(ticket.endDateTime.getTime() - ticket.startDateTime.getTime(), 2 * 3_600_000);
   // The same paid/coverage predicate used by the outside-visitor booking guard.
   assert.equal(
     await prisma.ticket.count({
       where: {
         ticketId,
         status: TicketStatus.PAID,
-        startDateTime: { lte: new Date(paidAt.getTime() + 60_000) },
-        endDateTime: { gte: new Date(paidAt.getTime() + 120_000) },
+        startDateTime: { lte: new Date(ticket.startDateTime.getTime() + 60_000) },
+        endDateTime: { gte: new Date(ticket.startDateTime.getTime() + 120_000) },
       },
     }),
     1
@@ -185,6 +186,36 @@ try {
   );
   await assertActivated(independent.ticket.ticketId, independent.payment.paymentId);
   console.log('PASS: independent success events do not extend ticket validity.');
+
+  const expired = await fixture();
+  const originalStart = new Date(Date.now() - 3 * 3_600_000);
+  const originalEnd = new Date(originalStart.getTime() + 2 * 3_600_000);
+  await prisma.ticket.update({
+    where: { ticketId: expired.ticket.ticketId },
+    data: { status: TicketStatus.PAID, startDateTime: originalStart, endDateTime: originalEnd },
+  });
+  await prisma.payment.update({
+    where: { paymentId: expired.payment.paymentId },
+    data: { status: PaymentStatus.PAID, paidAt: originalStart, openUid: null },
+  });
+  const late = await PaymentConfirmationService.handleWebhook(
+    expired.event,
+    expired.gateway,
+    prisma
+  );
+  assert.equal(late.activated, false);
+  const unchanged = await prisma.ticket.findUniqueOrThrow({
+    where: { ticketId: expired.ticket.ticketId },
+  });
+  assert.equal(unchanged.startDateTime.getTime(), originalStart.getTime());
+  assert.equal(unchanged.endDateTime.getTime(), originalEnd.getTime());
+  assert.equal(
+    (
+      await prisma.payment.findUniqueOrThrow({ where: { paymentId: expired.payment.paymentId } })
+    ).paidAt?.getTime(),
+    originalStart.getTime()
+  );
+  console.log('PASS: a late success event cannot restart an already expired PAID ticket.');
 
   const rollback = await fixture();
   const failing = prisma.$extends({
@@ -239,7 +270,11 @@ try {
   const legacy = await fixture();
   await prisma.payment.update({
     where: { paymentId: legacy.payment.paymentId },
-    data: { status: PaymentStatus.PAID, paidAt: new Date(), openUid: null },
+    data: {
+      status: PaymentStatus.PAID,
+      paidAt: new Date(Date.now() - 3 * 3_600_000),
+      openUid: null,
+    },
   });
   await TicketService.purchase(
     { uid: legacy.owner.uid, idempotencyKey: legacy.payment.clientKey },
@@ -247,7 +282,7 @@ try {
     prisma
   );
   await assertActivated(legacy.ticket.ticketId, legacy.payment.paymentId);
-  console.log('PASS: legacy PAID payment with UNPAID ticket is repaired with verified timing.');
+  console.log('PASS: legacy PAID/UNPAID repair starts a full validity window at activation.');
 
   // A webhook can arrive before US6-1 receives the checkout creation response.
   const earlyOwner = await user();
@@ -278,7 +313,6 @@ try {
       reference: String(createdPaymentId),
       amountSatang: 5000,
       currency: 'THB',
-      paidAt,
       raw: {},
     }),
   };

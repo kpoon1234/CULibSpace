@@ -32,7 +32,6 @@ function validDate(date: Date | undefined): date is Date {
   return date instanceof Date && Number.isFinite(date.getTime());
 }
 
-type Receipt = { eventId: string; gatewayRef: string };
 type ConfirmationResult = {
   handled: boolean;
   duplicate?: boolean;
@@ -81,8 +80,7 @@ export class PaymentConfirmationService {
       return { handled: true, duplicate: true, activated: false, paymentId };
     }
 
-    // Also retrieve the current state: supports delayed delivery and expands the
-    // payment details needed for paidAt without relying on session.created.
+    // Verify current payment state independently of the signed notification.
     const checkout = await gateway.retrieveCheckoutStatus(event.gatewayRef);
     if (checkout.state !== 'paid') {
       throw new PaymentConfirmationError(
@@ -101,10 +99,7 @@ export class PaymentConfirmationService {
         'Payment event does not match the checkout.'
       );
     }
-    return this.confirmCheckout(gateway.name, event.gatewayRef, checkout, prisma, {
-      eventId: event.eventId,
-      gatewayRef: event.gatewayRef,
-    });
+    return this.confirmCheckout(gateway.name, event.gatewayRef, checkout, prisma, event.eventId);
   }
 
   /** Shared by webhook and US6-1 recovery. Network I/O is completed BEFORE the
@@ -114,7 +109,7 @@ export class PaymentConfirmationService {
     gatewayRef: string,
     checkout: GatewayCheckoutStatus,
     prisma: PrismaClient = defaultPrisma,
-    receipt?: Receipt
+    eventId?: string
   ): Promise<ConfirmationResult> {
     const paymentId = paymentIdFrom(checkout.reference);
     if (checkout.state !== 'paid' || checkout.livemode === true) {
@@ -173,13 +168,6 @@ export class PaymentConfirmationService {
       }
 
       const activate = ticket.status === TicketStatus.UNPAID;
-      if (!validDate(checkout.paidAt) && (activate || !validDate(payment.paidAt ?? undefined))) {
-        throw new PaymentConfirmationError(
-          'PAYMENT_TIME_UNAVAILABLE',
-          'Verified payment time is unavailable.',
-          503
-        );
-      }
       if (
         activate &&
         (!Number.isInteger(payment.ticketValidityHours) || payment.ticketValidityHours <= 0)
@@ -191,28 +179,31 @@ export class PaymentConfirmationService {
       }
       // A receipt is committed only with successful confirmation. createMany
       // ON CONFLICT avoids aborting a PostgreSQL transaction on duplicate IDs.
-      if (receipt) {
+      if (eventId) {
         const inserted = await tx.paymentWebhookEvent.createMany({
-          data: { gateway, eventId: receipt.eventId, gatewayRef, paymentId },
+          data: { gateway, eventId, gatewayRef, paymentId },
           skipDuplicates: true,
         });
         if (inserted.count === 0) {
           const existing = await tx.paymentWebhookEvent.findUniqueOrThrow({
-            where: { gateway_eventId: { gateway, eventId: receipt.eventId } },
+            where: { gateway_eventId: { gateway, eventId } },
           });
           this.assertReceipt(existing, paymentId, gatewayRef);
           return { handled: true, duplicate: true, activated: false, paymentId };
         }
       }
 
+      // Ticket validity starts at our first verified activation, not at Stripe
+      // object creation. Serialize this decision under the ticket row lock.
+      // An already-active ticket keeps its original start even if paidAt is null.
+      const confirmedAt = activate ? new Date() : (payment.paidAt ?? ticket.startDateTime);
       if (activate) {
-        const start = checkout.paidAt!;
-        const end = new Date(start.getTime() + payment.ticketValidityHours * 3_600_000);
+        const end = new Date(confirmedAt.getTime() + payment.ticketValidityHours * 3_600_000);
         if (!validDate(end))
           throw new PaymentConfirmationError('INVALID_TICKET_VALIDITY', 'Invalid ticket validity.');
         await tx.ticket.update({
           where: { ticketId: ticket.ticketId },
-          data: { status: TicketStatus.PAID, startDateTime: start, endDateTime: end },
+          data: { status: TicketStatus.PAID, startDateTime: confirmedAt, endDateTime: end },
         });
       }
       await tx.payment.update({
@@ -222,7 +213,7 @@ export class PaymentConfirmationService {
           gatewayRef,
           openUid: null,
           // Never move the paid time/validity on a second success event.
-          paidAt: activate ? checkout.paidAt : (payment.paidAt ?? checkout.paidAt),
+          paidAt: confirmedAt,
         },
       });
       return { handled: true, duplicate: false, activated: activate, paymentId };

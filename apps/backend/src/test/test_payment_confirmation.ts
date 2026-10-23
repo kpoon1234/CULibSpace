@@ -14,7 +14,7 @@ import { getPaymentGateway } from '../services/paymentGatewayFactory.js';
 import { createPaymentWebhookRouter } from '../routes/paymentWebhookRoutes.js';
 import type { GatewayPaymentEvent, GatewayCheckoutStatus } from '../services/paymentGateway.js';
 
-const paidAt = new Date('2026-10-23T10:00:00Z');
+const confirmedAt = new Date('2026-10-23T10:00:00Z');
 const secret = 'whsec_unit_test_only';
 const stripe = new Stripe('sk_test_fixture');
 
@@ -69,7 +69,6 @@ function fixture() {
     reference: '101',
     amountSatang: 5000,
     currency: 'thb',
-    paidAt,
     raw: {},
   };
   const findReceipt = ({ where }: any) =>
@@ -134,8 +133,9 @@ function fixture() {
           },
           retrieve: async (_id, params) => {
             state.retrievals++;
-            assert.deepEqual(params.expand, ['payment_intent.latest_charge']);
+            assert.equal(params, undefined, 'confirmation does not need expanded charges');
             return {
+              ...(checkout.raw as Record<string, unknown>),
               id: 'cs_test_1',
               livemode: checkout.livemode,
               status: 'complete',
@@ -143,12 +143,6 @@ function fixture() {
               amount_total: checkout.amountSatang,
               currency: checkout.currency,
               metadata: { reference: checkout.reference },
-              payment_intent: checkout.paidAt
-                ? {
-                    status: 'succeeded',
-                    latest_charge: { created: checkout.paidAt.getTime() / 1000 },
-                  }
-                : null,
             };
           },
         },
@@ -169,21 +163,37 @@ async function rejectsCode(promise: Promise<unknown>, code: string) {
   );
 }
 
-test('verified success activates payment/ticket, clears openUid and uses snapshotted validity', async () => {
+test('verified success without charge details starts full validity at first confirmation', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: confirmedAt });
   const f = fixture();
   const result = await PaymentConfirmationService.handleWebhook(event(), f.gateway, f.db);
   assert.equal(result.activated, true);
   assert.equal(f.state.payment.status, PaymentStatus.PAID);
   assert.equal(f.state.payment.openUid, null);
   assert.equal(f.state.ticket.status, TicketStatus.PAID);
-  assert.equal(f.state.ticket.startDateTime.getTime(), paidAt.getTime());
-  assert.equal(f.state.ticket.endDateTime.getTime(), paidAt.getTime() + 2 * 3_600_000);
+  assert.equal(f.state.payment.paidAt?.getTime(), confirmedAt.getTime());
+  assert.equal(f.state.ticket.startDateTime.getTime(), confirmedAt.getTime());
+  assert.equal(f.state.ticket.endDateTime.getTime(), confirmedAt.getTime() + 2 * 3_600_000);
   assert.equal(f.state.receipts.length, 1);
   assert.match(f.state.locks[0], /payment.*FOR UPDATE/);
   assert.match(f.state.locks[1], /ticket.*FOR UPDATE/);
 });
 
-test('same event is acknowledged without contacting Stripe again; different success cannot extend validity', async () => {
+test('delayed payment ignores old Session, PaymentIntent and Charge creation times', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: confirmedAt });
+  const f = fixture();
+  const old = Math.floor(confirmedAt.getTime() / 1000) - 3 * 3600;
+  f.checkout.raw = {
+    created: old,
+    payment_intent: { created: old, status: 'succeeded', latest_charge: { created: old } },
+  };
+  await PaymentConfirmationService.handleWebhook(event(), f.gateway, f.db);
+  assert.equal(f.state.ticket.startDateTime.getTime(), confirmedAt.getTime());
+  assert.equal(f.state.ticket.endDateTime.getTime(), confirmedAt.getTime() + 2 * 3_600_000);
+});
+
+test('same event and different success cannot extend validity even after the ticket expires', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: confirmedAt });
   const f = fixture();
   await PaymentConfirmationService.handleWebhook(event(), f.gateway, f.db);
   const expiry = f.state.ticket.endDateTime.getTime();
@@ -192,10 +202,10 @@ test('same event is acknowledged without contacting Stripe again; different succ
     true
   );
   assert.equal(f.state.retrievals, 1);
-  f.checkout.paidAt = new Date(paidAt.getTime() + 3_600_000);
+  t.mock.timers.tick(3 * 3_600_000);
   await PaymentConfirmationService.handleWebhook(event({ eventId: 'evt_2' }), f.gateway, f.db);
   assert.equal(f.state.ticket.endDateTime.getTime(), expiry);
-  assert.equal(f.state.payment.paidAt?.getTime(), paidAt.getTime());
+  assert.equal(f.state.payment.paidAt?.getTime(), confirmedAt.getTime());
   assert.equal(f.state.receipts.length, 2);
 });
 
@@ -212,6 +222,34 @@ for (const status of [
     assert.equal(f.state.ticket.status, TicketStatus.PAID);
   });
 }
+
+test('legacy PAID payment with UNPAID ticket gets full validity when first activated', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: confirmedAt });
+  const f = fixture();
+  f.state.payment.status = PaymentStatus.PAID;
+  f.state.payment.paidAt = new Date(confirmedAt.getTime() - 3 * 3_600_000);
+  await PaymentConfirmationService.handleWebhook(event(), f.gateway, f.db);
+  assert.equal(f.state.payment.paidAt.getTime(), confirmedAt.getTime());
+  assert.equal(f.state.ticket.startDateTime.getTime(), confirmedAt.getTime());
+  assert.equal(f.state.ticket.endDateTime.getTime(), confirmedAt.getTime() + 2 * 3_600_000);
+});
+
+test('an already PAID ticket with missing payment timestamp keeps its original validity', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: confirmedAt });
+  const f = fixture();
+  const start = new Date(confirmedAt.getTime() - 3 * 3_600_000);
+  const end = new Date(start.getTime() + 2 * 3_600_000);
+  Object.assign(f.state.ticket, {
+    status: TicketStatus.PAID,
+    startDateTime: start,
+    endDateTime: end,
+  });
+  const result = await PaymentConfirmationService.handleWebhook(event(), f.gateway, f.db);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.paidAt?.getTime(), start.getTime());
+  assert.equal(f.state.ticket.startDateTime.getTime(), start.getTime());
+  assert.equal(f.state.ticket.endDateTime.getTime(), end.getTime());
+});
 
 test('webhook can bind a missing gatewayRef by the verified metadata payment ID', async () => {
   const f = fixture();
@@ -299,18 +337,12 @@ test('foreign gateway, mismatched stored checkout, ownership and refunded paymen
   }
 });
 
-test('missing payment/time, unknown gateway state and live mode do not activate', async () => {
+test('missing payment, unknown gateway state and live mode do not activate', async () => {
   const missing = fixture();
   missing.state.payment.paymentId = 999;
   await rejectsCode(
     PaymentConfirmationService.handleWebhook(event(), missing.gateway, missing.db),
     'PAYMENT_NOT_FOUND'
-  );
-  const time = fixture();
-  time.checkout.paidAt = undefined;
-  await rejectsCode(
-    PaymentConfirmationService.handleWebhook(event(), time.gateway, time.db),
-    'PAYMENT_TIME_UNAVAILABLE'
   );
   const unknown = fixture();
   unknown.checkout.state = 'unknown';

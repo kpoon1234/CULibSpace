@@ -158,9 +158,7 @@ export class StripePaymentGateway implements PaymentGateway {
    */
   async retrieveCheckoutStatus(gatewayRef: string): Promise<GatewayCheckoutStatus> {
     try {
-      const session = await this.stripe.checkout.sessions.retrieve(gatewayRef, {
-        expand: ['payment_intent.latest_charge'],
-      });
+      const session = await this.stripe.checkout.sessions.retrieve(gatewayRef);
 
       const object = session as unknown as Record<string, unknown>;
       const metadata = object['metadata'] as { reference?: string } | undefined;
@@ -180,7 +178,6 @@ export class StripePaymentGateway implements PaymentGateway {
         amountSatang: session.amount_total ?? undefined,
         currency: session.currency ?? undefined,
         reference: metadata?.reference,
-        paidAt: this.readPaidAt(object),
         raw: object,
       };
     } catch (error) {
@@ -248,11 +245,6 @@ export class StripePaymentGateway implements PaymentGateway {
     // สถานะการจ่ายเงินจริงจาก gateway (ไม่เท่ากับ "session completed")
     const paymentState = this.readPaymentState(object);
 
-    // เวลาที่ชำระเงินสำเร็จจริง
-    // ต้องมาจาก payment intent (จ่ายสำเร็จเมื่อไร) ไม่ใช่ session.created
-    // เพราะ session.created คือเวลาที่ผู้ใช้ยังกำลังกรอกข้อมูลอยู่
-    const paidAt = this.readPaidAt(object);
-
     switch (event.type) {
       case 'checkout.session.completed':
       case 'checkout.session.async_payment_succeeded':
@@ -267,7 +259,6 @@ export class StripePaymentGateway implements PaymentGateway {
             amountSatang,
             currency,
             paymentState,
-            paidAt,
             raw: event,
           };
         }
@@ -279,7 +270,6 @@ export class StripePaymentGateway implements PaymentGateway {
           amountSatang,
           currency,
           paymentState,
-          paidAt,
           raw: event,
         };
       case 'checkout.session.async_payment_failed':
@@ -329,49 +319,6 @@ export class StripePaymentGateway implements PaymentGateway {
     if (raw === 'unpaid') return 'unpaid';
     if (raw === 'no_payment_required') return 'no_payment_required';
     return 'unknown';
-  }
-
-  /**
-   * อ่านเวลาที่ชำระเงินสำเร็จจริง
-   * -------------------------------------------------------------------------
-   * ใช้ได้เฉพาะ "เวลาที่เกิดการเรียกเก็บเงินจริง" (charge) เท่านั้น
-   * - payment_intent.created  = เวลาสร้าง PaymentIntent ไม่ใช่เวลาจ่าย -> ใช้ไม่ได้
-   * - latest_charge.created    = เวลาที่เกิดการเรียกเก็บเงินจริง -> ใช้ได้
-   *
-   * ถ้าไม่มีข้อมูลที่เชื่อถือได้ -> คืน undefined
-   * ให้ US6-3 ดึงข้อมูลการชำระเงินเพิ่มเติมหรือกำหนดเวลาเปิดใช้ตั๋วตามนโยบายที่ตกลงกัน
-   * (ห้ามใช้เวลาสร้าง session / PaymentIntent แทนเวลาจ่าย)
-   */
-  private readPaidAt(object: Record<string, unknown>): Date | undefined {
-    const paymentIntent = object['payment_intent'] as
-      | {
-          id?: string;
-          created?: number;
-          status?: string;
-          latest_charge?: { created?: number } | string | null;
-        }
-      | string
-      | null
-      | undefined;
-
-    // ไม่มี payment intent ที่ expand มา -> ไม่มีเวลาจ่ายจริงที่เชื่อถือได้
-    if (!paymentIntent || typeof paymentIntent === 'string') {
-      return undefined;
-    }
-
-    // PaymentIntent ยังไม่สำเร็จ -> ยังไม่มีเวลาจ่าย
-    if (paymentIntent.status !== 'succeeded') {
-      return undefined;
-    }
-
-    // latest_charge ต้องเป็น object ที่มีข้อมูลเวลาจริง
-    // ถ้าเป็นแค่ id (string) หรือไม่มี -> ไม่มีเวลาจ่ายที่เชื่อถือได้
-    const charge = paymentIntent.latest_charge;
-    if (!charge || typeof charge !== 'object' || typeof charge.created !== 'number') {
-      return undefined;
-    }
-
-    return new Date(charge.created * 1000);
   }
 
   private assertAmount(amountSatang: number): void {

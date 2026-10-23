@@ -55,7 +55,6 @@ function fakeGateway(overrides: Record<string, any> = {}) {
     maxCheckoutExpiryMinutes: GATEWAY_MAX_EXPIRY_MINUTES,
     calls,
     checkoutState: 'open' as string,
-    paidAt: undefined as Date | undefined,
 
     prepareCheckoutSession(input: any) {
       const min = Date.now() + this.minCheckoutExpiryMinutes * 60 * 1000;
@@ -110,7 +109,6 @@ function fakeGateway(overrides: Record<string, any> = {}) {
         amountSatang: PRICE_SATANG,
         currency: 'THB',
         reference: gateway.reference,
-        paidAt: gateway.paidAt,
         raw: {},
       };
     },
@@ -1144,7 +1142,6 @@ test('recovery confirms the paid checkout and activates the ticket through US6-3
   const { client, state } = mockPrisma();
   const gateway = fakeGateway();
   gateway.checkoutState = 'paid';
-  gateway.paidAt = new Date('2026-10-22T10:00:00.000Z');
   gateway.reference = '813';
   state.tickets.push({ ticketId: 513, uid: 7, status: TicketStatus.UNPAID });
 
@@ -1170,6 +1167,7 @@ test('recovery confirms the paid checkout and activates the ticket through US6-3
     updatedAt: past,
   });
 
+  const before = Date.now();
   const result = await TicketService.purchase(
     { uid: 7, idempotencyKey: 'paid-key' },
     gateway as any,
@@ -1178,14 +1176,19 @@ test('recovery confirms the paid checkout and activates the ticket through US6-3
 
   assert.equal(result.paymentId, 813);
   assert.equal(state.payments[0].status, PaymentStatus.PAID);
-  assert.equal(state.payments[0].paidAt?.toISOString(), '2026-10-22T10:00:00.000Z');
+  assert.ok(state.payments[0].paidAt.getTime() >= before);
+  assert.ok(state.payments[0].paidAt.getTime() <= Date.now());
   assert.equal(state.payments[0].openUid, null);
   assert.equal(state.tickets[0]?.status, TicketStatus.PAID);
-  assert.equal(state.tickets[0]?.startDateTime.toISOString(), '2026-10-22T10:00:00.000Z');
+  assert.equal(state.tickets[0]?.startDateTime.getTime(), state.payments[0].paidAt.getTime());
+  assert.equal(
+    state.tickets[0].endDateTime.getTime() - state.tickets[0].startDateTime.getTime(),
+    VALIDITY_HOURS * 3_600_000
+  );
 });
 
 // ---------------------------------------------------------------------------
-// Regression: [4] paidAt must never fall back to the session / intent creation time
+// Creation timestamps are not a payment confirmation timestamp.
 // ---------------------------------------------------------------------------
 
 test('the adapter does not use payment_intent.created as the paid time', async () => {
@@ -1225,10 +1228,10 @@ test('the adapter does not use payment_intent.created as the paid time', async (
   // ต้องรู้ว่าจ่ายสำเร็จ แต่ห้ามคืนเวลาสร้าง PaymentIntent
   assert.equal(event.type, 'payment.succeeded');
   assert.equal(event.paymentState, 'paid');
-  assert.equal(event.paidAt, undefined, 'must not fall back to payment_intent.created');
+  assert.equal('paidAt' in event, false, 'adapter must not infer confirmation time');
 });
 
-test('the adapter uses the charge timestamp when the charge is expanded', async () => {
+test('the adapter does not treat Charge creation as successful confirmation time', async () => {
   process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
 
   const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
@@ -1262,7 +1265,7 @@ test('the adapter uses the charge timestamp when the charge is expanded', async 
   const event = await gateway.parseWebhookEvent(Buffer.from(payload), signature);
 
   assert.equal(event.type, 'payment.succeeded');
-  assert.equal(event.paidAt?.getTime(), chargeCreated * 1000);
+  assert.equal('paidAt' in event, false, 'even an expanded Charge is not a confirmation clock');
 });
 
 test('a completed session that is not paid is not reported as a successful payment', async () => {

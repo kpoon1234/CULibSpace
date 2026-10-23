@@ -67,8 +67,6 @@ export interface GatewayCheckoutStatus {
   currency?: string;
   /** อ้างอิงกลับเข้าระบบ (paymentId) */
   reference?: string;
-  /** เวลาที่ชำระเงินสำเร็จจริง (เฉพาะเมื่อมีข้อมูลที่เชื่อถือได้) */
-  paidAt?: Date;
   raw: unknown;
 }
 
@@ -94,12 +92,6 @@ export interface GatewayPaymentEvent {
   currency?: string;
   /** สถานะการจ่ายเงินจริงจาก gateway (ไม่ใช่แค่ "session completed") */
   paymentState: GatewayPaymentState;
-  /**
-   * เวลาที่ชำระเงินสำเร็จจริง
-   * หมายเหตุ: ค่านี้ไม่ควรเป็นเวลาที่สร้าง checkout session
-   * (เวลาสร้าง session คือเวลาที่ผู้ใช้ยังกำลังกรอกข้อมูลอยู่)
-   */
-  paidAt?: Date;
   /** payload ดิบ ไว้ debug / audit */
   raw: unknown;
 }
