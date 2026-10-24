@@ -11,6 +11,7 @@ import bookingRoutes from './routes/bookingRoutes.js';
 import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
+import issueRoutes from './routes/issueRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
 import { BookingService } from './services/bookingService.js';
@@ -60,6 +61,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/system-config', systemConfigRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/issues', issueRoutes);
 
 // Health check / diagnostic endpoint
 app.get('/api/hello', (req, res) => {
