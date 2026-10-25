@@ -14,35 +14,50 @@ type VisitorUser = {
   role?: string;
 };
 
+type ActiveRequest = {
+  requestId: number;
+  token: string;
+};
+
 const PURCHASE_KEY_PREFIX = 'culibspace:ticket-purchase:';
 
 export default function VisitorTicketPage() {
   const router = useRouter();
   const authSnapshot = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
-  const authToken = useSyncExternalStore(subscribeToAuth, getAuthToken, () => null);
 
   const requestEpoch = useRef(0);
+  const activeRequest = useRef<ActiveRequest | null>(null);
   const idempotencyKey = useRef<{ uid: number; value: string } | null>(null);
 
-  const [submittingRequest, setSubmittingRequest] = useState<{
-    requestId: number;
-    token: string;
-  } | null>(null);
-
-  const isSubmitting =
-    submittingRequest?.requestId === requestEpoch.current && submittingRequest.token === authToken;
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [ticketActive, setTicketActive] = useState(false);
+  const [ticketExpired, setTicketExpired] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
 
   useEffect(() => {
-    // Invalidate in-flight requests when the account changes or page unmounts.
-    return () => {
+    const unsubscribe = subscribeToAuth(() => {
+      // Invalidate any request owned by the previous auth session.
       requestEpoch.current += 1;
+      activeRequest.current = null;
+
+      setIsSubmitting(false);
+      setError('');
+      setNotice('');
+      setPaymentPending(false);
+      setPaymentConfirmed(false);
+      setTicketActive(false);
+      setTicketExpired(false);
+    });
+
+    return () => {
+      unsubscribe();
+      requestEpoch.current += 1;
+      activeRequest.current = null;
     };
-  }, [authToken]);
+  }, []);
 
   let user: VisitorUser | null = null;
 
@@ -63,7 +78,7 @@ export default function VisitorTicketPage() {
     try {
       key = sessionStorage.getItem(storageKey);
     } catch {
-      // Use an in-memory key if sessionStorage is unavailable.
+      // Fall back to an in-memory key if sessionStorage is unavailable.
     }
 
     if (!key) {
@@ -86,7 +101,7 @@ export default function VisitorTicketPage() {
     try {
       sessionStorage.setItem(`${PURCHASE_KEY_PREFIX}${uid}`, key);
     } catch {
-      // Use an in-memory key if sessionStorage is unavailable.
+      // Fall back to an in-memory key if sessionStorage is unavailable.
     }
 
     idempotencyKey.current = { uid, value: key };
@@ -115,11 +130,19 @@ export default function VisitorTicketPage() {
       return;
     }
 
+    // Prevent duplicate requests for the same authenticated session.
+    if (activeRequest.current?.token === tokenAtStart) {
+      return;
+    }
+
     const uid = user.uid;
     const requestId = ++requestEpoch.current;
+    activeRequest.current = { requestId, token: tokenAtStart };
 
     const isCurrentRequest = () =>
-      requestEpoch.current === requestId && getAuthToken() === tokenAtStart;
+      activeRequest.current?.requestId === requestId &&
+      activeRequest.current.token === tokenAtStart &&
+      getAuthToken() === tokenAtStart;
 
     let purchaseKey: string;
 
@@ -127,16 +150,17 @@ export default function VisitorTicketPage() {
       purchaseKey = rotatePurchaseKey(uid);
       setPaymentConfirmed(false);
       setTicketActive(false);
+      setTicketExpired(false);
     } else {
       purchaseKey = getPurchaseKey(uid);
     }
 
-    setSubmittingRequest({ requestId, token: tokenAtStart });
+    setIsSubmitting(true);
 
     try {
       const result = await purchaseVisitorTicket(purchaseKey);
 
-      // Ignore a response from an old request, account, or unmounted page.
+      // Ignore results from an old request, account, or unmounted page.
       if (!isCurrentRequest()) return;
 
       if (!result.ok) {
@@ -159,7 +183,7 @@ export default function VisitorTicketPage() {
         }
 
         if (result.code === 'PAYMENT_NOT_COMPLETED' || result.code === 'GATEWAY_REJECTED') {
-          // Backend says this attempt is terminal; the next attempt needs a new key.
+          // The previous attempt is terminal; the next attempt needs a new key.
           rotatePurchaseKey(uid);
         }
 
@@ -170,17 +194,48 @@ export default function VisitorTicketPage() {
       const paymentStatus = result.data.paymentStatus.toUpperCase();
       const ticketStatus = result.data.ticketStatus.toUpperCase();
 
-      // A paid response is final for this purchase, even when checkoutUrl is null.
+      // A paid response is final, even when checkoutUrl is null.
       if (paymentStatus === 'PAID') {
-        const isActive = ticketStatus === 'PAID';
-
         setPaymentConfirmed(true);
-        setTicketActive(isActive);
-        setNotice(
-          isActive
-            ? 'Payment confirmed. Your visitor ticket is active.'
-            : 'Payment confirmed. Your ticket is waiting for activation.'
-        );
+
+        if (ticketStatus !== 'PAID') {
+          setTicketActive(false);
+          setTicketExpired(false);
+          setNotice('Payment confirmed. Your ticket is waiting for activation.');
+          return;
+        }
+
+        const startMs = Date.parse(result.data.ticketStartDateTime);
+        const endMs = Date.parse(result.data.ticketEndDateTime);
+        const now = Date.now();
+
+        // Do not claim the ticket is active if its validity window is missing or invalid.
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+          setTicketActive(false);
+          setTicketExpired(false);
+          setNotice('Payment confirmed, but the ticket validity period could not be verified.');
+          return;
+        }
+
+        if (now >= endMs) {
+          setTicketActive(false);
+          setTicketExpired(true);
+          setNotice('This visitor ticket has expired. You can purchase a new ticket.');
+          return;
+        }
+
+        if (now < startMs) {
+          setTicketActive(false);
+          setTicketExpired(false);
+          setNotice(
+            `Payment confirmed. Your ticket becomes active at ${new Date(startMs).toLocaleString()}.`
+          );
+          return;
+        }
+
+        setTicketActive(true);
+        setTicketExpired(false);
+        setNotice('Payment confirmed. Your visitor ticket is active.');
         return;
       }
 
@@ -210,7 +265,8 @@ export default function VisitorTicketPage() {
       }
     } finally {
       if (isCurrentRequest()) {
-        setSubmittingRequest(null);
+        activeRequest.current = null;
+        setIsSubmitting(false);
       }
     }
   }
@@ -279,14 +335,18 @@ export default function VisitorTicketPage() {
             </p>
           )}
 
-          {paymentConfirmed && ticketActive ? (
+          {ticketActive || ticketExpired ? (
             <button
               type="button"
               onClick={() => startPurchase(true)}
               disabled={isSubmitting}
               className="mt-6 w-full rounded-md bg-cta-primary px-5 py-3 text-sm font-semibold text-white hover:bg-cta-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
-              {isSubmitting ? 'Connecting to checkout…' : 'Purchase another ticket'}
+              {isSubmitting
+                ? 'Connecting to checkout…'
+                : ticketExpired
+                  ? 'Purchase a new ticket'
+                  : 'Purchase another ticket'}
             </button>
           ) : (
             <button
