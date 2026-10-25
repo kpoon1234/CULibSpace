@@ -6,6 +6,8 @@ const router = Router();
 
 // POST /api/tickets/purchase : ซื้อตั๋วผู้เข้าชมภายนอก (เฉพาะ OUTSIDER)
 // GET /api/tickets/my-tickets และ GET /api/tickets/:ticketId : ดูตั๋วและประวัติชำระเงิน (US6-2)
+// US6-3's webhook is mounted separately before express.json() in server.ts;
+// do not duplicate it behind this JSON-parsed router.
 router.post('/purchase', authenticateToken, requireRoles('OUTSIDER'), TicketController.purchase);
 router.get(
   '/my-tickets',
