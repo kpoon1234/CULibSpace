@@ -125,6 +125,108 @@ export class TicketController {
       handleError(res, error, 'Error purchasing ticket');
     }
   }
+  /**
+   * GET /api/tickets/my-tickets
+   * [US6-2] ดึงรายละเอียดตั๋วและประวัติการชำระเงินของผู้เข้าชมภายนอก
+   */
+  static async getMyTickets(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const uid = authReq.user?.uid;
+
+      if (!uid) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: User session required',
+        });
+        return;
+      }
+
+      const tickets = await TicketService.getMyTickets(uid);
+
+      res.status(200).json({
+        success: true,
+        data: tickets,
+      });
+    } catch (error: any) {
+      handleError(res, error, 'Error fetching user tickets');
+    }
+  }
+
+  /**
+   * GET /api/tickets/:ticketId
+   * [US6-2] ดึงรายละเอียดตั๋วรายใบพร้อมประวัติการชำระเงินและช่วงเวลาที่ใช้ได้
+   */
+  static async getTicketById(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const user = authReq.user;
+
+      if (!user) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: Session required',
+        });
+        return;
+      }
+
+      const isAdmin = user.role === 'ADMIN';
+
+      // 1. แยกตรวจ session ของ admin และ user ให้ชัดเจน
+      if (!isAdmin && !user.uid) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: User session required',
+        });
+        return;
+      }
+
+      if (isAdmin && !user.adminId) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: Admin session required',
+        });
+        return;
+      }
+
+      const rawId = Array.isArray(req.params.ticketId)
+        ? req.params.ticketId[0]
+        : req.params.ticketId;
+      const ticketId = Number(rawId);
+
+      // 2. จำกัดค่าให้อยู่ในช่วง 1 - 2,147,483,647 (Prisma Int Limit)
+      if (
+        typeof rawId !== 'string' ||
+        !/^[1-9]\d*$/.test(rawId) ||
+        !Number.isSafeInteger(ticketId) ||
+        ticketId > 2147483647
+      ) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_TICKET_ID',
+          error: 'ticketId must be a positive integer within Prisma Int bounds',
+        });
+        return;
+      }
+
+      // 3. ส่งข้อมูลไป Service (รองรับ admin ที่ไม่มี uid ด้วยค่า undefined)
+      const ticket = await TicketService.getTicketById(ticketId, {
+        uid: isAdmin ? undefined : user.uid,
+        role: user.role,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: ticket,
+      });
+    } catch (error: any) {
+      handleError(res, error, 'Error fetching ticket detail');
+    }
+  }
 }
 
 export default TicketController;
