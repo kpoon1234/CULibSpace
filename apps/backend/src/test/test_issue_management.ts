@@ -149,6 +149,39 @@ test('admin list service filters by status and description and returns user/tabl
   });
 });
 
+for (const [name, description] of [
+  ['repeated spaces', 'Socket  broken'],
+  ['multiple lines', 'Socket\nbroken'],
+] as const) {
+  test(`admin list finds a copied description with ${name}`, async () => {
+    const row = issueRow({ issueInformation: description });
+    // Match the literal case-insensitive substring sent to Prisma, including whitespace.
+    const matchingRows = (args: any) =>
+      [row].filter((issue) =>
+        issue.issueInformation
+          .toLowerCase()
+          .includes(args.where.issueInformation.contains.toLowerCase())
+      );
+    const client = {
+      issueReport: {
+        findMany: async (args: any) => matchingRows(args),
+        count: async (args: any) => matchingRows(args).length,
+      },
+      $transaction: async (queries: Promise<unknown>[]) => Promise.all(queries),
+    } as unknown as PrismaClient;
+
+    const result = await IssueService.listAdmin(
+      { q: `  ${description.toUpperCase()}  `, page: 1, pageSize: 20 },
+      client
+    );
+
+    assert.equal(result.total, 1);
+    assert.equal(result.issues.length, 1);
+    assert.equal(result.issues[0]?.issueId, row.issueId);
+    assert.equal(result.issues[0]?.issueInformation, description);
+  });
+}
+
 test('create controller returns 201, success details and normalized input', async () => {
   const originalCreate = IssueService.create;
   const calls: unknown[] = [];

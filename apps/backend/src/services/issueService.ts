@@ -86,7 +86,7 @@ export class IssueService {
   }
 
   static async listAdmin(params: AdminIssueListParams, prismaClient: PrismaClient = defaultPrisma) {
-    const search = params.q.trim().replace(/\s+/g, ' ');
+    const search = params.q.trim();
     const where: Prisma.IssueReportWhereInput = {
       ...(params.status && { status: params.status }),
       ...(search && { issueInformation: { contains: search, mode: 'insensitive' } }),
