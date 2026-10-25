@@ -145,7 +145,11 @@ test('getTicketById returns ticket details for the ticket owner', async () => {
     },
   };
 
-  const result = await TicketService.getTicketById(101, { uid: 42, role: 'OUTSIDER' }, mockPrisma);
+  const result = await TicketService.getTicketById(
+    101,
+    { uid: 42, role: 'OUTSIDER' },
+    mockPrisma as any
+  );
   assert.deepEqual(queryArgs.where, { ticketId: 101 });
   assert.deepEqual(queryArgs.include.payments.orderBy, { createdAt: 'desc' });
   assert.equal(result.ticketId, 101);
@@ -160,7 +164,11 @@ test('getTicketById allows ADMIN to view any user ticket', async () => {
   };
 
   // Admin uid 999 viewing ticket of uid 42
-  const result = await TicketService.getTicketById(101, { uid: 999, role: 'ADMIN' }, mockPrisma);
+  const result = await TicketService.getTicketById(
+    101,
+    { uid: 999, role: 'ADMIN' },
+    mockPrisma as any
+  );
   assert.equal(result.ticketId, 101);
   assert.equal(result.uid, 42);
 });
@@ -175,7 +183,7 @@ test('getTicketById throws 403 FORBIDDEN when user tries to view another user ti
   await assert.rejects(
     async () => {
       // User 99 viewing ticket belonging to 42
-      await TicketService.getTicketById(101, { uid: 99, role: 'OUTSIDER' }, mockPrisma);
+      await TicketService.getTicketById(101, { uid: 99, role: 'OUTSIDER' }, mockPrisma as any);
     },
     (err: any) => {
       assert.equal(err.status, 403);
@@ -194,7 +202,7 @@ test('getTicketById throws 404 TICKET_NOT_FOUND when ticket does not exist', asy
 
   await assert.rejects(
     async () => {
-      await TicketService.getTicketById(999, { uid: 42, role: 'OUTSIDER' }, mockPrisma);
+      await TicketService.getTicketById(999, { uid: 42, role: 'OUTSIDER' }, mockPrisma as any);
     },
     (err: any) => {
       assert.equal(err.status, 404);
@@ -308,4 +316,73 @@ test('getTicketById controller rejects ticket IDs outside the safe integer range
 
   await TicketController.getTicketById(req, res);
   assert.equal(statusCode, 400);
+});
+
+// =========================================================================
+// 🔹 เพิ่ม Test Cases สำหรับ Admin Authentication & Boundary Validation
+// =========================================================================
+
+test('getTicketById allows ADMIN without uid (undefined uid) to view any ticket', async () => {
+  const mockPrisma = {
+    ticket: {
+      findUnique: async () => mockTicket({ ticketId: 101, uid: 42 }),
+    },
+  };
+
+  // Admin ส่ง userContext โดยไม่มี uid ({ role: 'ADMIN' })
+  const result = await TicketService.getTicketById(
+    101,
+    { role: 'ADMIN' },
+    mockPrisma as any // เติม as any เพื่อแก้ตัวแดง
+  );
+
+  assert.equal(result.ticketId, 101);
+  assert.equal(result.uid, 42);
+});
+
+test('getTicketById processes boundary MAX INT (2147483647) correctly', async () => {
+  let capturedWhere: any = null;
+  const mockPrisma = {
+    ticket: {
+      findUnique: async (args: any) => {
+        capturedWhere = args.where;
+        return mockTicket({ ticketId: 2147483647, uid: 42 });
+      },
+    },
+  };
+
+  const result = await TicketService.getTicketById(
+    2147483647,
+    { uid: 42, role: 'OUTSIDER' },
+    mockPrisma as any
+  );
+
+  assert.deepEqual(capturedWhere, { ticketId: 2147483647 });
+  assert.equal(result.ticketId, 2147483647);
+});
+
+test('getTicketById controller rejects out-of-bound ticketId (2147483648) with 400', async () => {
+  const req = {
+    user: { uid: 1, role: 'OUTSIDER' },
+    params: { ticketId: '2147483648' },
+  } as any;
+
+  // จำลอง Response Object
+  let statusCode = 200;
+  let body: any = null;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(data: any) {
+      body = data;
+      return this;
+    },
+  } as any;
+
+  await TicketController.getTicketById(req, res);
+
+  assert.equal(statusCode, 400);
+  assert.equal(body.code, 'INVALID_TICKET_ID');
 });

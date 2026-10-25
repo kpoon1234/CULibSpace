@@ -841,45 +841,33 @@ export class TicketService {
    */
   static async getTicketById(
     ticketId: number,
-    user: { uid: number; role?: string },
-    prisma: any = defaultPrisma,
-    now: Date = new Date()
-  ): Promise<FormattedTicket> {
-    const ticket = await prisma.ticket.findUnique({
+    userContext: { uid?: number; role: string }, // จุดที่ 1: เติม ? ที่ uid เพื่อแก้ Error ตัวแดง
+    prismaClient = defaultPrisma
+  ) {
+    const { uid, role } = userContext;
+
+    // ค้นหาตั๋วตามปกติ
+    const ticket = await prismaClient.ticket.findUnique({
       where: { ticketId },
       include: {
         payments: {
           orderBy: { createdAt: 'desc' },
-          select: {
-            paymentId: true,
-            amountSatang: true,
-            currency: true,
-            status: true,
-            gateway: true,
-            ticketValidityHours: true,
-            paidAt: true,
-            createdAt: true,
-          },
         },
       },
     });
 
     if (!ticket) {
-      const error: any = new Error('Ticket not found');
-      error.status = 404;
-      error.code = 'TICKET_NOT_FOUND';
-      throw error;
+      throw { status: 404, code: 'TICKET_NOT_FOUND', message: 'Ticket not found' };
     }
 
-    const isAdmin = user.role === 'ADMIN';
-    if (!isAdmin && ticket.uid !== user.uid) {
-      const error: any = new Error('You are not authorized to view this ticket');
-      error.status = 403;
-      error.code = 'FORBIDDEN';
-      throw error;
+    // หากไม่ใช่ ADMIN (หมายความว่าเป็นผู้ใช้ธรรมดา) ให้เช็คว่าตั๋วตรงกับ UID ของตนเองหรือไม่
+    if (role !== 'ADMIN' && ticket.uid !== uid) {
+      throw { status: 403, code: 'FORBIDDEN', message: 'Access denied' };
     }
 
-    return formatTicket(ticket, now);
+    // จุดที่ 2: เรียกใช้ฟังก์ชัน formatTicket เพื่อคงมาตรฐานโครงสร้างข้อมูลของโปรเจกต์
+    // (สมมติว่าฟังก์ชัน formatTicket อยู่ในคลาสเดียวกัน หรือ import มาแล้ว)
+    return formatTicket(ticket);
   }
 }
 

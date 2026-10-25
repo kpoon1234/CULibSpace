@@ -135,13 +135,11 @@ export class TicketController {
       const uid = authReq.user?.uid;
 
       if (!uid) {
-        res
-          .status(401)
-          .json({
-            success: false,
-            code: 'UNAUTHORIZED',
-            error: 'Unauthorized: User session required',
-          });
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: User session required',
+        });
         return;
       }
 
@@ -165,14 +163,33 @@ export class TicketController {
       const authReq = req as AuthenticatedRequest;
       const user = authReq.user;
 
-      if (!user?.uid) {
-        res
-          .status(401)
-          .json({
-            success: false,
-            code: 'UNAUTHORIZED',
-            error: 'Unauthorized: User session required',
-          });
+      if (!user) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: Session required',
+        });
+        return;
+      }
+
+      const isAdmin = user.role === 'ADMIN';
+
+      // 1. แยกตรวจ session ของ admin และ user ให้ชัดเจน
+      if (!isAdmin && !user.uid) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: User session required',
+        });
+        return;
+      }
+
+      if (isAdmin && !user.adminId) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: Admin session required',
+        });
         return;
       }
 
@@ -180,21 +197,25 @@ export class TicketController {
         ? req.params.ticketId[0]
         : req.params.ticketId;
       const ticketId = Number(rawId);
+
+      // 2. จำกัดค่าให้อยู่ในช่วง 1 - 2,147,483,647 (Prisma Int Limit)
       if (
         typeof rawId !== 'string' ||
         !/^[1-9]\d*$/.test(rawId) ||
-        !Number.isSafeInteger(ticketId)
+        !Number.isSafeInteger(ticketId) ||
+        ticketId > 2147483647
       ) {
         res.status(400).json({
           success: false,
           code: 'INVALID_TICKET_ID',
-          error: 'ticketId must be a positive integer',
+          error: 'ticketId must be a positive integer within Prisma Int bounds',
         });
         return;
       }
 
+      // 3. ส่งข้อมูลไป Service (รองรับ admin ที่ไม่มี uid ด้วยค่า undefined)
       const ticket = await TicketService.getTicketById(ticketId, {
-        uid: user.uid,
+        uid: isAdmin ? undefined : user.uid,
         role: user.role,
       });
 
