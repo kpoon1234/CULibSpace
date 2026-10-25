@@ -12,6 +12,7 @@ import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
 import issueRoutes from './routes/issueRoutes.js';
+import { createPaymentWebhookRouter } from './routes/paymentWebhookRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
 import { BookingService } from './services/bookingService.js';
@@ -28,9 +29,8 @@ app.use(
     credentials: true,
   })
 );
-// [US6-1] หมายเหตุ: webhook ของ Payment Gateway (POST /api/tickets/payment/webhook)
-// อยู่ในขอบเขตของ US6-3 และต้อง mount ก่อน express.json() เพื่อให้ได้ raw body
-// สำหรับตรวจสอบลายเซ็น -> ยังไม่ mount ใน PR นี้
+// Stripe signs the exact bytes: mount before the global JSON parser.
+app.use('/api/tickets', createPaymentWebhookRouter());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

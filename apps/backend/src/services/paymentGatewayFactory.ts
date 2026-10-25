@@ -30,6 +30,13 @@ export function getPaymentGateway(): PaymentGateway {
         { status: 500 }
       );
     }
+    if (!/^(sk|rk)_test_[A-Za-z0-9_]+$/.test(secretKey)) {
+      throw new PaymentGatewayError(
+        'GATEWAY_NOT_CONFIGURED',
+        'This demo requires a Stripe test/sandbox API key; live keys are disabled.',
+        { status: 500 }
+      );
+    }
 
     return new StripePaymentGateway({
       secretKey,
