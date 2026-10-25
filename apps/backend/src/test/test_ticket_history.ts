@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import express from 'express';
 import { TicketStatus, PaymentStatus } from '@prisma/client';
 
 process.env.DATABASE_URL = 'postgresql://invalid:invalid@127.0.0.1:1/invalid';
@@ -7,6 +11,8 @@ process.env.JWT_SECRET = 'ticket-history-test-secret';
 
 const { TicketService, formatTicket } = await import('../services/ticketService.js');
 const { TicketController } = await import('../controllers/ticketController.js');
+const { default: ticketRoutes } = await import('../routes/ticketRoutes.js');
+const { signJwt } = await import('../utils/jwt.js');
 
 function mockTicket(overrides: Record<string, unknown> = {}) {
   const baseStart = new Date('2026-10-23T10:00:00.000Z');
@@ -385,4 +391,128 @@ test('getTicketById controller rejects out-of-bound ticketId (2147483648) with 4
 
   assert.equal(statusCode, 400);
   assert.equal(body.code, 'INVALID_TICKET_ID');
+});
+
+test('ticket detail HTTP authentication and Int32 regression coverage', async (t) => {
+  const queries: number[] = [];
+  const contexts: Parameters<typeof TicketService.getTicketById>[1][] = [];
+  const mockPrisma = {
+    ticket: {
+      findUnique: async ({ where }: { where: { ticketId: number } }) => {
+        queries.push(where.ticketId);
+        return where.ticketId === 404 ? null : mockTicket({ ticketId: where.ticketId });
+      },
+    },
+  };
+  // Keep the real service, controller, router, and JWT middleware; replace only DB access.
+  const originalGetTicketById = TicketService.getTicketById;
+  t.mock.method(
+    TicketService,
+    'getTicketById',
+    (ticketId: number, context: Parameters<typeof TicketService.getTicketById>[1]) => {
+      contexts.push(context);
+      return originalGetTicketById(ticketId, context, mockPrisma as any);
+    }
+  );
+
+  const app = express();
+  app.use('/api/tickets', ticketRoutes);
+  const server = createServer(app);
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/tickets`;
+  const identity = { email: 'ticket-test@example.com', firstname: 'Ticket', lastname: 'Test' };
+  // Match the admin login payload: adminId and ADMIN role, without uid.
+  const adminToken = signJwt({ ...identity, adminId: 7, role: 'ADMIN' });
+  const ownerToken = signJwt({ ...identity, uid: 42, role: 'OUTSIDER' });
+  const otherUserToken = signJwt({ ...identity, uid: 99, role: 'OUTSIDER' });
+  const adminWithoutAdminId = signJwt({ ...identity, uid: 7, role: 'ADMIN' });
+
+  async function getTicket(ticketId: string, token?: string) {
+    queries.length = 0;
+    contexts.length = 0;
+    const response = await fetch(`${baseUrl}/${ticketId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return { status: response.status, body: (await response.json()) as any };
+  }
+
+  await t.test('ADMIN JWT without uid can view another user ticket', async () => {
+    const { status, body } = await getTicket('101', adminToken);
+    assert.equal(status, 200);
+    assert.equal(body.success, true);
+    assert.equal(body.data.ticketId, 101);
+    assert.equal(body.data.uid, 42);
+    assert.deepEqual(contexts, [{ uid: undefined, role: 'ADMIN' }]);
+    assert.deepEqual(queries, [101]);
+  });
+
+  await t.test('OUTSIDER JWT can view its own ticket', async () => {
+    const { status, body } = await getTicket('101', ownerToken);
+    assert.equal(status, 200);
+    assert.equal(body.data.ticketId, 101);
+    assert.deepEqual(contexts, [{ uid: 42, role: 'OUTSIDER' }]);
+    assert.deepEqual(queries, [101]);
+  });
+
+  await t.test('2147483647 passes controller validation and reaches the database', async () => {
+    const { status, body } = await getTicket('2147483647', ownerToken);
+    assert.equal(status, 200);
+    assert.equal(body.data.ticketId, 2147483647);
+    assert.deepEqual(queries, [2147483647]);
+  });
+
+  await t.test('2147483648 returns 400 before calling the service or database', async () => {
+    const { status, body } = await getTicket('2147483648', ownerToken);
+    assert.equal(status, 400);
+    assert.equal(body.code, 'INVALID_TICKET_ID');
+    assert.deepEqual(contexts, []);
+    assert.deepEqual(queries, []);
+  });
+
+  await t.test('zero returns 400 before calling the service or database', async () => {
+    const { status, body } = await getTicket('0', ownerToken);
+    assert.equal(status, 400);
+    assert.equal(body.code, 'INVALID_TICKET_ID');
+    assert.deepEqual(contexts, []);
+    assert.deepEqual(queries, []);
+  });
+
+  await t.test('another user receives 403', async () => {
+    const { status, body } = await getTicket('101', otherUserToken);
+    assert.equal(status, 403);
+    assert.equal(body.code, 'FORBIDDEN');
+    assert.deepEqual(queries, [101]);
+  });
+
+  await t.test('a missing ticket returns 404', async () => {
+    const { status, body } = await getTicket('404', ownerToken);
+    assert.equal(status, 404);
+    assert.equal(body.code, 'TICKET_NOT_FOUND');
+    assert.deepEqual(queries, [404]);
+  });
+
+  await t.test('missing JWT returns 401 before calling the service or database', async () => {
+    const { status } = await getTicket('101');
+    assert.equal(status, 401);
+    assert.deepEqual(contexts, []);
+    assert.deepEqual(queries, []);
+  });
+
+  await t.test(
+    'ADMIN JWT missing adminId returns 401 before calling the service or database',
+    async () => {
+      const { status, body } = await getTicket('101', adminWithoutAdminId);
+      assert.equal(status, 401);
+      assert.equal(body.code, 'UNAUTHORIZED');
+      assert.deepEqual(contexts, []);
+      assert.deepEqual(queries, []);
+    }
+  );
 });
