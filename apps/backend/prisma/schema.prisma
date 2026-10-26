@@ -70,6 +70,14 @@ enum ZoneType {
   @@map("zone_type_enum")
 }
 
+enum IssueStatus {
+  PENDING     @map("Pending")
+  IN_PROGRESS @map("In Progress")
+  COMPLETED   @map("Completed")
+
+  @@map("issue_status_enum")
+}
+
 // ==========================================
 // MODELS: USER & POLYMORPHIC INHERITANCE
 // ==========================================
@@ -342,6 +350,7 @@ model IssueReport {
   time             DateTime      @default(now()) @map("time")
   tableId          Int           @map("tableid")
   issueInformation String        @db.Text @map("issue_information")
+  status           IssueStatus   @default(PENDING) @map("status")
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")
 
@@ -352,6 +361,7 @@ model IssueReport {
 
   @@index([tableId], name: "idx_issue_table")
   @@index([uid], name: "idx_issue_user")
+  @@index([status, time(sort: Desc)], map: "idx_issue_report_status_time")
   @@map("issue_report")
 }
 
