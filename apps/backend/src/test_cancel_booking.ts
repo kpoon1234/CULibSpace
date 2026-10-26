@@ -786,7 +786,9 @@ async function runTests() {
   {
     const mockNow = new Date('2026-10-05T15:50:00Z');
     const mockPrisma = {
-      systemConfig: { findFirst: async () => ({ earlyCheckInMinutes: 15 }) },
+      systemConfig: {
+        findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
+      },
       booking: {
         findFirst: async () => ({
           bookingId: 802,
@@ -815,7 +817,9 @@ async function runTests() {
   {
     const mockNow = new Date('2026-10-05T15:50:00Z');
     const mockPrisma = {
-      systemConfig: { findFirst: async () => ({ earlyCheckInMinutes: 15 }) },
+      systemConfig: {
+        findFirst: async () => ({ earlyCheckInMinutes: 15, lateThresholdMinutes: 15 }),
+      },
       booking: {
         findFirst: async () => ({
           bookingId: 803,

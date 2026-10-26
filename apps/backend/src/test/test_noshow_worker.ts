@@ -98,6 +98,7 @@ async function runTests() {
 
     const mockPrisma = {
       $queryRaw: async () => [],
+      systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
         findFirst: async () => null,
@@ -175,6 +176,7 @@ async function runTests() {
 
     const mockPrisma = {
       $queryRaw: async () => [],
+      systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
         findFirst: async () => null,
@@ -214,6 +216,7 @@ async function runTests() {
     let tableUpdate: any = null;
     const mockPrisma = {
       $queryRaw: async () => [],
+      systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
         updateMany: async () => ({ count: 1 }),
@@ -248,6 +251,7 @@ async function runTests() {
 
     const mockPrisma = {
       $queryRaw: async () => [],
+      systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: {
         findFirst: async () => null,
@@ -292,6 +296,7 @@ async function runTests() {
   try {
     const mockPrisma = {
       $queryRaw: async () => [],
+      systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
       $transaction: async (fn: any) => fn(mockPrisma),
       booking: { updateMany: async () => ({ count: 1 }), findFirst: async () => null },
       table: {
