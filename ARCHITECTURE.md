@@ -160,6 +160,54 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
 - Admin ตรวจสอบรายการ อัปเดตสถานะปัญหา (`ManageIssue`) และปรับสถานะโต๊ะเป็น `CLOSED` หากชำรุด
 - Admin ตั้งค่าตารางเวลาเปิด-ปิด (`OperatingSchedule`) และเงื่อนไขระบบ (`SystemConfig`)
 
+#### US7-3: Issue-driven facility availability
+
+- Reuses the issue statuses from US7-1/US7-2. `IssueReport.blocksTable` defaults to
+  `false`; only `IN_PROGRESS` can block a table. `PENDING` and `COMPLETED` normalize
+  this flag to `false` (also enforced by a database CHECK constraint).
+- Effective closure is **stored `Table.status = CLOSED` OR any `IN_PROGRESS`
+  issue with `blocksTable = true`**. Issue changes do not overwrite stored
+  `Table.status`: manual closure stays independent, and completing one issue
+  cannot reopen a table blocked by another issue. Layout re-evaluates bookings
+  and holds after reopening, using its existing time-window logic.
+- `facilityAvailabilityService.ts` owns the shared predicate and
+  `applyIssueAvailabilityChange(tx, issueId, { status, blocksTable })` helper.
+  The **Poom/Andy status-and-notes API** must authorize the admin, validate its
+  request, and call this helper **before any issue status/flag write**, inside
+  the same interactive transaction as its `ManageIssue` audit entry. The helper
+  acquires the table row lock before changing the issue, then checks blocking
+  issues once after the update. If the table is closed, any remaining hold
+  fields are cleared (including partial/stale holds on an already closed table).
+  Empty holds are not rewritten. Do not write the status first or call the
+  helper after committing the audit. Any subsequent audit error must roll back
+  the entire transaction. This task adds no duplicate admin endpoint or UI.
+- The **Kla/Nine admin form** should expose an opt-in “Close table while fixing”
+  checkbox only for `IN_PROGRESS`, and send an explicit boolean. The existing
+  admin list API exposes `blocksTable` so the UI can initialize the checkbox;
+  no second list endpoint is added. A composite index on
+  `(tableId, status, blocksTable)` supports the shared availability predicate.
+- Hold and finalized booking operations use the same table lock and re-check
+  issue availability inside their transactions, returning `TABLE_CLOSED` when
+  blocked. A stale map/hold token cannot bypass this check. Existing floor-plan
+  polling (20 seconds) and `CLOSED` display are reused; no WebSocket is added.
+- The expiration worker locks expired rows in ascending `tableId` order inside
+  its transaction, with `FOR UPDATE SKIP LOCKED`. Rows held by another transaction
+  are left to a later tick instead of creating an inverted wait cycle with
+  `acquireLock`. Cleanup updates only the locked IDs which are still expired;
+  it cannot clear a renewed hold. Direct cleanup errors propagate to tests/callers,
+  while the scheduled worker logs failed ticks and keeps running.
+- **Existing bookings are unchanged:** this task prevents new holds/bookings;
+  it does not cancel, relocate, stop an active booking, deny existing check-in,
+  or change no-show penalties. The team must agree the existing-booking policy
+  before wiring this helper into a production admin closure flow. Workers can
+  continue updating stored booking status without removing effective closure.
+- Reuses PR #63's issue schema/services, now merged into main; its existing
+  status migration is unchanged. This branch adds only US7-3 changes.
+  `npm test --workspace=apps/backend` runs the mock facility suite;
+  `npm run test:integration --workspace=apps/backend` includes real PostgreSQL
+  issue/hold/booking/expiration-worker races and rollback checks, guarded by a distinct
+  `TEST_DATABASE_URL` whose database name ends in `_test`.
+
 ---
 
 ## 5. 🌐 API Specification & Endpoint Structure

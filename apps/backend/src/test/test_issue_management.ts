@@ -19,6 +19,7 @@ function issueRow(overrides: Record<string, any> = {}) {
     tableId: 101,
     issueInformation: 'ปลั๊กไฟชำรุด',
     status: IssueStatus.PENDING,
+    blocksTable: false,
     user: {
       uid: 5,
       firstname: 'Somchai',
@@ -198,6 +199,7 @@ test('admin list service filters by status and description and returns user/tabl
         time: '2026-10-24T10:30:00.000Z',
         issueInformation: 'ปลั๊กไฟชำรุด',
         status: 'In Progress',
+        blocksTable: false,
         user: {
           uid: 5,
           firstname: 'Somchai',
@@ -211,6 +213,23 @@ test('admin list service filters by status and description and returns user/tabl
     page: 2,
     pageSize: 5,
   });
+});
+
+test('admin list selects and returns both true and false blocksTable values', async () => {
+  const { client, calls } = mockPrisma([
+    issueRow({ issueId: 42, status: IssueStatus.IN_PROGRESS, blocksTable: true }),
+    issueRow({ issueId: 43, status: IssueStatus.IN_PROGRESS, blocksTable: false }),
+  ]);
+  const result = await IssueService.listAdmin({ q: '', page: 1, pageSize: 10 }, client);
+
+  assert.equal(calls.findMany.select.blocksTable, true);
+  assert.deepEqual(
+    result.issues.map(({ issueId, blocksTable }) => ({ issueId, blocksTable })),
+    [
+      { issueId: 42, blocksTable: true },
+      { issueId: 43, blocksTable: false },
+    ]
+  );
 });
 
 test('numeric admin search combines description and exact table ID with status and pagination', async () => {

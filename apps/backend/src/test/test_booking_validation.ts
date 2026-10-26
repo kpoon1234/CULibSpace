@@ -25,6 +25,7 @@ function createMockPrisma(overrides: {
   config?: any;
 }) {
   return {
+    issueReport: { findFirst: async () => null },
     systemConfig: {
       findFirst: async () =>
         overrides.config !== undefined

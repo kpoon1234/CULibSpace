@@ -11,6 +11,7 @@ import {
 import { ScheduleService } from './scheduleService.js';
 import { ScoreGuard } from './scoreGuard.js';
 import { lockTableForStatusChange, refreshTableStatus } from './tableStatusService.js';
+import { hasBlockingIssue, isFacilityClosed } from './facilityAvailabilityService.js';
 import { randomUUID } from 'crypto';
 
 export interface BookingWithTableAndZone {
@@ -211,7 +212,7 @@ export class BookingService {
         } as BookingValidationError;
       }
 
-      if (table.status === TableStatus.CLOSED) {
+      if (isFacilityClosed(table.status, await hasBlockingIssue(prisma, tableId))) {
         throw {
           status: 400,
           code: 'TABLE_CLOSED',
@@ -354,62 +355,83 @@ export class BookingService {
 
       if (startDateTime && endDateTime) {
         await ScheduleService.validateTargetTimeWindow(startDateTime, endDateTime, true);
+      }
 
-        const overlap = await prisma.booking.findFirst({
+      return prisma.$transaction(async (tx: any) => {
+        // Lock the target and this user's old holds in the same order. This
+        // serializes issue changes and avoids reversed-order table-switch locks.
+        await tx.$queryRaw`SELECT tableid FROM "table"
+          WHERE tableid = ${tableId} OR locked_by_uid = ${userId}
+          ORDER BY tableid FOR UPDATE`;
+        const table = await tx.table.findUnique({ where: { tableId } });
+        if (!table) {
+          throw { status: 404, code: 'TABLE_NOT_FOUND', message: 'Table not found.' };
+        }
+        if (isFacilityClosed(table.status, await hasBlockingIssue(tx, tableId))) {
+          throw {
+            status: 400,
+            code: 'TABLE_CLOSED',
+            message: 'This table is currently closed for maintenance.',
+          };
+        }
+
+        if (startDateTime && endDateTime) {
+          const overlap = await tx.booking.findFirst({
+            where: {
+              tableId,
+              status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+              startDateTime: { lt: endDateTime },
+              endDateTime: { gt: startDateTime },
+            },
+          });
+
+          if (overlap) {
+            throw {
+              status: 409,
+              code: 'TABLE_ALREADY_BOOKED',
+              message: 'This table is already booked for the requested time window.',
+            };
+          }
+        }
+
+        await tx.table.updateMany({
           where: {
-            tableId,
-            status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
-            startDateTime: { lt: endDateTime },
-            endDateTime: { gt: startDateTime },
+            lockedByUid: userId,
+            tableId: { not: tableId },
+          },
+          data: {
+            lockToken: null,
+            lockedUntil: null,
+            lockedByUid: null,
           },
         });
 
-        if (overlap) {
+        const lockToken = randomUUID();
+        const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
+
+        const updated = await tx.table.updateMany({
+          where: {
+            tableId,
+            status: { not: TableStatus.CLOSED },
+            OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }, { lockedByUid: userId }],
+          },
+          data: {
+            lockToken,
+            lockedUntil,
+            lockedByUid: userId,
+          },
+        });
+
+        if (updated.count === 0) {
           throw {
             status: 409,
-            code: 'TABLE_ALREADY_BOOKED',
-            message: 'This table is already booked for the requested time window.',
+            code: 'TABLE_LOCKED',
+            message: 'Table is currently on hold, closed, or unavailable.',
           };
         }
-      }
 
-      await prisma.table.updateMany({
-        where: {
-          lockedByUid: userId,
-          tableId: { not: tableId },
-        },
-        data: {
-          lockToken: null,
-          lockedUntil: null,
-          lockedByUid: null,
-        },
+        return { lockToken, lockedUntil };
       });
-
-      const lockToken = randomUUID();
-      const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
-
-      const updated = await prisma.table.updateMany({
-        where: {
-          tableId,
-          status: { not: TableStatus.CLOSED },
-          OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }, { lockedByUid: userId }],
-        },
-        data: {
-          lockToken,
-          lockedUntil,
-          lockedByUid: userId,
-        },
-      });
-
-      if (updated.count === 0) {
-        throw {
-          status: 409,
-          code: 'TABLE_LOCKED',
-          message: 'Table is currently on hold, closed, or unavailable.',
-        };
-      }
-
-      return { lockToken, lockedUntil };
     });
   }
 
@@ -463,6 +485,8 @@ export class BookingService {
     }
 
     return await prisma.$transaction(async (tx: any) => {
+      // Shared with issue changes: re-read availability only after acquiring it.
+      await lockTableForStatusChange(tx, input.tableId);
       // 1. Run all rule checks INSIDE the transaction using tx
       await this.validateBookingRules(input, tx);
 

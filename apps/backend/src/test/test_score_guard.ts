@@ -145,6 +145,21 @@ async function runTests() {
 
   console.log('\n--- Test Group 2: acquireLock Score Guard ---');
 
+  // Hold acquisition now checks issue availability inside a transaction.
+  function transactionalHoldMock(client: any) {
+    return {
+      ...client,
+      $queryRaw: async () => [],
+      issueReport: { findFirst: async () => null },
+      $transaction: async (callback: (tx: any) => Promise<unknown>) =>
+        callback({
+          ...client,
+          $queryRaw: async () => [],
+          issueReport: { findFirst: async () => null },
+        }),
+    };
+  }
+
   // Test 5: acquireLock blocks user with low score
   let lowScoreHoldWrites = 0;
   try {
@@ -208,7 +223,13 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds for user with sufficient score');
   } catch (err: any) {
     assert(false, 'acquireLock allows user with sufficient score', err?.message);
@@ -238,7 +259,13 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds with default minScoreToBook (50)');
   } catch (err: any) {
     assert(false, 'acquireLock works with default config', err?.message);
@@ -268,7 +295,13 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds for user at exactly minScoreToBook (50)');
   } catch (err: any) {
     assert(false, 'acquireLock allows user at threshold score (50)', err?.message);
@@ -332,7 +365,13 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds for user just above threshold (51)');
   } catch (err: any) {
     assert(false, 'acquireLock allows user just above threshold (51)', err?.message);
@@ -380,6 +419,7 @@ async function runTests() {
   let bookingConfigReads = 0;
   try {
     const tx = {
+      $queryRaw: async () => [],
       systemConfig: {
         findFirst: async () => {
           bookingConfigReads++;

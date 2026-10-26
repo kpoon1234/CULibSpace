@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma, ZoneType, TableStatus } from '@prisma/client';
+import { BLOCKING_ISSUE_WHERE, isFacilityClosed } from './facilityAvailabilityService.js';
 
 const prisma = new PrismaClient();
 
@@ -15,7 +16,7 @@ export class LayoutService {
   /**
    * US2-2: ดึงผังห้องสมุดพร้อมคำนวณสถานะเรียลไทม์ตามช่วงเวลาเป้าหมาย
    */
-  static async getLayoutWithStatus(filters: LayoutFilters) {
+  static async getLayoutWithStatus(filters: LayoutFilters, prismaClient = prisma) {
     const { targetStart, targetEnd, ...restFilters } = filters;
     const tableWhere: Prisma.TableWhereInput = {};
 
@@ -26,7 +27,7 @@ export class LayoutService {
     const zoneWhere: Prisma.ZoneWhereInput = {};
     if (restFilters.zoneType) zoneWhere.zoneType = restFilters.zoneType;
 
-    const layout = await prisma.zone.findMany({
+    const layout = await prismaClient.zone.findMany({
       where: zoneWhere,
       include: {
         tables: {
@@ -39,6 +40,11 @@ export class LayoutService {
             hasTvScreen: true,
             lockedUntil: true,
             lockedByUid: true,
+            issueReports: {
+              where: BLOCKING_ISSUE_WHERE,
+              select: { issueId: true },
+              take: 1,
+            },
             // ค้นหาการจองที่ทับซ้อนและมีสถานะ PENDING หรือ ACTIVE
             bookings: {
               where: {
@@ -57,12 +63,13 @@ export class LayoutService {
     return layout.map((zone) => ({
       ...zone,
       tables: zone.tables.map((table) => {
-        let dynamicStatus: TableStatus = table.status;
+        const closed = isFacilityClosed(table.status, table.issueReports.length > 0);
+        let dynamicStatus: TableStatus = closed ? TableStatus.CLOSED : table.status;
         const now = new Date();
-        const isHoldLocked = table.lockedUntil ? table.lockedUntil > now : false; // เช็ก 5-min Hold-Lock ปัจจุบัน (AC 3.2.1 / AC 3.2.2)
+        const isHoldLocked = !closed && Boolean(table.lockedUntil && table.lockedUntil > now);
 
         // คำนวณสถานะใหม่ หากโต๊ะไม่ได้ปิดซ่อมบำรุง
-        if (table.status !== TableStatus.CLOSED) {
+        if (!closed) {
           if (table.bookings.length > 0) {
             // ถ้ามี booking ที่ทับซ้อน
             const hasActive = table.bookings.some((b) => b.status === 'ACTIVE');
@@ -81,7 +88,7 @@ export class LayoutService {
         }));
 
         // ถอด bookings และ lockedUntil ออกเพื่อไม่ให้ข้อมูลล้นกลับไปที่ Frontend
-        const { bookings, lockedUntil, status, ...tableData } = table;
+        const { bookings, lockedUntil, status, issueReports, ...tableData } = table;
 
         return {
           ...tableData,

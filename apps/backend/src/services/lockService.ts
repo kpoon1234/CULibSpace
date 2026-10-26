@@ -4,19 +4,25 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export class LockService {
-  /**
-   * ค้นหาโต๊ะที่หมดเวลา Lock (lockedUntil < ปัจจุบัน) และคืนสถานะเป็น AVAILABLE
-   */
-  static async releaseExpiredLocks(): Promise<void> {
-    try {
-      const result = await prisma.table.updateMany({
+  /** Release expired holds only; booking/manual status is never changed. */
+  static async releaseExpiredLocks(
+    now: Date = new Date(),
+    prismaClient: Pick<PrismaClient, '$transaction'> = prisma
+  ): Promise<number> {
+    const result = await prismaClient.$transaction(async (tx) => {
+      // Same ascending table order as acquireLock. Never wait while holding
+      // another table: a busy row is retried by the next worker tick instead.
+      const expired = await tx.$queryRaw<{ tableid: number }[]>`
+        SELECT tableid FROM "table"
+        WHERE locked_until < ${now} AND lock_token IS NOT NULL
+        ORDER BY tableid FOR UPDATE SKIP LOCKED`;
+      if (expired.length === 0) return { count: 0 };
+
+      return tx.table.updateMany({
         where: {
-          lockedUntil: {
-            lt: new Date(), // ตรวจสอบว่าเวลาที่กำหนดไว้น้อยกว่าเวลาปัจจุบันหรือไม่
-          },
-          lockToken: {
-            not: null, // ป้องกันการอัปเดตโต๊ะที่ไม่ได้ถูกล็อกอยู่
-          },
+          tableId: { in: expired.map(({ tableid }) => tableid) },
+          lockedUntil: { lt: now },
+          lockToken: { not: null },
         },
         data: {
           lockToken: null,
@@ -24,13 +30,12 @@ export class LockService {
           lockedByUid: null,
         },
       });
+    });
 
-      if (result.count > 0) {
-        console.log(`[LockService] Released ${result.count} expired table locks.`);
-      }
-    } catch (error) {
-      console.error('[LockService] Error releasing expired locks:', error);
+    if (result.count > 0) {
+      console.log(`[LockService] Released ${result.count} expired table locks.`);
     }
+    return result.count;
   }
 
   /**
@@ -39,7 +44,12 @@ export class LockService {
   static startExpirationWorker(intervalMs: number = 30 * 1000): NodeJS.Timeout {
     console.log(`[LockService] Started lock expiration worker (Interval: ${intervalMs}ms)`);
     return setInterval(async () => {
-      await this.releaseExpiredLocks();
+      try {
+        await this.releaseExpiredLocks();
+      } catch (error) {
+        // A failed tick must be visible without killing the scheduled worker.
+        console.error('[LockService] Error releasing expired locks:', error);
+      }
     }, intervalMs);
   }
 }
