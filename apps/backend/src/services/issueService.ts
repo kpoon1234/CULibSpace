@@ -106,9 +106,14 @@ export class IssueService {
 
   static async listAdmin(params: AdminIssueListParams, prismaClient: PrismaClient = defaultPrisma) {
     const search = params.q.trim();
+    const tableId = /^\d+$/.test(search) ? Number(search) : NaN;
+    const isTableId = Number.isSafeInteger(tableId) && tableId >= 1 && tableId <= 2_147_483_647;
+    const descriptionFilter: Prisma.IssueReportWhereInput = {
+      issueInformation: { contains: search, mode: 'insensitive' },
+    };
     const where: Prisma.IssueReportWhereInput = {
       ...(params.status && { status: params.status }),
-      ...(search && { issueInformation: { contains: search, mode: 'insensitive' } }),
+      ...(search && (isTableId ? { OR: [descriptionFilter, { tableId }] } : descriptionFilter)),
     };
 
     const [rows, total] = await prismaClient.$transaction([

@@ -213,6 +213,62 @@ test('admin list service filters by status and description and returns user/tabl
   });
 });
 
+test('numeric admin search combines description and exact table ID with status and pagination', async () => {
+  const { client, calls } = mockPrisma([issueRow()], 7);
+  const result = await IssueService.listAdmin(
+    { q: '  101  ', status: IssueStatus.PENDING, page: 2, pageSize: 5 },
+    client
+  );
+
+  assert.deepEqual(calls.findMany.where, {
+    status: IssueStatus.PENDING,
+    OR: [{ issueInformation: { contains: '101', mode: 'insensitive' } }, { tableId: 101 }],
+  });
+  assert.deepEqual(calls.count.where, calls.findMany.where);
+  assert.equal(calls.findMany.skip, 5);
+  assert.equal(calls.findMany.take, 5);
+  assert.equal(result.total, 7);
+  assert.equal(result.page, 2);
+  assert.equal(result.pageSize, 5);
+});
+
+test('numeric admin search accepts positive Int32 IDs and leading zeros', async () => {
+  for (const [q, tableId] of [
+    ['1', 1],
+    ['00101', 101],
+    ['2147483647', 2_147_483_647],
+  ] as const) {
+    const { client, calls } = mockPrisma();
+    await IssueService.listAdmin({ q, page: 1, pageSize: 20 }, client);
+    assert.deepEqual(calls.findMany.where.OR, [
+      { issueInformation: { contains: q, mode: 'insensitive' } },
+      { tableId },
+    ]);
+    assert.deepEqual(calls.count.where, calls.findMany.where);
+  }
+});
+
+test('non-ID search terms remain description searches without invalid Prisma integers', async () => {
+  for (const q of ['0', '-1', '101.5', '1e2', '101 broken', '2147483648', '9'.repeat(400)]) {
+    const { client, calls } = mockPrisma();
+    await IssueService.listAdmin({ q, page: 1, pageSize: 20 }, client);
+    assert.deepEqual(calls.findMany.where, {
+      issueInformation: { contains: q, mode: 'insensitive' },
+    });
+    assert.deepEqual(calls.count.where, calls.findMany.where);
+  }
+});
+
+test('blank admin search does not add a description or table filter', async () => {
+  const { client, calls } = mockPrisma();
+  await IssueService.listAdmin(
+    { q: '   ', status: IssueStatus.COMPLETED, page: 1, pageSize: 20 },
+    client
+  );
+  assert.deepEqual(calls.findMany.where, { status: IssueStatus.COMPLETED });
+  assert.deepEqual(calls.count.where, calls.findMany.where);
+});
+
 for (const [name, description] of [
   ['repeated spaces', 'Socket  broken'],
   ['multiple lines', 'Socket\nbroken'],
