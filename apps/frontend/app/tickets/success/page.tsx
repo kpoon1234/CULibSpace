@@ -9,12 +9,20 @@ export default function TicketPaymentReturnPage() {
         Stripe returned you to CULibSpace. Your ticket becomes active after the payment is confirmed
         by the system. Please check your ticket status again shortly.
       </p>
-      <Link
-        href="/"
-        className="mt-7 inline-flex rounded-md bg-cta-primary px-5 py-3 text-sm font-semibold text-white hover:bg-cta-primary-hover"
-      >
-        Return to home
-      </Link>
+      <div className="mt-7 flex flex-wrap justify-center gap-3">
+        <Link
+          href="/visitor/tickets"
+          className="inline-flex rounded-md bg-cta-primary px-5 py-3 text-sm font-semibold text-white hover:bg-cta-primary-hover"
+        >
+          View my tickets
+        </Link>
+        <Link
+          href="/"
+          className="inline-flex rounded-md border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50"
+        >
+          Return to home
+        </Link>
+      </div>
     </section>
   );
 }
