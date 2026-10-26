@@ -1,6 +1,10 @@
 import { PrismaClient, PaymentStatus, TicketStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
+  PaymentConfirmationError,
+  PaymentConfirmationService,
+} from './paymentConfirmationService.js';
+import {
   PaymentGateway,
   PaymentGatewayError,
   CheckoutSessionResult,
@@ -8,9 +12,6 @@ import {
 } from './paymentGateway.js';
 
 const defaultPrisma = new PrismaClient();
-
-/** รหัส gateway ที่บันทึกลงฐานข้อมูล */
-export const PAYMENT_GATEWAY_NAME = 'stripe';
 
 /** ความยาวสูงสุดของ client key ที่ API รับได้ (ตรงกับคอลัมน์ client_key) */
 export const MAX_CLIENT_KEY_LENGTH = 64;
@@ -88,7 +89,7 @@ interface StoredCheckoutPayload {
  *      -> เก็บสถานะ UNCONFIRMED ไว้ (ไม่ตัดเป็น FAILED)
  *      -> ครั้งถัดไปที่ยิงด้วย idempotency key เดิม จะกู้ checkout เดิมกลับมาได้
  *         เพราะ gateway เก็บผลลัพธ์ของ idempotency key เดิมไว้
- *   4. ตั๋วจะยังไม่ถูกเปิดใช้งานจนกว่าจะได้รับ webhook ยืนยันการชำระเงินสำเร็จ
+ *   4. เปิดใช้ตั๋วหลังยืนยันกับ gateway ผ่าน webhook หรือ recovery เท่านั้น
  */
 export class TicketService {
   static async purchase(
@@ -542,6 +543,17 @@ export class TicketService {
     const isOpen =
       payment.status === PaymentStatus.PENDING || payment.status === PaymentStatus.UNCONFIRMED;
 
+    // Repair payments marked Paid by older recovery code without activating
+    // their ticket. Do not short-circuit solely on the payment status.
+    if (payment.status === PaymentStatus.PAID && payment.gatewayRef) {
+      const ticket = await prisma.ticket.findUnique({ where: { ticketId: payment.ticketId } });
+      if (ticket?.status === TicketStatus.UNPAID) {
+        const checkout = await gateway.retrieveCheckoutStatus(payment.gatewayRef);
+        await this.confirmRecoveredPayment(payment, checkout, gateway, prisma);
+        return prisma.payment.findUnique({ where: { paymentId: payment.paymentId } });
+      }
+    }
+
     if (!isOpen) {
       // รายการปิดแล้ว (Paid / Failed / Expired) -> ตอบรายการเดิมตามสถานะ
       return payment;
@@ -559,7 +571,7 @@ export class TicketService {
    *
    * - มี gatewayRef -> ดึงสถานะจริงจาก gateway
    *   - open      : ยังจ่ายได้ -> เก็บช่องไว้ คืนรายการเดิม
-   *   - paid      : จ่ายแล้ว -> บันทึกสถานะ (การเปิดใช้ตั๋วเป็นหน้าที่ของ US6-3)
+   *   - paid      : ใช้ confirmation service ยืนยันและเปิดใช้ตั๋วใน transaction เดียวกัน
    *   - expired   : หมดอายุ -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
    *   - not_found : gateway ไม่เคยสร้าง -> ปิดรายการ ปล่อยให้ซื้อใหม่ได้
    *   - unknown   : ตรวจไม่ได้ -> คงสถานะรอตรวจสอบ ห้ามปล่อยช่อง
@@ -576,16 +588,8 @@ export class TicketService {
       const status = await gateway.retrieveCheckoutStatus(payment.gatewayRef);
 
       if (status.state === 'paid') {
-        // จ่ายแล้วจริง -> บันทึกสถานะให้ตรงกับ gateway
-        // (การเปิดใช้ตั๋วเป็นหน้าที่ของ US6-3 ผ่าน webhook)
-        return await prisma.payment.update({
-          where: { paymentId: payment.paymentId },
-          data: {
-            status: PaymentStatus.PAID,
-            paidAt: status.paidAt ?? new Date(),
-            openUid: null,
-          },
-        });
+        await this.confirmRecoveredPayment(payment, status, gateway, prisma);
+        return prisma.payment.findUnique({ where: { paymentId: payment.paymentId } });
       }
 
       if (status.state === 'expired' || status.state === 'not_found') {
@@ -672,7 +676,7 @@ export class TicketService {
     } catch (error) {
       // กู้ไม่ได้ -> เก็บสถานะรอตรวจสอบไว้ ห้ามสร้างรายการใหม่
       // (ถ้ามี gateway reference แล้ว แปลว่ามีคำขออื่นกู้สำเร็จไปแล้ว -> ไม่ต้องแตะ)
-      console.error(`[TicketService] Could not reconcile payment #${payment.paymentId}:`, error);
+      console.error(`[TicketService] Could not reconcile payment #${payment.paymentId}.`);
       await prisma.payment.updateMany({
         where: {
           paymentId: payment.paymentId,
@@ -683,6 +687,26 @@ export class TicketService {
       });
       return payment;
     }
+  }
+
+  private static async confirmRecoveredPayment(
+    payment: any,
+    checkout: import('./paymentGateway.js').GatewayCheckoutStatus,
+    gateway: PaymentGateway,
+    prisma: any
+  ) {
+    if (checkout.reference !== String(payment.paymentId)) {
+      throw new PaymentConfirmationError(
+        'PAYMENT_REFERENCE_MISMATCH',
+        'Recovered checkout reference does not match the payment.'
+      );
+    }
+    await PaymentConfirmationService.confirmCheckout(
+      gateway.name,
+      payment.gatewayRef,
+      checkout,
+      prisma
+    );
   }
 
   /**
@@ -732,7 +756,10 @@ export class TicketService {
       );
     }
 
-    console.error(`[TicketService] Payment #${paymentId} gateway call failed:`, error);
+    console.error(`[TicketService] Payment #${paymentId} gateway call failed:`, {
+      code: gatewayError.code,
+      retryable: gatewayError.retryable,
+    });
 
     return {
       status: gatewayError.status,
@@ -805,6 +832,144 @@ export class TicketService {
       ...previousPayment,
     } as TicketPurchaseError;
   }
+
+  /**
+   * [US6-2] ดึงตั๋วทั้งหมดของผู้ใช้พร้อมประวัติการชำระเงินและช่วงเวลาที่ใช้งานได้
+   */
+  static async getMyTickets(
+    uid: number,
+    prisma: any = defaultPrisma,
+    now: Date = new Date()
+  ): Promise<FormattedTicket[]> {
+    const tickets = await prisma.ticket.findMany({
+      where: { uid },
+      include: {
+        payments: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            paymentId: true,
+            amountSatang: true,
+            currency: true,
+            status: true,
+            gateway: true,
+            ticketValidityHours: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return tickets.map((ticket: any) => formatTicket(ticket, now));
+  }
+
+  /**
+   * [US6-2] ดึงรายละเอียดตั๋วรายใบพร้อมประวัติการชำระเงินและสิทธิ์การเข้าถึง
+   */
+  static async getTicketById(
+    ticketId: number,
+    userContext: { uid?: number; role: string }, // จุดที่ 1: เติม ? ที่ uid เพื่อแก้ Error ตัวแดง
+    prismaClient = defaultPrisma
+  ) {
+    const { uid, role } = userContext;
+
+    // ค้นหาตั๋วตามปกติ
+    const ticket = await prismaClient.ticket.findUnique({
+      where: { ticketId },
+      include: {
+        payments: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!ticket) {
+      throw { status: 404, code: 'TICKET_NOT_FOUND', message: 'Ticket not found' };
+    }
+
+    // หากไม่ใช่ ADMIN (หมายความว่าเป็นผู้ใช้ธรรมดา) ให้เช็คว่าตั๋วตรงกับ UID ของตนเองหรือไม่
+    if (role !== 'ADMIN' && ticket.uid !== uid) {
+      throw { status: 403, code: 'FORBIDDEN', message: 'Access denied' };
+    }
+
+    // จุดที่ 2: เรียกใช้ฟังก์ชัน formatTicket เพื่อคงมาตรฐานโครงสร้างข้อมูลของโปรเจกต์
+    // (สมมติว่าฟังก์ชัน formatTicket อยู่ในคลาสเดียวกัน หรือ import มาแล้ว)
+    return formatTicket(ticket);
+  }
+}
+
+export interface FormattedTicketPayment {
+  paymentId: number;
+  amountSatang: number;
+  amountBaht: number;
+  currency: string;
+  status: PaymentStatus;
+  gateway: string;
+  ticketValidityHours: number;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface FormattedTicket {
+  ticketId: number;
+  uid: number;
+  status: TicketStatus | 'EXPIRED';
+  startDateTime: string;
+  endDateTime: string;
+  createdAt: string;
+  validTimePeriod: {
+    startDateTime: string;
+    endDateTime: string;
+    isValidNow: boolean;
+    isExpired: boolean;
+    remainingSeconds: number;
+  };
+  payments: FormattedTicketPayment[];
+}
+
+export function formatTicket(ticket: any, now: Date = new Date()): FormattedTicket {
+  const start = new Date(ticket.startDateTime);
+  const end = new Date(ticket.endDateTime);
+  const nowMs = now.getTime();
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+
+  const isExpired = nowMs > endMs;
+  let effectiveStatus: TicketStatus | 'EXPIRED' = ticket.status;
+  if (ticket.status === TicketStatus.PAID && isExpired) {
+    effectiveStatus = 'EXPIRED';
+  }
+
+  const isValidNow = ticket.status === TicketStatus.PAID && nowMs >= startMs && nowMs <= endMs;
+  const remainingSeconds = isValidNow ? Math.max(0, Math.floor((endMs - nowMs) / 1000)) : 0;
+
+  return {
+    ticketId: ticket.ticketId,
+    uid: ticket.uid,
+    status: effectiveStatus,
+    startDateTime: start.toISOString(),
+    endDateTime: end.toISOString(),
+    createdAt: new Date(ticket.createdAt).toISOString(),
+    validTimePeriod: {
+      startDateTime: start.toISOString(),
+      endDateTime: end.toISOString(),
+      isValidNow,
+      isExpired,
+      remainingSeconds,
+    },
+    payments: (ticket.payments || []).map((p: any) => ({
+      paymentId: p.paymentId,
+      amountSatang: p.amountSatang,
+      amountBaht: (p.amountSatang ?? 0) / 100,
+      currency: p.currency,
+      status: p.status,
+      gateway: p.gateway,
+      ticketValidityHours: p.ticketValidityHours,
+      paidAt: p.paidAt ? new Date(p.paidAt).toISOString() : null,
+      createdAt: new Date(p.createdAt).toISOString(),
+    })),
+  };
 }
 
 export default TicketService;

@@ -14,6 +14,9 @@ import type { AdminUserSummary } from '@/lib/adminUsers';
 export default function AdminUsersPage() {
   const admin = useAdminGuard();
   const [adjustUser, setAdjustUser] = useState<AdminUserSummary | null>(null);
+  // Keep the current modal target synchronously. A fresh object per opening
+  // distinguishes A -> B -> A as well as a switch to a different UID.
+  const currentAdjustmentRef = useRef<AdminUserSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const retryRef = useRef<(() => void) | null>(null);
 
@@ -55,7 +58,9 @@ export default function AdminUsersPage() {
               type="button"
               disabled={isMock}
               onClick={() => {
-                setAdjustUser(user);
+                const target = { ...user };
+                currentAdjustmentRef.current = target;
+                setAdjustUser(target);
                 setNotice(null);
               }}
               aria-label={`Adjust score for ${user.firstname} ${user.lastname}`}
@@ -75,6 +80,8 @@ export default function AdminUsersPage() {
         <ScoreAdjustmentModal
           key={adjustUser.uid}
           onClose={() => {
+            if (currentAdjustmentRef.current !== adjustUser) return;
+            currentAdjustmentRef.current = null;
             setAdjustUser(null);
           }}
           targetUser={{
@@ -85,6 +92,10 @@ export default function AdminUsersPage() {
             behaviourScore: adjustUser.behaviourScore,
           }}
           onSuccess={() => {
+            // An unmounted modal can still finish its POST. Only the opening
+            // that owns this callback may close the modal or replace its notice.
+            if (currentAdjustmentRef.current !== adjustUser) return;
+            currentAdjustmentRef.current = null;
             setAdjustUser(null);
             setNotice(`ปรับคะแนน ${adjustUser.firstname} ${adjustUser.lastname} เรียบร้อยแล้ว`);
             retryRef.current?.();

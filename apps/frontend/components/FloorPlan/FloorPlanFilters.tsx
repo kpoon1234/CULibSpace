@@ -46,7 +46,7 @@ function computeMaxDate(maxAdvanceBookingDays: number): string {
 
 // Table Filter dialog — maps the Figma panel to the GET /api/tables/layout params:
 // large screen -> hasTvScreen, plug amount -> plugCap (min), minimum seats ->
-// minSeats, and a same-day Date + From + To (each a fixed half-hour slot) ->
+// minSeats, and a same-day Date + From + To (each a fixed 30-minute slot) ->
 // startDateTime / endDateTime, the window the status is evaluated against.
 export default function FloorPlanFilters({ value, onClose, onApply }: FloorPlanFiltersProps) {
   const [draft, setDraft] = useState<FloorPlanFilter>(value);

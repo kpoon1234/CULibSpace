@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import express, { Router } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { getPaymentGateway } from '../services/paymentGatewayFactory.js';
 import { PaymentGatewayError, type PaymentGateway } from '../services/paymentGateway.js';
@@ -7,14 +8,7 @@ import {
   PaymentConfirmationService,
 } from '../services/paymentConfirmationService.js';
 
-/**
- * [US6-3] Payment Webhook Router
- * -------------------------------------------------------------------------
- * ต้องถูก mount ก่อน express.json() ใน server.ts เพื่อให้ได้ raw body
- * ที่จำเป็นสำหรับตรวจสอบลายเซ็นของ Stripe
- *
- * ใช้ Stripe signature (ไม่ใช่ JWT ของผู้ใช้)
- */
+/** Mount before express.json(). Uses a Stripe signature, NOT a user's JWT. */
 export function createPaymentWebhookRouter(
   gatewayFactory: () => PaymentGateway = getPaymentGateway,
   prisma?: PrismaClient
@@ -38,8 +32,6 @@ export function createPaymentWebhookRouter(
         res.status(200).json({ received: true, ...result });
       } catch (error) {
         if (error instanceof PaymentConfirmationError) {
-          // Signed but permanently mismatched data needs operator attention, not
-          // repeated activation attempts. Do not expose payment/customer details.
           console.warn('[PaymentWebhook]', { code: error.code, eventId });
           res
             .status(error.status >= 500 ? 503 : 200)
@@ -57,5 +49,3 @@ export function createPaymentWebhookRouter(
   );
   return router;
 }
-
-export default createPaymentWebhookRouter;

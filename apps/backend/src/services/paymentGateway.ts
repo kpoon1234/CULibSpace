@@ -67,8 +67,6 @@ export interface GatewayCheckoutStatus {
   currency?: string;
   /** อ้างอิงกลับเข้าระบบ (paymentId) */
   reference?: string;
-  /** เวลาที่ชำระเงินสำเร็จจริง (เฉพาะเมื่อมีข้อมูลที่เชื่อถือได้) */
-  paidAt?: Date;
   raw: unknown;
 }
 
@@ -77,11 +75,11 @@ export type GatewayPaymentEventType =
   'payment.succeeded' | 'payment.failed' | 'payment.expired' | 'payment.unknown';
 
 export interface GatewayPaymentEvent {
-  type: GatewayPaymentEventType;
   /** Stripe event identity, distinct from the checkout/session identity. */
   eventId?: string;
   /** Whether this is a live-mode event (must be false in test mode) */
   livemode?: boolean;
+  type: GatewayPaymentEventType;
   /** รหัสอ้างอิงฝั่ง gateway เพื่อจับคู่กับ payment */
   gatewayRef: string;
   /**

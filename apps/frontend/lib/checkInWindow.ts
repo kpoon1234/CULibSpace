@@ -3,11 +3,9 @@
 // reads SystemConfig.earlyCheckInMinutes / lateThresholdMinutes and falls back
 // to 15/15 when that row is unreadable.
 //
-// - earlyMinutes is derived from the booking's own `cancellation.deadline`,
-//   which getActiveBooking() computes as startDateTime − earlyCheckInMinutes
-//   from the real SystemConfig row, so it tracks the DB without a new endpoint.
-// - lateMinutes is not exposed by any endpoint; it is 15 in SystemConfig today,
-//   so it stays a constant here.
+// getActiveBooking() includes both limits from the SystemConfig row. Older API
+// responses can still derive earlyMinutes from the cancellation deadline; if
+// the config is unavailable, the backend also falls back to 15/15.
 //
 // Either way the backend stays authoritative: a check-in outside the real window
 // is rejected with CHECK_IN_TOO_EARLY / CHECK_IN_TOO_LATE whatever this shows.
@@ -27,18 +25,27 @@ export interface CheckInWindow {
 export function resolveCheckInWindow(booking: {
   startDateTime: string;
   cancellation?: { deadline?: string };
+  checkInWindow?: { earlyMinutes: number; lateMinutes: number };
 }): CheckInWindow {
   const startMs = Date.parse(booking.startDateTime);
   const deadlineMs = booking.cancellation?.deadline
     ? Date.parse(booking.cancellation.deadline)
     : NaN;
   const derivedEarly = (startMs - deadlineMs) / 60_000;
+  const apiEarly = booking.checkInWindow?.earlyMinutes;
+  const apiLate = booking.checkInWindow?.lateMinutes;
+
+  let earlyMinutes: number = DEFAULT_CHECK_IN_WINDOW.earlyMinutes;
+  if (Number.isFinite(derivedEarly) && derivedEarly >= 0) earlyMinutes = derivedEarly;
+  if (typeof apiEarly === 'number' && Number.isFinite(apiEarly) && apiEarly >= 0) {
+    earlyMinutes = apiEarly;
+  }
 
   return {
-    earlyMinutes:
-      Number.isFinite(derivedEarly) && derivedEarly >= 0
-        ? derivedEarly
-        : DEFAULT_CHECK_IN_WINDOW.earlyMinutes,
-    lateMinutes: DEFAULT_CHECK_IN_WINDOW.lateMinutes,
+    earlyMinutes,
+    lateMinutes:
+      typeof apiLate === 'number' && Number.isFinite(apiLate) && apiLate >= 0
+        ? apiLate
+        : DEFAULT_CHECK_IN_WINDOW.lateMinutes,
   };
 }

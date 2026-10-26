@@ -5,8 +5,15 @@ import { authenticateToken, requireRoles } from '../middlewares/authMiddleware.j
 const router = Router();
 
 // POST /api/tickets/purchase : ซื้อตั๋วผู้เข้าชมภายนอก (เฉพาะ OUTSIDER)
-// หมายเหตุ: GET /api/tickets/my-tickets และ POST /api/tickets/payment/webhook
-// อยู่ในขอบเขตของ US6-2 / US6-3 (ดูรายการตั๋ว และยืนยันผลการจ่ายเงิน) ไม่ได้อยู่ใน PR นี้
+// GET /api/tickets/my-tickets และ GET /api/tickets/:ticketId : ดูตั๋วและประวัติชำระเงิน (US6-2)
+// US6-3's webhook is mounted separately before express.json() in server.ts;
+// do not duplicate it behind this JSON-parsed router.
 router.post('/purchase', authenticateToken, requireRoles('OUTSIDER'), TicketController.purchase);
-
+router.get(
+  '/my-tickets',
+  authenticateToken,
+  requireRoles('OUTSIDER'),
+  TicketController.getMyTickets
+);
+router.get('/:ticketId', authenticateToken, TicketController.getTicketById);
 export default router;

@@ -178,6 +178,7 @@ export default function FloorPlanView({
 
       {reservingTable && (
         <ReservationModal
+          key={reservingTable.tableId}
           isOpen
           onClose={() => {
             setReservingTable(null);

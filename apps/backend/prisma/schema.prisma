@@ -70,6 +70,14 @@ enum ZoneType {
   @@map("zone_type_enum")
 }
 
+enum IssueStatus {
+  PENDING     @map("Pending")
+  IN_PROGRESS @map("In Progress")
+  COMPLETED   @map("Completed")
+
+  @@map("issue_status_enum")
+}
+
 // ==========================================
 // MODELS: USER & POLYMORPHIC INHERITANCE
 // ==========================================
@@ -313,7 +321,7 @@ model Payment {
   //    (กันสร้าง checkout ซ้ำ และบังคับให้กู้รายการเดิมก่อนซื้อใหม่)
   // หมายเหตุ: US6-3 ต้องล้าง openUid เมื่อ payment เปลี่ยนเป็น Paid/Expired/Failed
   openUid        Int?          @unique(map: "payment_open_uid_key") @map("open_uid")
-  // เวลาที่ชำระเงินสำเร็จ
+  // เวลา backend ยืนยันและเปิดใช้ตั๋วครั้งแรก ไม่ใช่เวลาสร้าง Stripe Charge
   paidAt         DateTime?     @map("paid_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
@@ -331,6 +339,21 @@ model Payment {
   @@map("payment")
 }
 
+// Successful confirmation receipts only. Unhandled failed/expired events belong
+// to the other US6-3 task and must NOT be marked processed here.
+model PaymentWebhookEvent {
+  gateway     String   @db.VarChar(32) @map("gateway")
+  eventId     String   @db.VarChar(255) @map("event_id")
+  paymentId   Int      @map("paymentid")
+  gatewayRef  String   @db.VarChar(255) @map("gateway_ref")
+  processedAt DateTime @default(now()) @map("processed_at")
+  payment     Payment  @relation(fields: [paymentId], references: [paymentId], onDelete: Cascade)
+
+  @@id([gateway, eventId])
+  @@index([paymentId], map: "idx_payment_webhook_payment")
+  @@map("payment_webhook_event")
+}
+
 // ==========================================
 // MODELS: FACILITY & AUDIT LOGS
 // ==========================================
@@ -341,6 +364,7 @@ model IssueReport {
   time             DateTime      @default(now()) @map("time")
   tableId          Int           @map("tableid")
   issueInformation String        @db.Text @map("issue_information")
+  status           IssueStatus   @default(PENDING) @map("status")
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")
 
@@ -351,6 +375,7 @@ model IssueReport {
 
   @@index([tableId], name: "idx_issue_table")
   @@index([uid], name: "idx_issue_user")
+  @@index([status, time(sort: Desc)], map: "idx_issue_report_status_time")
   @@map("issue_report")
 }
 
