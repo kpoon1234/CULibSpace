@@ -64,8 +64,36 @@ export class IssueController {
         data,
       });
     } catch (error: any) {
+      if (error?.code === 'USER_NOT_FOUND' || error?.code === 'PROFILE_INCOMPLETE') {
+        res.status(error.status).json({
+          success: false,
+          code: error.code,
+          error: error.message,
+        });
+        return;
+      }
       if (error?.code === 'P2003') {
-        res.status(400).json({ success: false, error: 'The selected table does not exist' });
+        const fieldName = error.meta?.constraint ?? error.meta?.field_name;
+        const constraint =
+          typeof fieldName === 'string' ? fieldName.replace(/ \(index\)$/, '') : '';
+        if (constraint === 'issue_report_uid_fkey' || constraint === 'uid') {
+          res.status(401).json({
+            success: false,
+            code: 'USER_NOT_FOUND',
+            error: 'User session is no longer valid',
+          });
+          return;
+        }
+        const isTableReference =
+          constraint === 'issue_report_tableid_fkey' ||
+          constraint === 'tableid' ||
+          constraint === 'tableId';
+        res.status(400).json({
+          success: false,
+          error: isTableReference
+            ? 'The selected table does not exist'
+            : 'Invalid table or user reference',
+        });
         return;
       }
       console.error('Error creating issue report:', error);

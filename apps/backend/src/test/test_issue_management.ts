@@ -30,11 +30,27 @@ function issueRow(overrides: Record<string, any> = {}) {
   };
 }
 
-function mockPrisma(rows: ReturnType<typeof issueRow>[] = [], total = rows.length) {
-  const calls: { create?: any; findMany?: any; count?: any; transactionCount: number } = {
+function mockPrisma(
+  rows: ReturnType<typeof issueRow>[] = [],
+  total = rows.length,
+  user: { isProfileComplete: boolean } | null = { isProfileComplete: true }
+) {
+  const calls: {
+    userFindUnique?: any;
+    create?: any;
+    findMany?: any;
+    count?: any;
+    transactionCount: number;
+  } = {
     transactionCount: 0,
   };
   const client = {
+    user: {
+      findUnique: async (args: unknown) => {
+        calls.userFindUnique = args;
+        return user;
+      },
+    },
     issueReport: {
       create: async (args: unknown) => {
         calls.create = args;
@@ -94,6 +110,10 @@ test('create service persists user/table/details and uses the database timestamp
     client
   );
 
+  assert.deepEqual(calls.userFindUnique, {
+    where: { uid: 5 },
+    select: { isProfileComplete: true },
+  });
   assert.deepEqual(calls.create.data, {
     uid: 5,
     tableId: 101,
@@ -108,6 +128,50 @@ test('create service persists user/table/details and uses the database timestamp
     status: 'Pending',
   });
 });
+
+for (const scenario of [
+  {
+    name: 'an incomplete database profile despite a complete-profile token',
+    user: { isProfileComplete: false },
+    status: 403,
+    code: 'PROFILE_INCOMPLETE',
+    message: 'Please complete your profile onboarding before reporting an issue',
+  },
+  {
+    name: 'a deleted user with an unexpired token',
+    user: null,
+    status: 401,
+    code: 'USER_NOT_FOUND',
+    message: 'User session is no longer valid',
+  },
+] as const) {
+  test(`create rejects ${scenario.name} without persisting a report`, async () => {
+    const { client, calls } = mockPrisma([], 0, scenario.user);
+    const originalCreate = IssueService.create;
+    IssueService.create = (input) => originalCreate(input, client);
+    try {
+      const response = mockResponse();
+      await IssueController.create(
+        {
+          body: { tableId: 101, issueInformation: 'details' },
+          user: { uid: 5, isProfileComplete: true },
+        } as any,
+        response as any
+      );
+
+      assert.deepEqual(calls.userFindUnique.where, { uid: 5 });
+      assert.equal(calls.create, undefined);
+      assert.equal(response.statusCode, scenario.status);
+      assert.deepEqual(response.body, {
+        success: false,
+        code: scenario.code,
+        error: scenario.message,
+      });
+    } finally {
+      IssueService.create = originalCreate;
+    }
+  });
+}
 
 test('admin list service filters by status and description and returns user/table details', async () => {
   const row = issueRow({ status: IssueStatus.IN_PROGRESS });
@@ -269,29 +333,86 @@ test('create controller rejects empty, non-string and oversized descriptions', a
   }
 });
 
-test('create controller maps a missing table foreign-key error to 400', async () => {
-  const originalCreate = IssueService.create;
-  const originalError = console.error;
-  IssueService.create = (async () => {
-    throw { code: 'P2003' };
-  }) as typeof IssueService.create;
-  console.error = () => {};
-  try {
-    const response = mockResponse();
-    await IssueController.create(
-      { body: { tableId: 999, issueInformation: 'details' }, user: { uid: 5 } } as any,
-      response as any
-    );
-    assert.equal(response.statusCode, 400);
-    assert.deepEqual(response.body, {
+for (const scenario of [
+  {
+    name: 'table constraint returned by PostgreSQL',
+    meta: { constraint: 'issue_report_tableid_fkey' },
+    status: 400,
+    body: { success: false, error: 'The selected table does not exist' },
+  },
+  {
+    name: 'legacy table constraint metadata',
+    meta: { field_name: 'issue_report_tableid_fkey (index)' },
+    status: 400,
+    body: { success: false, error: 'The selected table does not exist' },
+  },
+  {
+    name: 'table column',
+    meta: { field_name: 'tableid' },
+    status: 400,
+    body: { success: false, error: 'The selected table does not exist' },
+  },
+  {
+    name: 'user constraint returned by PostgreSQL after the profile lookup',
+    meta: { constraint: 'issue_report_uid_fkey' },
+    status: 401,
+    body: {
       success: false,
-      error: 'The selected table does not exist',
-    });
-  } finally {
-    IssueService.create = originalCreate;
-    console.error = originalError;
-  }
-});
+      code: 'USER_NOT_FOUND',
+      error: 'User session is no longer valid',
+    },
+  },
+  {
+    name: 'legacy user constraint metadata',
+    meta: { field_name: 'issue_report_uid_fkey (index)' },
+    status: 401,
+    body: {
+      success: false,
+      code: 'USER_NOT_FOUND',
+      error: 'User session is no longer valid',
+    },
+  },
+  {
+    name: 'user column',
+    meta: { field_name: 'uid' },
+    status: 401,
+    body: {
+      success: false,
+      code: 'USER_NOT_FOUND',
+      error: 'User session is no longer valid',
+    },
+  },
+  {
+    name: 'missing metadata',
+    meta: undefined,
+    status: 400,
+    body: { success: false, error: 'Invalid table or user reference' },
+  },
+  {
+    name: 'unknown constraint',
+    meta: { field_name: 'unknown_fkey' },
+    status: 400,
+    body: { success: false, error: 'Invalid table or user reference' },
+  },
+] as const) {
+  test(`create controller handles P2003 for ${scenario.name}`, async () => {
+    const originalCreate = IssueService.create;
+    IssueService.create = (async () => {
+      throw { code: 'P2003', meta: scenario.meta };
+    }) as typeof IssueService.create;
+    try {
+      const response = mockResponse();
+      await IssueController.create(
+        { body: { tableId: 999, issueInformation: 'details' }, user: { uid: 5 } } as any,
+        response as any
+      );
+      assert.equal(response.statusCode, scenario.status);
+      assert.deepEqual(response.body, scenario.body);
+    } finally {
+      IssueService.create = originalCreate;
+    }
+  });
+}
 
 test('admin list controller applies defaults and forwards each accepted status filter', async () => {
   const originalList = IssueService.listAdmin;

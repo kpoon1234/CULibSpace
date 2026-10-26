@@ -67,6 +67,25 @@ export class IssueService {
     input: CreateIssueInput,
     prismaClient: PrismaClient = defaultPrisma
   ): Promise<CreatedIssueResult> {
+    const user = await prismaClient.user.findUnique({
+      where: { uid: input.uid },
+      select: { isProfileComplete: true },
+    });
+    if (!user) {
+      throw {
+        status: 401,
+        code: 'USER_NOT_FOUND',
+        message: 'User session is no longer valid',
+      };
+    }
+    if (!user.isProfileComplete) {
+      throw {
+        status: 403,
+        code: 'PROFILE_INCOMPLETE',
+        message: 'Please complete your profile onboarding before reporting an issue',
+      };
+    }
+
     const issue: CreatedIssue = await prismaClient.issueReport.create({
       data: {
         uid: input.uid,
