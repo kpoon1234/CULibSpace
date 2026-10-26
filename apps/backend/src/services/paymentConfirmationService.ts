@@ -57,8 +57,17 @@ export class PaymentConfirmationService {
     gateway: PaymentGateway,
     prisma: PrismaClient = defaultPrisma
   ): Promise<ConfirmationResult> {
-    // Only payment.succeeded events are handled here.
-    // Failed/expired events belong to another task (Keep pending or failed payments inactive).
+    // Handle failed payments: keep ticket inactive, update payment status to FAILED
+    if (event.type === 'payment.failed') {
+      return this.handleFailedPayment(event, gateway, prisma);
+    }
+
+    // Handle expired payments: keep ticket inactive, update payment status to EXPIRED
+    if (event.type === 'payment.expired') {
+      return this.handleExpiredPayment(event, gateway, prisma);
+    }
+
+    // Only payment.succeeded events are handled for activation.
     if (event.type !== 'payment.succeeded') return { handled: false };
 
     if (event.paymentState !== 'paid') {
@@ -117,6 +126,98 @@ export class PaymentConfirmationService {
     }
 
     return this.confirmCheckout(gateway.name, event.gatewayRef, checkout, prisma, event.eventId);
+  }
+
+  /**
+   * [US6-3] Handle failed payment: update status to FAILED, keep ticket inactive
+   * -------------------------------------------------------------------------
+   * Payment remains inactive (ticket stays UNPAID) and user can retry with a new purchase.
+   * openUid is released so the user can start a new purchase.
+   */
+  private static async handleFailedPayment(
+    event: GatewayPaymentEvent,
+    gateway: PaymentGateway,
+    prisma: PrismaClient
+  ): Promise<ConfirmationResult> {
+    if (!event.gatewayRef || event.gatewayRef.length > 255) {
+      throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
+    }
+
+    const paymentId = paymentIdFrom(event.reference);
+
+    const payment = await prisma.payment.findFirst({
+      where: {
+        OR: [{ paymentId }, { gatewayRef: event.gatewayRef }],
+      },
+    });
+
+    if (!payment) {
+      return { handled: false };
+    }
+
+    // Only update if still in an open state (PENDING or UNCONFIRMED)
+    if (payment.status !== PaymentStatus.PENDING && payment.status !== PaymentStatus.UNCONFIRMED) {
+      // Already processed (PAID, FAILED, EXPIRED, REFUNDED) - no-op
+      return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+    }
+
+    // Update payment to FAILED and release openUid
+    await prisma.payment.update({
+      where: { paymentId: payment.paymentId },
+      data: {
+        status: PaymentStatus.FAILED,
+        openUid: null,
+      },
+    });
+
+    // Ticket stays UNPAID (inactive) - do NOT activate
+    return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
+  }
+
+  /**
+   * [US6-3] Handle expired payment: update status to EXPIRED, keep ticket inactive
+   * -------------------------------------------------------------------------
+   * Payment remains inactive (ticket stays UNPAID) and user can retry with a new purchase.
+   * openUid is released so the user can start a new purchase.
+   */
+  private static async handleExpiredPayment(
+    event: GatewayPaymentEvent,
+    gateway: PaymentGateway,
+    prisma: PrismaClient
+  ): Promise<ConfirmationResult> {
+    if (!event.gatewayRef || event.gatewayRef.length > 255) {
+      throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
+    }
+
+    const paymentId = paymentIdFrom(event.reference);
+
+    const payment = await prisma.payment.findFirst({
+      where: {
+        OR: [{ paymentId }, { gatewayRef: event.gatewayRef }],
+      },
+    });
+
+    if (!payment) {
+      return { handled: false };
+    }
+
+    // Only update if still in an open state (PENDING or UNCONFIRMED)
+    if (payment.status !== PaymentStatus.PENDING && payment.status !== PaymentStatus.UNCONFIRMED) {
+      // Already processed - no-op
+      return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+    }
+
+    // Update payment to EXPIRED and release openUid
+    await prisma.payment.update({
+      where: { paymentId: payment.paymentId },
+      data: {
+        status: PaymentStatus.EXPIRED,
+        openUid: null,
+      },
+    });
+
+    // Ticket stays UNPAID (inactive) - do NOT activate
+    return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
   }
 
   /** Shared by webhook and US6-1 recovery. Network I/O is completed BEFORE the

@@ -84,6 +84,20 @@ function fixture() {
     payment: {
       findUnique: async ({ where }: any) =>
         where.paymentId === state.payment.paymentId ? state.payment : null,
+      findFirst: async ({ where }: any) => {
+        // For failed/expired handling, search by paymentId or gatewayRef
+        if (where?.paymentId && where.paymentId === state.payment.paymentId) return state.payment;
+        if (where?.gatewayRef && where.gatewayRef === state.payment.gatewayRef)
+          return state.payment;
+        if (where?.OR) {
+          for (const cond of where.OR) {
+            if (cond.paymentId && cond.paymentId === state.payment.paymentId) return state.payment;
+            if (cond.gatewayRef && cond.gatewayRef === state.payment.gatewayRef)
+              return state.payment;
+          }
+        }
+        return null;
+      },
       update: async ({ data }: any) => {
         if (state.failPayment) throw new Error('payment write failed');
         Object.assign(state.payment, data);
@@ -185,14 +199,45 @@ test('duplicate event is idempotent', async (t) => {
   assert.equal(f.state.receipts.length, 1);
 });
 
-test('failed/expired events are not handled by success task', async () => {
-  for (const type of ['payment.failed', 'payment.expired', 'payment.unknown'] as const) {
-    const f = fixture();
-    const result = await PaymentConfirmationService.handleWebhook(event({ type }), f.gateway, f.db);
-    assert.equal(result.handled, false);
-    assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
-    assert.equal(f.state.receipts.length, 0);
-  }
+test('unknown events are not handled', async () => {
+  const f = fixture();
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.unknown' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(result.handled, false);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+  assert.equal(f.state.retrievals, 0);
+});
+
+test('failed/expired events update payment status but do not activate ticket', async () => {
+  // Failed event -> payment becomes FAILED, ticket stays UNPAID
+  const f1 = fixture();
+  const result1 = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f1.gateway,
+    f1.db
+  );
+  assert.equal(result1.handled, true);
+  assert.equal(result1.activated, false);
+  assert.equal(f1.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f1.state.payment.openUid, null);
+  assert.equal(f1.state.ticket.status, TicketStatus.UNPAID);
+
+  // Expired event -> payment becomes EXPIRED, ticket stays UNPAID
+  const f2 = fixture();
+  const result2 = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired' }),
+    f2.gateway,
+    f2.db
+  );
+  assert.equal(result2.handled, true);
+  assert.equal(result2.activated, false);
+  assert.equal(f2.state.payment.status, PaymentStatus.EXPIRED);
+  assert.equal(f2.state.payment.openUid, null);
+  assert.equal(f2.state.ticket.status, TicketStatus.UNPAID);
 });
 
 test('event identity cannot be reused for another payment', async () => {
