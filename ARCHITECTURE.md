@@ -175,14 +175,17 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
   The **Poom/Andy status-and-notes API** must authorize the admin, validate its
   request, and call this helper **before any issue status/flag write**, inside
   the same interactive transaction as its `ManageIssue` audit entry. The helper
-  acquires the table row lock before changing the issue and invalidates holds
-  when the table becomes closed. Do not write the status first or call the
+  acquires the table row lock before changing the issue, then checks blocking
+  issues once after the update. If the table is closed, any remaining hold
+  fields are cleared (including partial/stale holds on an already closed table).
+  Empty holds are not rewritten. Do not write the status first or call the
   helper after committing the audit. Any subsequent audit error must roll back
   the entire transaction. This task adds no duplicate admin endpoint or UI.
 - The **Kla/Nine admin form** should expose an opt-in “Close table while fixing”
-  checkbox only for `IN_PROGRESS`, and send an explicit boolean. The admin list
-  API must expose `blocksTable` when that UI is implemented; that API contract
-  change belongs with the status-and-notes task, not a second list endpoint.
+  checkbox only for `IN_PROGRESS`, and send an explicit boolean. The existing
+  admin list API exposes `blocksTable` so the UI can initialize the checkbox;
+  no second list endpoint is added. A composite index on
+  `(tableId, status, blocksTable)` supports the shared availability predicate.
 - Hold and finalized booking operations use the same table lock and re-check
   issue availability inside their transactions, returning `TABLE_CLOSED` when
   blocked. A stale map/hold token cannot bypass this check. Existing floor-plan

@@ -22,6 +22,7 @@ const { PrismaClient, IssueStatus, TableStatus, UserType, ZoneType, BookingStatu
 const { applyIssueAvailabilityChange } = await import('../services/facilityAvailabilityService.js');
 const { BookingService } = await import('../services/bookingService.js');
 const { LayoutService } = await import('../services/layoutService.js');
+const { IssueService } = await import('../services/issueService.js');
 const { ScheduleService } = await import('../services/scheduleService.js');
 const prisma = new PrismaClient();
 const runId = randomUUID();
@@ -156,6 +157,62 @@ async function test(name: string, run: () => Promise<void>) {
   console.log(`PASS: ${name}`);
 }
 try {
+  await test('the blocking composite index exists alongside the existing table index', async () => {
+    const indexes = await prisma.$queryRaw<{ indexname: string; indexdef: string }[]>`
+      SELECT indexname, indexdef FROM pg_indexes
+      WHERE schemaname = current_schema() AND tablename = 'issue_report'
+        AND indexname IN ('idx_issue_table', 'idx_issue_table_blocking')`;
+    assert.equal(indexes.length, 2);
+    assert.match(
+      indexes.find(({ indexname }) => indexname === 'idx_issue_table_blocking')!.indexdef,
+      /\(tableid, status, blocks_table\)/
+    );
+  });
+
+  await test('non-blocking updates preserve holds; an already closed table clears partial holds', async () => {
+    const f = await fixture();
+    await change(f, IssueStatus.IN_PROGRESS, false);
+    const table = await prisma.table.findUniqueOrThrow({ where: { tableId: f.table.tableId } });
+    assert.equal(table.lockToken, f.table.lockToken);
+    assert.equal(table.lockedUntil?.getTime(), f.table.lockedUntil?.getTime());
+    assert.equal(table.lockedByUid, f.user.uid);
+
+    await change(f, IssueStatus.IN_PROGRESS, true);
+    // Simulate a legacy/partial hold left on an already issue-blocked table.
+    await prisma.table.update({
+      where: { tableId: f.table.tableId },
+      data: { lockToken: null, lockedUntil: f.table.lockedUntil, lockedByUid: f.user.uid },
+    });
+    await change(f, IssueStatus.IN_PROGRESS, true);
+    const closedTable = await prisma.table.findUniqueOrThrow({
+      where: { tableId: f.table.tableId },
+    });
+    assert.equal(closedTable.lockToken, null);
+    assert.equal(closedTable.lockedUntil, null);
+    assert.equal(closedTable.lockedByUid, null);
+    assert.equal((await layout(f)).status, TableStatus.CLOSED);
+  });
+
+  await test('the real admin list returns blocksTable for both blocking and non-blocking issues', async () => {
+    const f = await fixture();
+    await change(f, IssueStatus.IN_PROGRESS, true);
+    const other = await prisma.issueReport.create({
+      data: { uid: f.user.uid, tableId: f.table.tableId, issueInformation: 'Non-blocking fixture' },
+    });
+    const result = await IssueService.listAdmin(
+      { q: String(f.table.tableId), page: 1, pageSize: 10 },
+      prisma
+    );
+    assert.equal(
+      result.issues.find(({ issueId }) => issueId === f.issue.issueId)?.blocksTable,
+      true
+    );
+    assert.equal(
+      result.issues.find(({ issueId }) => issueId === other.issueId)?.blocksTable,
+      false
+    );
+  });
+
   await test('default is non-blocking; the database rejects blocking outside IN_PROGRESS', async () => {
     const f = await fixture();
     assert.equal(f.issue.blocksTable, false);

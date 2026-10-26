@@ -40,6 +40,7 @@ const adminIssueSelect = {
   time: true,
   issueInformation: true,
   status: true,
+  blocksTable: true,
   user: { select: { uid: true, firstname: true, lastname: true, email: true } },
   table: {
     select: {
@@ -133,6 +134,7 @@ export class IssueService {
         time: issue.time.toISOString(),
         issueInformation: issue.issueInformation,
         status: toIssueStatusLabel(issue.status),
+        blocksTable: issue.blocksTable,
         user: issue.user,
         table: {
           tableId: issue.table.tableId,

@@ -53,9 +53,8 @@ export async function applyIssueAvailabilityChange(
   await lockTableForStatusChange(tx, issue.tableId);
   const table = await tx.table.findUniqueOrThrow({
     where: { tableId: issue.tableId },
-    select: { status: true },
+    select: { status: true, lockToken: true, lockedUntil: true, lockedByUid: true },
   });
-  const wasClosed = isFacilityClosed(table.status, await hasBlockingIssue(tx, issue.tableId));
   const updated = await tx.issueReport.update({
     where: { issueId },
     data: {
@@ -66,7 +65,11 @@ export async function applyIssueAvailabilityChange(
   });
   const closed = isFacilityClosed(table.status, await hasBlockingIssue(tx, issue.tableId));
 
-  if (!wasClosed && closed) {
+  // The row lock keeps this hold snapshot stable. A closed table must not retain
+  // even a partial/stale hold, regardless of whether this update first closed it.
+  const hasHold =
+    table.lockToken !== null || table.lockedUntil !== null || table.lockedByUid !== null;
+  if (closed && hasHold) {
     await tx.table.update({
       where: { tableId: issue.tableId },
       data: { lockToken: null, lockedUntil: null, lockedByUid: null },

@@ -37,6 +37,7 @@ function fixture(issues: Issue[] = [issue()], status: TableStatus = TableStatus.
     lockedByUid: 42 as number | null,
   };
   const events: string[] = [];
+  const blockingReads: boolean[] = [];
   const client: any = {
     $queryRaw: async () => {
       events.push('lock');
@@ -56,6 +57,7 @@ function fixture(issues: Issue[] = [issue()], status: TableStatus = TableStatus.
     issueReport: {
       findUnique: async ({ where }: any) => issues.find((i) => i.issueId === where.issueId) ?? null,
       findFirst: async ({ where }: any) => {
+        blockingReads.push(events.includes('issue-update'));
         assert.deepEqual(where, { tableId: 1, ...BLOCKING_ISSUE_WHERE });
         return (
           issues.find(
@@ -123,7 +125,7 @@ function fixture(issues: Issue[] = [issue()], status: TableStatus = TableStatus.
   async function layout() {
     return (await LayoutService.getLayoutWithStatus(window, client))[0]!.tables[0]!;
   }
-  return { table, issues, client, events, layout };
+  return { table, issues, client, events, blockingReads, layout };
 }
 
 let passed = 0;
@@ -175,6 +177,7 @@ await test('closing clears an old hold, completing reopens without restoring it'
   assert.equal(f.table.lockToken, null);
   assert.equal(f.table.lockedUntil, null);
   assert.equal(f.table.lockedByUid, null);
+  assert.deepEqual(f.blockingReads, [true], 'one blocking query, after updating the issue');
   const opened = await applyIssueAvailabilityChange(f.client, 1, {
     status: IssueStatus.COMPLETED,
     blocksTable: true,
@@ -183,6 +186,64 @@ await test('closing clears an old hold, completing reopens without restoring it'
   assert.equal(opened.closed, false);
   assert.equal((await f.layout()).status, TableStatus.AVAILABLE);
 });
+
+await test('non-blocking issue changes preserve a live hold without writing the table', async () => {
+  const f = fixture();
+  const hold = { token: f.table.lockToken, until: f.table.lockedUntil, uid: f.table.lockedByUid };
+  const result = await applyIssueAvailabilityChange(f.client, 1, {
+    status: IssueStatus.IN_PROGRESS,
+    blocksTable: false,
+  });
+  assert.equal(result.closed, false);
+  assert.equal(f.table.lockToken, hold.token);
+  assert.equal(f.table.lockedUntil, hold.until);
+  assert.equal(f.table.lockedByUid, hold.uid);
+  assert.deepEqual(f.events, ['lock', 'issue-update']);
+  assert.deepEqual(f.blockingReads, [true]);
+});
+
+await test('an already issue-closed table clears stale holds but skips an empty-hold write', async () => {
+  const f = fixture([issue(IssueStatus.IN_PROGRESS, true)]);
+  await applyIssueAvailabilityChange(f.client, 1, {
+    status: IssueStatus.IN_PROGRESS,
+    blocksTable: true,
+  });
+  assert.equal(f.table.lockToken, null);
+  assert.equal(f.table.lockedUntil, null);
+  assert.equal(f.table.lockedByUid, null);
+  assert.deepEqual(f.blockingReads, [true]);
+  assert(f.events.includes('table-update'));
+
+  f.events.length = 0;
+  f.blockingReads.length = 0;
+  await applyIssueAvailabilityChange(f.client, 1, {
+    status: IssueStatus.IN_PROGRESS,
+    blocksTable: true,
+  });
+  assert.deepEqual(f.events, ['lock', 'issue-update']);
+  assert.deepEqual(f.blockingReads, [true]);
+});
+
+for (const field of ['lockToken', 'lockedUntil', 'lockedByUid'] as const) {
+  await test(`closing clears a partial hold containing only ${field}`, async () => {
+    const f = fixture();
+    const value = f.table[field];
+    Object.assign(f.table, {
+      lockToken: null,
+      lockedUntil: null,
+      lockedByUid: null,
+      [field]: value,
+    });
+    await applyIssueAvailabilityChange(f.client, 1, {
+      status: IssueStatus.IN_PROGRESS,
+      blocksTable: true,
+    });
+    assert.equal(f.table.lockToken, null);
+    assert.equal(f.table.lockedUntil, null);
+    assert.equal(f.table.lockedByUid, null);
+    assert(f.events.includes('table-update'));
+  });
+}
 
 await test('completing one of multiple blocking issues keeps the table closed', async () => {
   const f = fixture([
@@ -218,6 +279,9 @@ await test('completing an issue never reopens an independently CLOSED table', as
     true
   );
   assert.equal(f.table.status, TableStatus.CLOSED);
+  assert.equal(f.table.lockToken, null);
+  assert.equal(f.table.lockedUntil, null);
+  assert.equal(f.table.lockedByUid, null);
   assert.equal((await f.layout()).status, TableStatus.CLOSED);
 });
 

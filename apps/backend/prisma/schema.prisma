@@ -361,6 +361,7 @@ model IssueReport {
   manageIssues     ManageIssue[]
 
   @@index([tableId], name: "idx_issue_table")
+  @@index([tableId, status, blocksTable], map: "idx_issue_table_blocking")
   @@index([uid], name: "idx_issue_user")
   @@index([status, time(sort: Desc)], map: "idx_issue_report_status_time")
   @@map("issue_report")
