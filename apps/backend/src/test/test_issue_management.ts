@@ -20,6 +20,7 @@ function issueRow(overrides: Record<string, any> = {}) {
     issueInformation: 'ปลั๊กไฟชำรุด',
     status: IssueStatus.PENDING,
     blocksTable: false,
+    manageIssues: [],
     user: {
       uid: 5,
       firstname: 'Somchai',
@@ -200,6 +201,7 @@ test('admin list service filters by status and description and returns user/tabl
         issueInformation: 'ปลั๊กไฟชำรุด',
         status: 'In Progress',
         blocksTable: false,
+        notes: '',
         user: {
           uid: 5,
           firstname: 'Somchai',

@@ -1,4 +1,5 @@
 import { IssueStatus, Prisma, PrismaClient } from '@prisma/client';
+import { applyIssueAvailabilityChange } from './facilityAvailabilityService.js';
 
 const defaultPrisma = new PrismaClient();
 
@@ -35,12 +36,25 @@ export interface AdminIssueListParams {
   pageSize: number;
 }
 
+export interface UpdateAdminIssueInput {
+  adminId: number;
+  issueId: number;
+  status: IssueStatus;
+  blocksTable: boolean;
+  notes: string;
+}
+
 const adminIssueSelect = {
   issueId: true,
   time: true,
   issueInformation: true,
   status: true,
   blocksTable: true,
+  manageIssues: {
+    select: { info: true },
+    orderBy: { timestamp: 'desc' },
+    take: 1,
+  },
   user: { select: { uid: true, firstname: true, lastname: true, email: true } },
   table: {
     select: {
@@ -64,6 +78,53 @@ export function toIssueStatusLabel(status: IssueStatus): IssueStatusLabel {
 }
 
 export class IssueService {
+  static async updateAdmin(
+    input: UpdateAdminIssueInput,
+    prismaClient: PrismaClient = defaultPrisma
+  ) {
+    return prismaClient.$transaction(async (tx) => {
+      const admin = await tx.admin.findUnique({
+        where: { adminId: input.adminId },
+        select: { adminId: true },
+      });
+      if (!admin) {
+        throw { status: 403, code: 'ADMIN_NOT_FOUND', message: 'Invalid admin account.' };
+      }
+
+      // This helper locks the table before writing the issue and clearing holds.
+      const updated = await applyIssueAvailabilityChange(tx, input.issueId, {
+        status: input.status,
+        blocksTable: input.blocksTable,
+      });
+
+      // All updates to this issue hold the same table lock. Keep timestamps strictly
+      // increasing even for requests in one millisecond (also part of the audit PK).
+      const latest = await tx.manageIssue.findFirst({
+        where: { issueId: input.issueId },
+        orderBy: { timestamp: 'desc' },
+        select: { timestamp: true },
+      });
+      const timestamp = new Date(Math.max(Date.now(), (latest?.timestamp.getTime() ?? 0) + 1));
+      const audit = await tx.manageIssue.create({
+        data: {
+          issueId: input.issueId,
+          adminId: input.adminId,
+          timestamp,
+          info: input.notes,
+        },
+        select: { timestamp: true },
+      });
+
+      return {
+        ...updated,
+        status: toIssueStatusLabel(updated.status),
+        notes: input.notes,
+        updatedBy: input.adminId,
+        updatedAt: audit.timestamp.toISOString(),
+      };
+    });
+  }
+
   static async create(
     input: CreateIssueInput,
     prismaClient: PrismaClient = defaultPrisma
@@ -135,6 +196,7 @@ export class IssueService {
         issueInformation: issue.issueInformation,
         status: toIssueStatusLabel(issue.status),
         blocksTable: issue.blocksTable,
+        notes: issue.manageIssues[0]?.info ?? '',
         user: issue.user,
         table: {
           tableId: issue.table.tableId,
