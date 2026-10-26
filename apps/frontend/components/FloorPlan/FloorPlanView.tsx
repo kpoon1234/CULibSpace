@@ -20,22 +20,19 @@ import FloorPlanFilters from './FloorPlanFilters';
 import FloorNav from './FloorNav';
 import { FloorPlanError, FloorPlanSkeleton } from './FloorPlanStates';
 import ReservationModal from '../Reservation/ReservationModal';
+import IssueReportModal from '../IssueReport/IssueReportModal';
 
 interface FloorPlanViewProps {
   initialFloorId: number;
   initialZone?: ZoneType;
   /** Called once a reservation is confirmed in the booking modal (FR-3). */
   onReserve?: (table: FloorPlanTable) => void;
-  /** Wire to issue reporting (FR-7) when it exists. */
+  /** Called when the user opens the issue report form. */
   onReportIssue?: (table: FloorPlanTable) => void;
 }
 
 const PANEL_ID = 'floor-plan-panel';
 
-// Top-level composition of the 2D floor-plan UI: zone tabs + pan/zoom canvas +
-// selected-table detail + amenity filter + floor navigation. Data comes from
-// useFloorPlan (GET /api/tables/layout); a network/server failure renders
-// FloorPlanError with a retry button instead of the plan.
 export default function FloorPlanView({
   initialFloorId,
   initialZone = 'Common',
@@ -48,6 +45,7 @@ export default function FloorPlanView({
   const [filter, setFilter] = useState<FloorPlanFilter>(EMPTY_FILTER);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [reservingTable, setReservingTable] = useState<FloorPlanTable | null>(null);
+  const [reportingTable, setReportingTable] = useState<FloorPlanTable | null>(null);
 
   const { plan, isLoading, isError, isStale, isRefreshing, source, refresh } = useFloorPlan(
     floorId,
@@ -63,21 +61,24 @@ export default function FloorPlanView({
   if (isLoading) return <FloorPlanSkeleton />;
   if (isError || !plan || !activeZone) return <FloorPlanError onRetry={refresh} />;
 
-  const zoneOptions: ZoneTabOption[] = plan.zones.map((z) => ({
-    zoneType: z.zoneType,
-    label: z.label,
-    open: z.counts.Available,
+  const zoneOptions: ZoneTabOption[] = plan.zones.map((zone) => ({
+    zoneType: zone.zoneType,
+    label: zone.label,
+    open: zone.counts.Available,
   }));
 
   const selectedTable =
     selectedTableId != null
-      ? (activeZone.tables.find((t) => t.tableId === selectedTableId) ?? null)
+      ? (activeZone.tables.find((table) => table.tableId === selectedTableId) ?? null)
       : null;
 
-  // Falls back to "now" only when the filter has no booking window set —
-  // otherwise the reservation modal should open pre-filled with whatever
-  // date/time the user already picked in the filter.
+  // Falls back to "now" when no booking window is set in the filter.
   const reservationDate = new Date();
+
+  function handleReportIssue(table: FloorPlanTable) {
+    setReportingTable(table);
+    onReportIssue?.(table);
+  }
 
   return (
     <section aria-label="Floor plan" className="flex flex-col gap-4">
@@ -94,6 +95,7 @@ export default function FloorPlanView({
             <span className="text-xs text-gray-400">Updating…</span>
           )}
         </div>
+
         <FloorNav
           floor={plan.floor}
           onNavigate={(id) => {
@@ -103,9 +105,7 @@ export default function FloorPlanView({
         />
       </div>
 
-      {/* A later refresh failed but a plan is still on screen (keepPreviousData) —
-          isError alone can't catch this, so surface it as its own inline notice
-          instead of leaving a stale, silently-broken plan on screen. */}
+      {/* Show a notice if refreshing failed but the previous plan is still visible. */}
       {isStale && (
         <div
           role="alert"
@@ -115,7 +115,7 @@ export default function FloorPlanView({
           <button
             type="button"
             onClick={refresh}
-            className="rounded-md border border-chula-pink/40 bg-paper px-2.5 py-1 text-xs font-medium text-chula-pink transition-colors hover:bg-chula-pink/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-chula-pink"
+            className="rounded-md border border-chula-pink/40 bg-paper px-2.5 py-1 text-xs font-medium text-chula-pink hover:bg-chula-pink/10"
           >
             Try again
           </button>
@@ -127,9 +127,9 @@ export default function FloorPlanView({
         <ZoneTabs
           options={zoneOptions}
           active={activeZone.zoneType}
-          onChange={(z) => {
+          onChange={(zone) => {
             setSelectedTableId(null);
-            setRequestedZone(z);
+            setRequestedZone(zone);
           }}
           panelId={PANEL_ID}
         />
@@ -138,28 +138,28 @@ export default function FloorPlanView({
         </p>
       </div>
 
-      {/* Canvas + detail */}
+      {/* Canvas + selected table details */}
       <div id={PANEL_ID} role="tabpanel" className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="h-[420px] sm:h-[520px]">
           <FloorCanvas
             zone={activeZone}
             selectedTableId={selectedTableId}
-            onSelect={(t) => setSelectedTableId(t.tableId)}
+            onSelect={(table) => setSelectedTableId(table.tableId)}
             onOpenFilters={() => setFiltersOpen(true)}
             onClearFilters={() => setFilter(EMPTY_FILTER)}
             activeFilterCount={activeFilterCount(filter)}
           />
         </div>
+
         <TableDetailPanel
           table={selectedTable}
           zoneLabel={activeZone.label}
           onClose={() => setSelectedTableId(null)}
           onReserve={setReservingTable}
-          onReportIssue={onReportIssue}
+          onReportIssue={handleReportIssue}
         />
       </div>
 
-      {/* Legend */}
       <FloorPlanLegend counts={activeZone.counts} />
 
       {filtersOpen && (
@@ -168,6 +168,7 @@ export default function FloorPlanView({
           onClose={() => setFiltersOpen(false)}
           onApply={(next) => {
             setFilter(next);
+
             // Drop the selection only if the new filter would exclude it.
             if (selectedTable && !tablePassesFilter(selectedTable, next)) {
               setSelectedTableId(null);
@@ -193,6 +194,19 @@ export default function FloorPlanView({
             onReserve?.(reservingTable);
             refresh();
           }}
+        />
+      )}
+
+      {reportingTable && (
+        <IssueReportModal
+          key={`${reportingTable.tableId}-${reportingTable.zoneId}`}
+          location={{
+            tableId: reportingTable.tableId,
+            tableCode: reportingTable.code,
+            zoneId: reportingTable.zoneId,
+            zoneLabel: activeZone.label,
+          }}
+          onClose={() => setReportingTable(null)}
         />
       )}
     </section>
