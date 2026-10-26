@@ -272,20 +272,6 @@ model Ticket {
   @@map("ticket")
 }
 
-model PaymentWebhookEvent {
-  gateway     String   @db.VarChar(32) @map("gateway")
-  eventId     String   @db.VarChar(255) @map("event_id")
-  paymentId   Int      @map("paymentid")
-  gatewayRef  String   @db.VarChar(255) @map("gateway_ref")
-  processedAt DateTime @default(now()) @map("processed_at")
-
-  payment     Payment  @relation(fields: [paymentId], references: [paymentId], onDelete: Cascade)
-
-  @@id([gateway, eventId])
-  @@index([paymentId], map: "idx_payment_webhook_payment")
-  @@map("payment_webhook_event")
-}
-
 // [US6-1] ตาราง Payment ผูกกับ Ticket เพื่อเก็บยอดเงิน (หน่วยสตางค์), สกุลเงิน,
 // สถานะการชำระเงิน, gateway reference และ idempotency key
 // ตกลง schema ชุดเดียวกับทีม US6-2 / US6-3 (migration กลาง)
