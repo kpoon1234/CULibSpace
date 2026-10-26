@@ -23,6 +23,7 @@ const { applyIssueAvailabilityChange } = await import('../services/facilityAvail
 const { BookingService } = await import('../services/bookingService.js');
 const { LayoutService } = await import('../services/layoutService.js');
 const { IssueService } = await import('../services/issueService.js');
+const { LockService } = await import('../services/lockService.js');
 const { ScheduleService } = await import('../services/scheduleService.js');
 const prisma = new PrismaClient();
 const runId = randomUUID();
@@ -156,7 +157,179 @@ async function test(name: string, run: () => Promise<void>) {
   passed++;
   console.log(`PASS: ${name}`);
 }
+
+async function expiredPair() {
+  const old = await fixture();
+  const target = await fixture();
+  await prisma.table.updateMany({
+    where: { tableId: { in: [old.table.tableId, target.table.tableId] } },
+    data: { lockedUntil: new Date(Date.now() - 60_000) },
+  });
+  return { old, target };
+}
+
+async function assertRenewedHold(tableId: number, uid: number, token: string) {
+  const table = await prisma.table.findUniqueOrThrow({ where: { tableId } });
+  assert.equal(table.lockToken, token);
+  assert.equal(table.lockedByUid, uid);
+  assert(table.lockedUntil! > new Date());
+}
+
 try {
+  await test('expiration skips A while holding B, so a table-switch hold cannot deadlock', async () => {
+    const { old, target } = await expiredPair();
+    const aLocked = deferred(),
+      bLocked = deferred();
+    const workerRows: number[] = [];
+    // Recreate the adverse legacy ordering deterministically: hold owns A,
+    // cleanup owns B, and the real acquireLock query subsequently waits for B.
+    const holdClient = {
+      user: prisma.user,
+      systemConfig: prisma.systemConfig,
+      $transaction: (callback: (tx: any) => Promise<unknown>) =>
+        prisma.$transaction(
+          async (tx) => {
+            const proxy = new Proxy(tx, {
+              get(client, prop) {
+                if (prop !== '$queryRaw') return Reflect.get(client, prop);
+                return async (...args: any[]) => {
+                  await tx.$queryRaw`SELECT tableid FROM "table" WHERE tableid = ${old.table.tableId} FOR UPDATE`;
+                  aLocked.resolve();
+                  await bLocked.promise;
+                  return (tx.$queryRaw as any)(...args);
+                };
+              },
+            });
+            return callback(proxy);
+          },
+          { timeout: 10_000 }
+        ),
+    };
+    const workerClient = {
+      $transaction: (callback: (tx: any) => Promise<unknown>) =>
+        prisma.$transaction(
+          async (tx) => {
+            await aLocked.promise;
+            await tx.$queryRaw`SELECT tableid FROM "table" WHERE tableid = ${target.table.tableId} FOR UPDATE`;
+            bLocked.resolve();
+            return callback(
+              new Proxy(tx, {
+                get(client, prop) {
+                  if (prop !== '$queryRaw') return Reflect.get(client, prop);
+                  return async (...args: any[]) => {
+                    const rows = await (tx.$queryRaw as any)(...args);
+                    workerRows.push(...rows.map(({ tableid }: { tableid: number }) => tableid));
+                    return rows;
+                  };
+                },
+              })
+            );
+          },
+          { timeout: 10_000 }
+        ),
+    };
+    const hold = BookingService.acquireLock(
+      target.table.tableId,
+      old.user.uid,
+      undefined,
+      undefined,
+      holdClient
+    ).then(
+      (value) => ({ value, error: null as any }),
+      (error) => ({ value: null, error })
+    );
+    let worker: Promise<{ value: unknown; error: any }> | undefined;
+    try {
+      await waitFor(aLocked.promise, 'hold locks A');
+      worker = LockService.releaseExpiredLocks(new Date(), workerClient as any).then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error })
+      );
+      const [held, cleaned] = await Promise.all([hold, worker]);
+      assert.ifError(held.error);
+      assert.ifError(cleaned.error);
+      assert.equal(cleaned.value, 1);
+      assert.deepEqual(workerRows, [target.table.tableId]);
+      await assertRenewedHold(target.table.tableId, old.user.uid, held.value!.lockToken);
+      assert.equal(
+        (await prisma.table.findUniqueOrThrow({ where: { tableId: old.table.tableId } })).lockToken,
+        null
+      );
+    } finally {
+      aLocked.resolve();
+      bLocked.resolve();
+      await Promise.allSettled([hold, ...(worker ? [worker] : [])]);
+    }
+  });
+
+  await test('cleanup skips in-flight hold rows and cannot clear a newly renewed token', async () => {
+    const { old, target } = await expiredPair();
+    const holder = pausedClient();
+    const hold = BookingService.acquireLock(
+      target.table.tableId,
+      old.user.uid,
+      undefined,
+      undefined,
+      holder.client
+    ).then(
+      (value) => ({ value, error: null as any }),
+      (error) => ({ value: null, error })
+    );
+    try {
+      await waitFor(holder.acquired.promise, 'hold locks both expired rows');
+      assert.equal(await LockService.releaseExpiredLocks(new Date(), prisma), 0);
+      holder.resume.resolve();
+      const result = await hold;
+      assert.ifError(result.error);
+      assert.equal(await LockService.releaseExpiredLocks(new Date(), prisma), 0);
+      await assertRenewedHold(target.table.tableId, old.user.uid, result.value!.lockToken);
+    } finally {
+      holder.resume.resolve();
+      await hold;
+    }
+  });
+
+  await test('hold waits for cleanup to commit and its fresh token survives the next tick', async () => {
+    const { old, target } = await expiredPair();
+    const cleaner = pausedClient(),
+      holder = pausedClient();
+    const cleanup = LockService.releaseExpiredLocks(new Date(), cleaner.client as any).then(
+      (value) => ({ value, error: null as any }),
+      (error) => ({ value: null, error })
+    );
+    let hold: Promise<{ value: any; error: any }> | undefined;
+    try {
+      await waitFor(cleaner.acquired.promise, 'cleanup locks expired rows');
+      hold = BookingService.acquireLock(
+        target.table.tableId,
+        old.user.uid,
+        undefined,
+        undefined,
+        holder.client
+      ).then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error })
+      );
+      await waitFor(holder.attempted.promise, 'hold attempts cleanup-owned rows');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(holder.locked(), false);
+      cleaner.resume.resolve();
+      const cleaned = await cleanup;
+      assert.ifError(cleaned.error);
+      assert.equal(cleaned.value, 2);
+      await waitFor(holder.acquired.promise, 'hold obtains released rows');
+      holder.resume.resolve();
+      const held = await hold;
+      assert.ifError(held.error);
+      assert.equal(await LockService.releaseExpiredLocks(new Date(), prisma), 0);
+      await assertRenewedHold(target.table.tableId, old.user.uid, held.value.lockToken);
+    } finally {
+      cleaner.resume.resolve();
+      holder.resume.resolve();
+      await Promise.allSettled([cleanup, ...(hold ? [hold] : [])]);
+    }
+  });
+
   await test('the blocking composite index exists alongside the existing table index', async () => {
     const indexes = await prisma.$queryRaw<{ indexname: string; indexdef: string }[]>`
       SELECT indexname, indexdef FROM pg_indexes

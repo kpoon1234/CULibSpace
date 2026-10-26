@@ -190,16 +190,22 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
   issue availability inside their transactions, returning `TABLE_CLOSED` when
   blocked. A stale map/hold token cannot bypass this check. Existing floor-plan
   polling (20 seconds) and `CLOSED` display are reused; no WebSocket is added.
+- The expiration worker locks expired rows in ascending `tableId` order inside
+  its transaction, with `FOR UPDATE SKIP LOCKED`. Rows held by another transaction
+  are left to a later tick instead of creating an inverted wait cycle with
+  `acquireLock`. Cleanup updates only the locked IDs which are still expired;
+  it cannot clear a renewed hold. Direct cleanup errors propagate to tests/callers,
+  while the scheduled worker logs failed ticks and keeps running.
 - **Existing bookings are unchanged:** this task prevents new holds/bookings;
   it does not cancel, relocate, stop an active booking, deny existing check-in,
   or change no-show penalties. The team must agree the existing-booking policy
   before wiring this helper into a production admin closure flow. Workers can
   continue updating stored booking status without removing effective closure.
-- Branch dependency: based on PR #63's issue schema/services. Merge that PR
-  first (or retarget this branch to it); do not recreate its status migration.
+- Reuses PR #63's issue schema/services, now merged into main; its existing
+  status migration is unchanged. This branch adds only US7-3 changes.
   `npm test --workspace=apps/backend` runs the mock facility suite;
   `npm run test:integration --workspace=apps/backend` includes real PostgreSQL
-  issue/hold/booking races and rollback checks, guarded by a distinct
+  issue/hold/booking/expiration-worker races and rollback checks, guarded by a distinct
   `TEST_DATABASE_URL` whose database name ends in `_test`.
 
 ---
