@@ -171,3 +171,38 @@ via `useBookingLimits()` from `GET /api/system-config/booking-limits`. That
 endpoint doesn't send the field yet, so it falls back to 50 (the backend's
 default for `SystemConfig.minScoreToBook`). Once the backend adds
 `minScoreToBook` to that response, the UI picks it up with no frontend change.
+
+## `lib/tickets` — visitor ticket purchase (US6-1)
+
+`lib/tickets.ts` is the frontend data-layer client for starting a visitor ticket
+purchase. Route and feature UI code call `purchaseVisitorTicket()` rather than
+calling the ticket API directly. The helper reads the current bearer token from
+`lib/auth.ts`, sends a client-generated idempotency key, and returns a typed
+success/error result including backend error codes and retryability.
+
+### The purchase endpoint
+
+#### `POST /api/tickets/purchase`
+
+Requires an authenticated `OUTSIDER` account with a completed visitor profile.
+The client sends only `{ idempotencyKey }`; price and ticket validity come from
+backend `SystemConfig`, never from form fields. On success, the page redirects
+to the returned `checkoutUrl`. Keep the same key when recovering a pending or
+unconfirmed attempt; use a new key after a terminal failed/expired attempt.
+
+### Entry points and booking handoff
+
+- An outsider can open `/visitor/ticket` from **Buy visitor ticket** in the
+  account menu, without first attempting to reserve a table.
+- When booking returns `TICKET_REQUIRED`, `ReservationSession` preserves the
+  backend code and `ReservationModal` offers the same purchase route.
+- Do not carry a table hold across Stripe checkout. Holds expire independently
+  of payment; after the ticket is confirmed active, the visitor starts a fresh
+  reservation flow.
+- `/tickets/success` reports that payment is being checked; it does not treat
+  the Stripe redirect as proof of payment. US6-3 webhook processing activates
+  the ticket. `/tickets/cancel` returns the visitor to the purchase route.
+
+API/network failures remain explicit in the page; there is no mock or silent
+fallback. The ticket-list/history endpoint belongs to US6-2 and is documented
+when its frontend client is added.
