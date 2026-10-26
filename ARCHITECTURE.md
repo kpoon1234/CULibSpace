@@ -160,6 +160,45 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
 - Admin ตรวจสอบรายการ อัปเดตสถานะปัญหา (`ManageIssue`) และปรับสถานะโต๊ะเป็น `CLOSED` หากชำรุด
 - Admin ตั้งค่าตารางเวลาเปิด-ปิด (`OperatingSchedule`) และเงื่อนไขระบบ (`SystemConfig`)
 
+#### US7-3: Issue-driven facility availability
+
+- Reuses the issue statuses from US7-1/US7-2. `IssueReport.blocksTable` defaults to
+  `false`; only `IN_PROGRESS` can block a table. `PENDING` and `COMPLETED` normalize
+  this flag to `false` (also enforced by a database CHECK constraint).
+- Effective closure is **stored `Table.status = CLOSED` OR any `IN_PROGRESS`
+  issue with `blocksTable = true`**. Issue changes do not overwrite stored
+  `Table.status`: manual closure stays independent, and completing one issue
+  cannot reopen a table blocked by another issue. Layout re-evaluates bookings
+  and holds after reopening, using its existing time-window logic.
+- `facilityAvailabilityService.ts` owns the shared predicate and
+  `applyIssueAvailabilityChange(tx, issueId, { status, blocksTable })` helper.
+  The **Poom/Andy status-and-notes API** must authorize the admin, validate its
+  request, and call this helper **before any issue status/flag write**, inside
+  the same interactive transaction as its `ManageIssue` audit entry. The helper
+  acquires the table row lock before changing the issue and invalidates holds
+  when the table becomes closed. Do not write the status first or call the
+  helper after committing the audit. Any subsequent audit error must roll back
+  the entire transaction. This task adds no duplicate admin endpoint or UI.
+- The **Kla/Nine admin form** should expose an opt-in “Close table while fixing”
+  checkbox only for `IN_PROGRESS`, and send an explicit boolean. The admin list
+  API must expose `blocksTable` when that UI is implemented; that API contract
+  change belongs with the status-and-notes task, not a second list endpoint.
+- Hold and finalized booking operations use the same table lock and re-check
+  issue availability inside their transactions, returning `TABLE_CLOSED` when
+  blocked. A stale map/hold token cannot bypass this check. Existing floor-plan
+  polling (20 seconds) and `CLOSED` display are reused; no WebSocket is added.
+- **Existing bookings are unchanged:** this task prevents new holds/bookings;
+  it does not cancel, relocate, stop an active booking, deny existing check-in,
+  or change no-show penalties. The team must agree the existing-booking policy
+  before wiring this helper into a production admin closure flow. Workers can
+  continue updating stored booking status without removing effective closure.
+- Branch dependency: based on PR #63's issue schema/services. Merge that PR
+  first (or retarget this branch to it); do not recreate its status migration.
+  `npm test --workspace=apps/backend` runs the mock facility suite;
+  `npm run test:integration --workspace=apps/backend` includes real PostgreSQL
+  issue/hold/booking races and rollback checks, guarded by a distinct
+  `TEST_DATABASE_URL` whose database name ends in `_test`.
+
 ---
 
 ## 5. 🌐 API Specification & Endpoint Structure

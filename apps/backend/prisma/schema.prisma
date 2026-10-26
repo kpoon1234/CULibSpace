@@ -351,6 +351,7 @@ model IssueReport {
   tableId          Int           @map("tableid")
   issueInformation String        @db.Text @map("issue_information")
   status           IssueStatus   @default(PENDING) @map("status")
+  blocksTable      Boolean       @default(false) @map("blocks_table")
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")
 

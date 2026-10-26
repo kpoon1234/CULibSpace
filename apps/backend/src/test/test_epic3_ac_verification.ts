@@ -32,6 +32,8 @@ function createMockPrisma(overrides: {
   activeBooking?: any;
 }) {
   return {
+    $queryRaw: async () => [],
+    issueReport: { findFirst: async () => null },
     systemConfig: {
       findFirst: async () =>
         overrides.config !== undefined
