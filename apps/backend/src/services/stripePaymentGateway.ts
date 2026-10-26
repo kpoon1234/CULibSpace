@@ -15,18 +15,12 @@ import {
  * -------------------------------------------------------------------------
  * ใช้ Stripe Checkout Sessions เป็น redirect flow:
  *   Backend -> Stripe Checkout Session -> ผู้ใช้ชำระเงิน -> Stripe webhook -> Backend
- *
- * ข้อดีของ Checkout Session เหนือ PaymentIntent:
- *   - Stripe จัดการหน้า checkout และการรับเงินให้เราเอง (hosted page)
- *   - มี idempotency key ระดับ request อยู่แล้ว
- *   - ส่ง webhook มาตอน checkout.session.completed / .expired
  */
 
 /**
  * ส่วนของ Stripe SDK ที่ adapter ใช้จริง
  * -------------------------------------------------------------------------
  * ทำเป็น interface เพื่อให้เทสต์สามารถ mock "เฉพาะ SDK" ได้
- * โดยที่ยังทดสอบตรรกะของ adapter จริง (การ clamp expiry, การแปลง error, การ map event)
  */
 export interface StripeCheckoutClient {
   checkout: {
@@ -43,15 +37,11 @@ export interface StripeCheckoutClient {
 export interface StripeGatewayOptions {
   secretKey: string;
   webhookSecret?: string;
-  /** ค่า default ของ Stripe คือ 'auto' (ใช้ key ที่ตั้งไว้ใน dashboard) */
   apiVersion?: Stripe.LatestApiVersion;
-  /** timeout ของการเรียก gateway (มิลลิวินาที) */
   timeoutMs?: number;
-  /** inject ได้สำหรับทดสอบ (ถ้าไม่ระบุจะสร้าง Stripe client จริง) */
   client?: StripeCheckoutClient;
 }
 
-/** Stripe บังคับให้ expires_at อยู่ระหว่าง 30 นาที ถึง 24 ชั่วโมงนับจากตอนสร้าง */
 export const STRIPE_MIN_CHECKOUT_EXPIRY_MINUTES = 30;
 export const STRIPE_MAX_CHECKOUT_EXPIRY_MINUTES = 24 * 60;
 
@@ -82,13 +72,6 @@ export class StripePaymentGateway implements PaymentGateway {
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
 
-  /**
-   * ปรับ input ให้อยู่ในช่วงที่ Stripe รองรับ
-   * -------------------------------------------------------------------------
-   * ต้องถูกเรียก **ครั้งเดียวตอนสร้างรายการ** แล้วเก็บผลลัพธ์ไว้ในฐานข้อมูล
-   * ถ้าคำนวณใหม่ตอน retry เวลาอ้างอิงจะเลื่อนตามเวลาจริง
-   * -> Stripe จะปฏิเสธการใช้ idempotency key เดิมเพราะพารามิเตอร์ไม่ตรงกัน
-   */
   prepareCheckoutSession(input: CreateCheckoutSessionInput): CreateCheckoutSessionInput {
     this.assertAmount(input.amountSatang);
     this.assertCurrency(input.currency);
@@ -103,15 +86,12 @@ export class StripePaymentGateway implements PaymentGateway {
     this.assertAmount(input.amountSatang);
     this.assertCurrency(input.currency);
 
-    // ใช้ expiresAt ตามที่เตรียมไว้เป๊ะ ๆ ห้าม clamp ซ้ำที่นี่
-    // (ถ้า clamp ซ้ำ ค่าจะเลื่อนตามเวลาที่ retry -> Stripe ปฏิเสธ idempotency key เดิม)
     const expiresAt = input.expiresAt;
 
     try {
       const session = await this.stripe.checkout.sessions.create(
         {
           mode: 'payment',
-          // Stripe ใช้หน่วยเล็กสุดของสกุลเงิน -> สำหรับ THB คือ satang (ส่งค่าเดียวกันได้)
           line_items: [
             {
               quantity: 1,
@@ -124,7 +104,6 @@ export class StripePaymentGateway implements PaymentGateway {
               },
             },
           ],
-          // ใส่ reference กลับเข้าระบบไว้ทั้งที่ session และ payment intent
           metadata: { reference: input.reference },
           payment_intent_data: { metadata: { reference: input.reference } },
           expires_at: Math.floor(expiresAt.getTime() / 1000),
@@ -152,12 +131,6 @@ export class StripePaymentGateway implements PaymentGateway {
     }
   }
 
-  /**
-   * ดึงสถานะจริงของ checkout session จาก Stripe
-   * ใช้ตัดสินว่าจะปิดรายการในฝั่งเราได้หรือยัง
-   * (ห้ามปิดรายการจากเวลาฝั่ง DB อย่างเดียว เพราะ checkout ที่ gateway สร้างไว้
-   *  อาจยังเปิดอยู่แม้เวลาในฐานข้อมูลผ่านไปแล้ว)
-   */
   async retrieveCheckoutStatus(gatewayRef: string): Promise<GatewayCheckoutStatus> {
     try {
       const session = await this.stripe.checkout.sessions.retrieve(gatewayRef, {
@@ -178,6 +151,7 @@ export class StripePaymentGateway implements PaymentGateway {
 
       return {
         state,
+        livemode: session.livemode,
         amountSatang: session.amount_total ?? undefined,
         currency: session.currency ?? undefined,
         reference: metadata?.reference,
@@ -187,12 +161,10 @@ export class StripePaymentGateway implements PaymentGateway {
     } catch (error) {
       const stripeError = error as { statusCode?: number; code?: string; message?: string };
 
-      // Stripe ตอบ 404 = ไม่มี session นี้ (ไม่เคยถูกสร้าง)
       if (stripeError?.statusCode === 404 || stripeError?.code === 'resource_missing') {
         return { state: 'not_found', raw: error };
       }
 
-      // ตรวจสอบไม่ได้ -> ไม่ต้องปิดรายการ (ปลอดภัยกว่า)
       console.error('[StripePaymentGateway] Could not retrieve checkout status:', error);
       return { state: 'unknown', raw: error };
     }
@@ -215,10 +187,16 @@ export class StripePaymentGateway implements PaymentGateway {
     try {
       event = this.stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
     } catch (error) {
-      // ลายเซ็นไม่ถูกต้อง = คำขอไม่น่าเชื่อถือ ต้องปฏิเสธ (ไม่ใช่ gateway ล่ม)
       throw new PaymentGatewayError('GATEWAY_REJECTED', 'Invalid Stripe webhook signature', {
         status: 400,
         cause: error,
+      });
+    }
+
+    // Reject live-mode events before any processing.
+    if (event.livemode === true) {
+      throw new PaymentGatewayError('GATEWAY_REJECTED', 'Live payment events are disabled.', {
+        status: 400,
       });
     }
 
@@ -226,6 +204,7 @@ export class StripePaymentGateway implements PaymentGateway {
   }
 
   private mapEvent(event: Stripe.Event): GatewayPaymentEvent {
+    const identity = { eventId: event.id, livemode: event.livemode };
     const raw = event as unknown as { data?: { object?: Record<string, unknown> } };
     const object = raw.data?.object ?? {};
 
@@ -239,22 +218,17 @@ export class StripePaymentGateway implements PaymentGateway {
     const amountSatang = (object['amount_total'] as number | undefined) ?? undefined;
     const currency = (object['currency'] as string | undefined) ?? undefined;
 
-    // สถานะการจ่ายเงินจริงจาก gateway (ไม่เท่ากับ "session completed")
     const paymentState = this.readPaymentState(object);
-
-    // เวลาที่ชำระเงินสำเร็จจริง
-    // ต้องมาจาก payment intent (จ่ายสำเร็จเมื่อไร) ไม่ใช่ session.created
-    // เพราะ session.created คือเวลาที่ผู้ใช้ยังกำลังกรอกข้อมูลอยู่
     const paidAt = this.readPaidAt(object);
 
     switch (event.type) {
       case 'checkout.session.completed':
       case 'checkout.session.async_payment_succeeded':
-        // session completed ไม่ได้แปลว่าจ่ายสำเร็จเสมอ (เช่น จ่ายด้วยวิธีที่ต้องรอ)
-        // ต้องเช็ค payment_state จริงด้วย
         if (paymentState === 'paid' || paymentState === 'no_payment_required') {
           return {
             type: 'payment.succeeded',
+            eventId: identity.eventId,
+            livemode: identity.livemode,
             gatewayRef,
             reference,
             amountSatang,
@@ -266,6 +240,8 @@ export class StripePaymentGateway implements PaymentGateway {
         }
         return {
           type: 'payment.unknown',
+          eventId: identity.eventId,
+          livemode: identity.livemode,
           gatewayRef,
           reference,
           amountSatang,
@@ -278,6 +254,8 @@ export class StripePaymentGateway implements PaymentGateway {
       case 'payment_intent.payment_failed':
         return {
           type: 'payment.failed',
+          eventId: identity.eventId,
+          livemode: identity.livemode,
           gatewayRef,
           reference,
           amountSatang,
@@ -288,6 +266,8 @@ export class StripePaymentGateway implements PaymentGateway {
       case 'checkout.session.expired':
         return {
           type: 'payment.expired',
+          eventId: identity.eventId,
+          livemode: identity.livemode,
           gatewayRef,
           reference,
           amountSatang,
@@ -296,9 +276,10 @@ export class StripePaymentGateway implements PaymentGateway {
           raw: event,
         };
       default:
-        // event อื่นที่เรายังไม่สนใจ -> ให้ caller จัดการแบบ no-op
         return {
           type: 'payment.unknown',
+          eventId: identity.eventId,
+          livemode: identity.livemode,
           gatewayRef,
           reference,
           amountSatang,
@@ -309,9 +290,6 @@ export class StripePaymentGateway implements PaymentGateway {
     }
   }
 
-  /**
-   * อ่านสถานะการจ่ายเงินจริงจาก payload
-   */
   private readPaymentState(object: Record<string, unknown>): GatewayPaymentState {
     const raw = object['payment_status'];
     if (raw === 'paid') return 'paid';
@@ -320,17 +298,6 @@ export class StripePaymentGateway implements PaymentGateway {
     return 'unknown';
   }
 
-  /**
-   * อ่านเวลาที่ชำระเงินสำเร็จจริง
-   * -------------------------------------------------------------------------
-   * ใช้ได้เฉพาะ "เวลาที่เกิดการเรียกเก็บเงินจริง" (charge) เท่านั้น
-   * - payment_intent.created  = เวลาสร้าง PaymentIntent ไม่ใช่เวลาจ่าย -> ใช้ไม่ได้
-   * - latest_charge.created    = เวลาที่เกิดการเรียกเก็บเงินจริง -> ใช้ได้
-   *
-   * ถ้าไม่มีข้อมูลที่เชื่อถือได้ -> คืน undefined
-   * ให้ US6-3 ดึงข้อมูลการชำระเงินเพิ่มเติมหรือกำหนดเวลาเปิดใช้ตั๋วตามนโยบายที่ตกลงกัน
-   * (ห้ามใช้เวลาสร้าง session / PaymentIntent แทนเวลาจ่าย)
-   */
   private readPaidAt(object: Record<string, unknown>): Date | undefined {
     const paymentIntent = object['payment_intent'] as
       | {
@@ -343,18 +310,14 @@ export class StripePaymentGateway implements PaymentGateway {
       | null
       | undefined;
 
-    // ไม่มี payment intent ที่ expand มา -> ไม่มีเวลาจ่ายจริงที่เชื่อถือได้
     if (!paymentIntent || typeof paymentIntent === 'string') {
       return undefined;
     }
 
-    // PaymentIntent ยังไม่สำเร็จ -> ยังไม่มีเวลาจ่าย
     if (paymentIntent.status !== 'succeeded') {
       return undefined;
     }
 
-    // latest_charge ต้องเป็น object ที่มีข้อมูลเวลาจริง
-    // ถ้าเป็นแค่ id (string) หรือไม่มี -> ไม่มีเวลาจ่ายที่เชื่อถือได้
     const charge = paymentIntent.latest_charge;
     if (!charge || typeof charge !== 'object' || typeof charge.created !== 'number') {
       return undefined;
@@ -381,7 +344,6 @@ export class StripePaymentGateway implements PaymentGateway {
     }
   }
 
-  /** Stripe บังคับให้ expires_at อยู่ในช่วง 30 นาที - 24 ชั่วโมง */
   private clampExpiry(requested: Date): Date {
     const now = Date.now();
     const min = now + STRIPE_MIN_CHECKOUT_EXPIRY_MINUTES * 60 * 1000;
@@ -390,7 +352,6 @@ export class StripePaymentGateway implements PaymentGateway {
     return new Date(Math.min(Math.max(target, min), max));
   }
 
-  /** แปลง error ของ Stripe ให้เป็น PaymentGatewayError ที่มีความหมายชัดเจน */
   private toGatewayError(error: unknown): PaymentGatewayError {
     if (error instanceof PaymentGatewayError) return error;
 

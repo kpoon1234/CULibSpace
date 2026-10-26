@@ -60,6 +60,7 @@ export type GatewayCheckoutState = 'open' | 'paid' | 'expired' | 'not_found' | '
 
 export interface GatewayCheckoutStatus {
   state: GatewayCheckoutState;
+  livemode?: boolean;
   /** ยอดเงินที่ gateway ยืนยัน (หน่วยสตางค์) */
   amountSatang?: number;
   /** สกุลเงินที่ gateway ยืนยัน */
@@ -77,6 +78,10 @@ export type GatewayPaymentEventType =
 
 export interface GatewayPaymentEvent {
   type: GatewayPaymentEventType;
+  /** Stripe event identity, distinct from the checkout/session identity. */
+  eventId?: string;
+  /** Whether this is a live-mode event (must be false in test mode) */
+  livemode?: boolean;
   /** รหัสอ้างอิงฝั่ง gateway เพื่อจับคู่กับ payment */
   gatewayRef: string;
   /**
@@ -93,7 +98,6 @@ export interface GatewayPaymentEvent {
   /**
    * เวลาที่ชำระเงินสำเร็จจริง
    * หมายเหตุ: ค่านี้ไม่ควรเป็นเวลาที่สร้าง checkout session
-   * (เวลาสร้าง session คือเวลาที่ผู้ใช้ยังกำลังกรอกข้อมูลอยู่)
    */
   paidAt?: Date;
   /** payload ดิบ ไว้ debug / audit */

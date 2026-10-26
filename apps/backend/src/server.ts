@@ -11,6 +11,7 @@ import bookingRoutes from './routes/bookingRoutes.js';
 import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
+import { createPaymentWebhookRouter } from './routes/paymentWebhookRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
 import { BookingService } from './services/bookingService.js';
@@ -30,6 +31,14 @@ app.use(
 // [US6-1] หมายเหตุ: webhook ของ Payment Gateway (POST /api/tickets/payment/webhook)
 // อยู่ในขอบเขตของ US6-3 และต้อง mount ก่อน express.json() เพื่อให้ได้ raw body
 // สำหรับตรวจสอบลายเซ็น -> ยังไม่ mount ใน PR นี้
+
+// [US6-3] Webhook ของ Payment Gateway ต้องใช้ raw body เพื่อตรวจสอบลายเซ็น
+// ต้อง mount ก่อน express.json() ทั่วไป
+app.use('/api/tickets', createPaymentWebhookRouter());
+
+// [US6-3] Webhook ของ Payment Gateway ต้องใช้ raw body เพื่อตรวจสอบลายเซ็น
+// ต้อง mount ก่อน express.json() ทั่วไป
+app.use('/api/tickets', createPaymentWebhookRouter());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -59,6 +68,8 @@ app.use('/api/tables/layout', layoutRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/system-config', systemConfigRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/tickets', ticketRoutes);
+app.use('/api/tickets', ticketRoutes);
 app.use('/api/tickets', ticketRoutes);
 
 // Health check / diagnostic endpoint
