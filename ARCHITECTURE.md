@@ -236,6 +236,51 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
   issue/hold/booking/expiration-worker races and rollback checks, guarded by a distinct
   `TEST_DATABASE_URL` whose database name ends in `_test`.
 
+#### US7-3: Admin issue status and notes API
+
+- `PATCH /api/admin/issues/:issueId` requires an admin Bearer token and an
+  existing admin account. The issue ID must be a positive PostgreSQL integer.
+  The JSON body contains exactly these required fields:
+
+  ```json
+  {
+    "status": "In Progress",
+    "blocksTable": true,
+    "notes": "Waiting for a replacement power socket"
+  }
+  ```
+
+- Status labels match the list API: `Pending`, `In Progress`, `Completed`.
+  Any of the three statuses can be selected, including reopening a completed
+  report or saving notes without changing its status. `blocksTable` must always
+  be an explicit boolean; the shared availability helper normalizes it to
+  `false` for `Pending` and `Completed`. The UI should send the current status
+  and checkbox value when changing only notes.
+- Notes are trimmed and limited to 2,000 characters. Send `"notes": ""` to
+  clear the current notes. Each save appends a `ManageIssue` record with the
+  authenticated admin ID and notes in `info`; earlier records and the original
+  user report remain intact. No new schema or migration is required.
+- The helper's issue/availability update, hold cleanup, and audit insert run in
+  one transaction. All API updates share the helper's table lock; server audit
+  timestamps increase strictly per issue so rapid saves cannot collide on the
+  compound audit key or return an older note as the latest one.
+- Success returns `{ success: true, message, data }`, where `data` contains
+  `issueId`, `tableId`, `status`, `blocksTable`, `closed` (effective facility
+  closure), `notes`, `updatedBy`, and `updatedAt` (ISO audit timestamp).
+  `GET /api/admin/issues` also includes the latest `notes` on each issue,
+  defaulting to `""` before the first update. Responses disable caching.
+- Invalid IDs/payloads return `400`, missing authentication returns `401`,
+  non-admin or deleted admin accounts return `403`, and missing issues return
+  `404` with `ISSUE_NOT_FOUND`. Unexpected transaction failures return `500`
+  and roll back both issue and hold changes. Existing booking, check-in, and
+  no-show policies remain as documented above; deployment of closure controls
+  still depends on the team's existing-booking policy decision.
+- `npm run test:issues --workspace=apps/backend` runs the isolated controller,
+  route authorization, list, and facility suites. With a separate migrated
+  `TEST_DATABASE_URL` ending in `_test`, run
+  `npm run test:issues:integration --workspace=apps/backend` to check real
+  status/notes persistence, concurrent saves, and full audit-failure rollback.
+
 ---
 
 ## 5. 🌐 API Specification & Endpoint Structure
