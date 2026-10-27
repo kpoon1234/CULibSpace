@@ -5,10 +5,10 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "test": "tsx src/test/test_unit.ts && tsx src/test/test_admin_score.ts && tsx src/test/test_admin_user_search.ts && tsx src/test/test_admin_audit_logs.ts && tsx src/test/test_checkin_window.ts && tsx src/test_cancel_booking.ts && tsx src/test/test_noshow_worker.ts && tsx src/test/test_score_concurrency.ts && tsx src/test/test_score_guard.ts && tsx src/test/test_completion_worker.ts && tsx src/test/test_ticket_purchase.ts && tsx src/test/test_ticket_history.ts && tsx src/test/test_payment_confirmation.ts && tsx src/test/test_issue_management.ts && tsx src/test/test_facility_availability.ts && tsx src/test/test_lock_expiration.ts && tsx src/test/test_admin_issue_update.ts",
+    "test": "tsx src/test/test_unit.ts && tsx src/test/test_admin_score.ts && tsx src/test/test_admin_user_search.ts && tsx src/test/test_admin_audit_logs.ts && tsx src/test/test_checkin_window.ts && tsx src/test_cancel_booking.ts && tsx src/test/test_noshow_worker.ts && tsx src/test/test_score_concurrency.ts && tsx src/test/test_score_guard.ts && tsx src/test/test_completion_worker.ts && tsx src/test/test_ticket_purchase.ts && tsx src/test/test_ticket_history.ts && tsx src/test/test_payment_confirmation.ts && tsx src/test/test_issue_management.ts && tsx src/test/test_facility_availability.ts && tsx src/test/test_lock_expiration.ts && tsx src/test/test_admin_issue_update.ts && tsx src/test/test_booking_policy.ts && tsx src/test/test_saved_schedules.ts",
     "test:payment": "tsx src/test/test_ticket_purchase.ts && tsx src/test/test_payment_confirmation.ts",
     "test:score-concurrency": "tsx src/test/test_score_concurrency.ts",
-    "test:integration": "tsx src/test/test_admin_score_integration.ts && tsx src/test/test_booking_completion_integration.ts && tsx src/test/test_payment_confirmation_integration.ts && tsx src/test/test_facility_availability_integration.ts && tsx src/test/test_admin_issue_update_integration.ts",
+    "test:integration": "tsx src/test/test_admin_score_integration.ts && tsx src/test/test_booking_completion_integration.ts && tsx src/test/test_payment_confirmation_integration.ts && tsx src/test/test_facility_availability_integration.ts && tsx src/test/test_admin_issue_update_integration.ts && tsx src/test/test_saved_booking_rules_integration.ts",
     "test:facility": "tsx src/test/test_facility_availability.ts",
     "test:payment:integration": "tsx src/test/test_payment_confirmation_integration.ts",
     "start": "node dist/server.js",
