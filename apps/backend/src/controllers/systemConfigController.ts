@@ -1,40 +1,31 @@
-import { Request, Response } from 'express';
+import type { RequestHandler } from 'express';
 import { PrismaClient } from '@prisma/client';
+import {
+  BOOKING_POLICY_FIELDS,
+  readBookingPolicy,
+  type PolicyClient,
+} from '../services/bookingPolicyService.js';
 
 const prisma = new PrismaClient();
 
-// Same fallback values as ScheduleService.validateTargetTimeWindow — kept in
-// sync with that function's defaults, not a separate source of truth.
-const DEFAULTS = {
-  maxBookingDurationMinutes: 120,
-  maxAdvanceBookingDays: 7,
-};
+/** Public, read-only saved limits. Dependency injection never occupies Express's next argument. */
+export function createBookingLimitsHandler(client: PolicyClient): RequestHandler {
+  return async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const policy = await readBookingPolicy(client, BOOKING_POLICY_FIELDS);
+      res.status(200).json({ success: true, data: policy });
+    } catch (error) {
+      const failure = error as { status?: number; code?: string; message?: string };
+      res.status(failure.status ?? 500).json({
+        success: false,
+        code: failure.code ?? 'BOOKING_SETTINGS_UNAVAILABLE',
+        error: failure.status ? failure.message : 'Booking settings are temporarily unavailable.',
+      });
+    }
+  };
+}
 
 export class SystemConfigController {
-  /**
-   * GET /api/system-config
-   * Read-only, unauthenticated subset of SystemConfig the frontend needs to
-   * mirror booking-window limits client-side (Table Filter dialog) instead of
-   * hardcoding them and drifting out of sync with the DB.
-   */
-  static async getBookingLimits(req: Request, res: Response): Promise<void> {
-    let config: { maxBookingDurationMinutes: number; maxAdvanceBookingDays: number } | null = null;
-    try {
-      config = await prisma.systemConfig.findFirst({
-        select: { maxBookingDurationMinutes: true, maxAdvanceBookingDays: true },
-      });
-    } catch {
-      // Fallback to defaults if the DB is unreachable or the table is empty.
-    }
-
-    res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json({
-      success: true,
-      data: {
-        maxBookingDurationMinutes:
-          config?.maxBookingDurationMinutes ?? DEFAULTS.maxBookingDurationMinutes,
-        maxAdvanceBookingDays: config?.maxAdvanceBookingDays ?? DEFAULTS.maxAdvanceBookingDays,
-      },
-    });
-  }
+  static getBookingLimits = createBookingLimitsHandler(prisma);
 }

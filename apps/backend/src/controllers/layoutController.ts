@@ -61,6 +61,8 @@ export class LayoutController {
           targetStart: validation.targetStart,
           targetEnd: validation.targetEnd,
           schedule: validation.schedule,
+          scheduleSegments: validation.scheduleSegments,
+          timeZone: 'Asia/Bangkok',
         },
       });
     } catch (err: any) {
@@ -68,6 +70,7 @@ export class LayoutController {
         res.status(err.status).json({
           success: false,
           error: err.message,
+          code: err.code,
         });
         return;
       }
