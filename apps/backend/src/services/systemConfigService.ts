@@ -294,7 +294,7 @@ export class SystemConfigService {
 
       // 2. Serialize ทั้งกรณีตารางว่างและมีแถวอยู่แล้วด้วย Transaction-level Advisory Lock
       //    ตามด้วย Row-level Lock บนแถวที่มีอยู่ เพื่อให้ผู้เขียนทุกรายรอคิวกันอย่างปลอดภัย
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(704001)`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(704001)::text`;
       await tx.$queryRaw`SELECT configid FROM "system_config" ORDER BY configid ASC FOR UPDATE`;
 
       let existing = await tx.systemConfig.findFirst({

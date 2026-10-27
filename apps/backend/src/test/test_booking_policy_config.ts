@@ -23,6 +23,11 @@ function createMockPrisma(initialConfig: any = { ...DEFAULT_SYSTEM_CONFIG }) {
     $queryRaw: async (strings: TemplateStringsArray) => {
       const sql = strings.join('?');
       if (sql.includes('pg_advisory_xact_lock')) {
+        assert.match(
+          sql,
+          /pg_advisory_xact_lock\(704001\)::text/,
+          'advisory lock must cast void to text for Prisma compatibility'
+        );
         state.advisoryLocks++;
       } else {
         state.locks++;
