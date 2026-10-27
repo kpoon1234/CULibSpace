@@ -71,7 +71,7 @@ function parseStrictInteger(value: unknown): number | null {
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) ? value : null;
   }
-  if (typeof value === 'string' && /^[+-]?\d+\$/.test(value.trim())) {
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
     const parsed = Number(value.trim());
     return Number.isSafeInteger(parsed) ? parsed : null;
   }
