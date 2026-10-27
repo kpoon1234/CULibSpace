@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
+import IssueReportModal from '../IssueReport/IssueReportModal';
+import { MegaphoneIcon } from '@/components/HomeComponent/icons';
 import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
 import { useProfileModal } from '@/lib/profileModalContext';
 
@@ -13,6 +15,7 @@ export default function TopMenu() {
   const pathname = usePathname();
   const { openProfile, openBookingHistory } = useProfileModal();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
     if (!storedUser) return null;
@@ -193,6 +196,15 @@ export default function TopMenu() {
                     </>
                   )}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setReportOpen(true)}
+                  aria-label="Report a facility issue"
+                  className="flex min-w-0 items-center justify-center rounded-full p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white hover:bg-chula-pink-hover cursor-pointer"
+                >
+                  <MegaphoneIcon className="h-5 w-5 text-ink" />
+                </button>
               </div>
             ) : (
               <TopMenuItem label="Log In" href="/login" isActive={pathname === '/login'} />
@@ -200,6 +212,18 @@ export default function TopMenu() {
           </div>
         </nav>
       </header>
+
+      {reportOpen && (
+        <IssueReportModal
+          location={{
+            tableId: 0,
+            tableCode: 'General',
+            zoneId: 0,
+            zoneLabel: 'General',
+          }}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
     </>
   );
 }
