@@ -63,3 +63,11 @@ export const HistoryIcon = (p: IconProps) => (
     <path d="M12 7.5V12l3 2" />
   </Icon>
 );
+
+export const IssueIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M1 9v6l4 2v2l4-2v-2z" />
+    <path d="M9 9h2a7 7 0 0 0 7-7H9z" />
+    <circle cx="11" cy="5" r="1" />
+  </Icon>
+);
