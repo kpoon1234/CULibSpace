@@ -6,6 +6,12 @@ import {
 
 const defaultPrisma = new PrismaClient();
 
+/** Stripe requires at least 10.00 THB (1,000 satang) for THB settlement. */
+export const MIN_TICKET_PRICE_SATANG = 1000;
+export const MAX_PRISMA_INT = 2_147_483_647;
+export const MAX_MINUTES_PER_DAY = 1440;
+export const MAX_ADVANCE_DAYS_LIMIT = 365;
+
 export const DEFAULT_SYSTEM_CONFIG = {
   configId: 1,
   maxBookingDurationMinutes: 120,
@@ -18,6 +24,21 @@ export const DEFAULT_SYSTEM_CONFIG = {
   paymentCheckoutExpiryMinutes: 30,
 } as const;
 
+export const SUPPORTED_POLICY_FIELDS = [
+  'maxBookingDurationMinutes',
+  'maxAdvanceBookingDays',
+  'minScoreToBook',
+  'earlyCheckInMinutes',
+  'lateThresholdMinutes',
+  'ticketPriceSatang',
+  'ticketValidityHours',
+  'paymentCheckoutExpiryMinutes',
+] as const;
+
+export type SupportedPolicyField = (typeof SUPPORTED_POLICY_FIELDS)[number];
+
+const SUPPORTED_FIELD_SET = new Set<string>(SUPPORTED_POLICY_FIELDS);
+
 export interface BookingPolicyUpdateInput {
   maxBookingDurationMinutes?: unknown;
   maxAdvanceBookingDays?: unknown;
@@ -27,6 +48,7 @@ export interface BookingPolicyUpdateInput {
   ticketPriceSatang?: unknown;
   ticketValidityHours?: unknown;
   paymentCheckoutExpiryMinutes?: unknown;
+  [key: string]: unknown;
 }
 
 export interface ValidatedBookingPolicy {
@@ -45,15 +67,11 @@ export interface PolicyFieldError {
   message: string;
 }
 
-const MAX_MINUTES_PER_DAY = 1440;
-const MAX_ADVANCE_DAYS_LIMIT = 365;
-const MAX_PRISMA_INT = 2_147_483_647;
-
 function parseStrictInteger(value: unknown): number | null {
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) ? value : null;
   }
-  if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
+  if (typeof value === 'string' && /^[+-]?\d+\$/.test(value.trim())) {
     const parsed = Number(value.trim());
     return Number.isSafeInteger(parsed) ? parsed : null;
   }
@@ -62,8 +80,8 @@ function parseStrictInteger(value: unknown): number | null {
 
 export class SystemConfigService {
   /**
-   * ตรวจสอบความถูกต้องของพารามิเตอร์ทุกตัวและคืนค่า field errors ทั้งหมดในครั้งเดียว
-   * เพื่อให้ Frontend แสดงผล Error ได้ครบทุกช่องพร้อมกัน
+   * ตรวจสอบความถูกต้องของพารามิเตอร์ทุกตัว ปฏิเสธ unknown fields
+   * และตรวจว่ามี supported field อย่างน้อย 1 ตัว
    */
   static validatePolicyInput(
     input: BookingPolicyUpdateInput,
@@ -72,11 +90,22 @@ export class SystemConfigService {
     const errors: PolicyFieldError[] = [];
     const updates: Partial<ValidatedBookingPolicy> = {};
 
-    const providedKeys = Object.keys(input).filter(
-      (k) => input[k as keyof BookingPolicyUpdateInput] !== undefined
-    );
-    if (providedKeys.length === 0) {
-      errors.push({ field: 'body', message: 'At least one policy parameter must be provided.' });
+    const allKeys = Object.keys(input);
+    const unknownKeys = allKeys.filter((k) => !SUPPORTED_FIELD_SET.has(k));
+    for (const unknownKey of unknownKeys) {
+      errors.push({
+        field: unknownKey,
+        message: `Unknown policy parameter "${unknownKey}".`,
+      });
+    }
+
+    const providedSupportedKeys = SUPPORTED_POLICY_FIELDS.filter((k) => input[k] !== undefined);
+
+    if (providedSupportedKeys.length === 0) {
+      errors.push({
+        field: 'body',
+        message: 'At least one supported policy parameter must be provided.',
+      });
       return { errors };
     }
 
@@ -145,13 +174,13 @@ export class SystemConfigService {
       }
     }
 
-    // 6. ticketPriceSatang (100 .. MAX_PRISMA_INT)
+    // 6. ticketPriceSatang (1000 .. MAX_PRISMA_INT ตามขั้นต่ำของ Stripe THB)
     if (input.ticketPriceSatang !== undefined) {
       const val = parseStrictInteger(input.ticketPriceSatang);
-      if (val === null || val <= 0 || val > MAX_PRISMA_INT) {
+      if (val === null || val < MIN_TICKET_PRICE_SATANG || val > MAX_PRISMA_INT) {
         errors.push({
           field: 'ticketPriceSatang',
-          message: 'ticketPriceSatang must be a positive integer.',
+          message: `ticketPriceSatang must be an integer between ${MIN_TICKET_PRICE_SATANG} and ${MAX_PRISMA_INT}.`,
         });
       } else {
         updates.ticketPriceSatang = val;
@@ -188,7 +217,7 @@ export class SystemConfigService {
       }
     }
 
-    // Cross-field invariant: lateThresholdMinutes ต้องไม่เกินหรือเท่ากับ maxBookingDurationMinutes
+    // Cross-field invariant: lateThresholdMinutes ต้องน้อยกว่า maxBookingDurationMinutes
     const effectiveDuration =
       updates.maxBookingDurationMinutes ?? current.maxBookingDurationMinutes;
     const effectiveLateThreshold = updates.lateThresholdMinutes ?? current.lateThresholdMinutes;
@@ -200,7 +229,7 @@ export class SystemConfigService {
       });
     }
 
-    if (errors.length > 0) {
+    if (errors.length > 0 || Object.keys(updates).length === 0) {
       return { errors };
     }
 
@@ -234,6 +263,7 @@ export class SystemConfigService {
 
   /**
    * อัปเดตนโยบายการจองแบบ Atomic & Isolated (ACID)
+   * รองรับกรณีตารางว่างและมีคำขอพร้อมกันโดยใช้ Advisory Lock + Safe Singleton Initialization
    */
   static async updatePolicy(
     adminId: number,
@@ -249,7 +279,7 @@ export class SystemConfigService {
     }
 
     return await prisma.$transaction(async (tx: any) => {
-      // 1. ตรวจสอบว่า Admin มีตัวตนอยู่ในระบบจริง (ป้องกัน Stale/Forged Admin Token)
+      // 1. ตรวจสอบว่า Admin มีตัวตนอยู่ในระบบจริง
       const admin = await tx.admin.findUnique({
         where: { adminId },
         select: { adminId: true },
@@ -262,10 +292,12 @@ export class SystemConfigService {
         };
       }
 
-      // 2. Serialize concurrent updates บนตาราง system_config ด้วย Row-level Lock
+      // 2. Serialize ทั้งกรณีตารางว่างและมีแถวอยู่แล้วด้วย Transaction-level Advisory Lock
+      //    ตามด้วย Row-level Lock บนแถวที่มีอยู่ เพื่อให้ผู้เขียนทุกรายรอคิวกันอย่างปลอดภัย
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(704001)`;
       await tx.$queryRaw`SELECT configid FROM "system_config" ORDER BY configid ASC FOR UPDATE`;
 
-      const existing = await tx.systemConfig.findFirst({
+      let existing = await tx.systemConfig.findFirst({
         orderBy: { configId: 'asc' },
       });
 
@@ -287,7 +319,7 @@ export class SystemConfigService {
           DEFAULT_SYSTEM_CONFIG.paymentCheckoutExpiryMinutes,
       };
 
-      // 3. Validate ค่าใหม่เทียบกับค่าปัจจุบันภายใต้ Lock
+      // 3. Validate ค่าใหม่เทียบกับค่าปัจจุบันภายใต้ Lock (ถ้าไม่ผ่านจะ throw ก่อนเขียน DB)
       const validation = this.validatePolicyInput(input, currentPolicy);
       if (validation.errors.length > 0 || !validation.data) {
         throw {
@@ -298,19 +330,54 @@ export class SystemConfigService {
         };
       }
 
-      // 4. Upsert / Update แถวเดียวอย่างปลอดภัย
-      const saved = existing
-        ? await tx.systemConfig.update({
-            where: { configId: existing.configId },
-            data: validation.data,
-          })
-        : await tx.systemConfig.create({
+      // 4. หากตารางว่างและมีคำขออื่นแทรกสร้างแถวไปแล้ว (fallback P2002 safety)
+      let saved: any;
+      if (existing) {
+        saved = await tx.systemConfig.update({
+          where: { configId: existing.configId },
+          data: validation.data,
+        });
+      } else {
+        try {
+          saved = await tx.systemConfig.create({
             data: {
               configId: DEFAULT_SYSTEM_CONFIG.configId,
               ...currentPolicy,
               ...validation.data,
             },
           });
+        } catch (err: any) {
+          if (err?.code !== 'P2002') throw err;
+          existing = await tx.systemConfig.findFirst({
+            orderBy: { configId: 'asc' },
+          });
+          if (!existing) throw err;
+
+          const refreshedPolicy: ValidatedBookingPolicy = {
+            maxBookingDurationMinutes: existing.maxBookingDurationMinutes,
+            maxAdvanceBookingDays: existing.maxAdvanceBookingDays,
+            minScoreToBook: Number(existing.minScoreToBook),
+            earlyCheckInMinutes: existing.earlyCheckInMinutes,
+            lateThresholdMinutes: existing.lateThresholdMinutes,
+            ticketPriceSatang: existing.ticketPriceSatang,
+            ticketValidityHours: existing.ticketValidityHours,
+            paymentCheckoutExpiryMinutes: existing.paymentCheckoutExpiryMinutes,
+          };
+          const revalidated = this.validatePolicyInput(input, refreshedPolicy);
+          if (revalidated.errors.length > 0 || !revalidated.data) {
+            throw {
+              status: 400,
+              code: 'INVALID_BOOKING_POLICY',
+              message: revalidated.errors[0].message,
+              errors: revalidated.errors,
+            };
+          }
+          saved = await tx.systemConfig.update({
+            where: { configId: existing.configId },
+            data: revalidated.data,
+          });
+        }
+      }
 
       return {
         configId: saved.configId,
