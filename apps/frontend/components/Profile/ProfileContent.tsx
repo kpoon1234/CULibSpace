@@ -258,16 +258,18 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
           <div>
             <div className="flex items-center justify-between text-sm font-medium text-gray-700">
               <span>Behaviour Score</span>
-              <button
-                type="button"
-                onClick={() => {
-                  closeProfile();
-                  openHistory();
-                }}
-                className="cursor-pointer text-xs text-gray-400 hover:text-rose-600 hover:underline focus:outline-none"
-              >
-                [ view history ]
-              </button>
+              {user.role !== 'ADMIN' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeProfile();
+                    openHistory();
+                  }}
+                  className="cursor-pointer text-xs text-gray-400 hover:text-rose-600 hover:underline focus:outline-none"
+                >
+                  [ view history ]
+                </button>
+              )}
             </div>
             <div className="relative mt-1 h-6 w-full overflow-hidden rounded-full bg-red-500">
               <div
