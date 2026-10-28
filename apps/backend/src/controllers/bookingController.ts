@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
 import { getBookingHistory, getActiveBooking } from '../services/bookingService.js';
 import BookingService from '../services/bookingService.js';
+import { ScheduleService } from '../services/scheduleService.js';
 
 export class BookingController {
   /**
@@ -67,14 +68,16 @@ export class BookingController {
       }
 
       // Parse the dates so the service can check for overlaps
-      const parsedStart = startDateTime ? new Date(startDateTime) : undefined;
-      const parsedEnd = endDateTime ? new Date(endDateTime) : undefined;
+      const window =
+        startDateTime !== undefined || endDateTime !== undefined
+          ? ScheduleService.parseTargetTimeWindow({ startDateTime, endDateTime })
+          : undefined;
 
       const lockData = await BookingService.acquireLock(
         parsedTableId,
         userId,
-        parsedStart,
-        parsedEnd
+        window?.targetStart,
+        window?.targetEnd
       );
 
       res.status(200).json({ success: true, data: lockData });
@@ -118,24 +121,23 @@ export class BookingController {
 
       const { tableId, startDateTime, endDateTime, lockToken } = req.body;
       const parsedTableId = parseInt(String(tableId), 10);
-      const parsedStart = new Date(startDateTime);
-      const parsedEnd = new Date(endDateTime);
 
       if (
         isNaN(parsedTableId) ||
-        isNaN(parsedStart.getTime()) ||
-        isNaN(parsedEnd.getTime()) ||
+        typeof startDateTime !== 'string' ||
+        typeof endDateTime !== 'string' ||
         !lockToken
       ) {
         res.status(400).json({ success: false, error: 'Missing or invalid required fields' });
         return;
       }
 
+      const window = ScheduleService.parseTargetTimeWindow({ startDateTime, endDateTime });
       const booking = await BookingService.createBooking({
         userId,
         tableId: parsedTableId,
-        startDateTime: parsedStart,
-        endDateTime: parsedEnd,
+        startDateTime: window.targetStart,
+        endDateTime: window.targetEnd,
         lockToken: String(lockToken),
       });
 
@@ -166,15 +168,11 @@ export class BookingController {
 
       // Parse and validate required fields
       const parsedTableId = parseInt(String(tableId), 10);
-      const parsedStart = startDateTime ? new Date(startDateTime) : undefined;
-      const parsedEnd = endDateTime ? new Date(endDateTime) : undefined;
 
       if (
         isNaN(parsedTableId) ||
-        !parsedStart ||
-        !parsedEnd ||
-        isNaN(parsedStart.getTime()) ||
-        isNaN(parsedEnd.getTime())
+        typeof startDateTime !== 'string' ||
+        typeof endDateTime !== 'string'
       ) {
         res.status(400).json({
           success: false,
@@ -184,11 +182,12 @@ export class BookingController {
       }
 
       // Call the service validation method
+      const window = ScheduleService.parseTargetTimeWindow({ startDateTime, endDateTime });
       const validationResult = await BookingService.validateBookingRules({
         userId: userId,
         tableId: parsedTableId,
-        startDateTime: parsedStart,
-        endDateTime: parsedEnd,
+        startDateTime: window.targetStart,
+        endDateTime: window.targetEnd,
         lockToken: lockToken ?? undefined, // lockToken is optional in the service
       });
 

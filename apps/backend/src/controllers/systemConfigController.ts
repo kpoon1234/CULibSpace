@@ -1,39 +1,39 @@
-import { Request, Response } from 'express';
+import type { Request, Response, RequestHandler } from 'express';
+import { PrismaClient } from '@prisma/client';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
-import { SystemConfigService, DEFAULT_SYSTEM_CONFIG } from '../services/systemConfigService.js';
+import { SystemConfigService } from '../services/systemConfigService.js';
+import {
+  BOOKING_POLICY_FIELDS,
+  readBookingPolicy,
+  type PolicyClient,
+} from '../services/bookingPolicyService.js';
+
+const prisma = new PrismaClient();
+
+/** Public, read-only saved limits. Dependency injection never occupies Express's next argument. */
+export function createBookingLimitsHandler(client: PolicyClient): RequestHandler {
+  return async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const policy = await readBookingPolicy(client, BOOKING_POLICY_FIELDS);
+      res.status(200).json({ success: true, data: policy });
+    } catch (error) {
+      const failure = error as { status?: number; code?: string; message?: string };
+      res.status(failure.status ?? 500).json({
+        success: false,
+        code: failure.code ?? 'BOOKING_SETTINGS_UNAVAILABLE',
+        error: failure.status ? failure.message : 'Booking settings are temporarily unavailable.',
+      });
+    }
+  };
+}
 
 export class SystemConfigController {
   /**
    * GET /api/system-config/booking-limits
    * Public read-only endpoint สำหรับให้ Frontend ดึงค่าจำกัดการจองไปใช้ทำ Client-side validation
    */
-  static async getBookingLimits(_req: Request, res: Response): Promise<void> {
-    res.setHeader('Cache-Control', 'no-store');
-    try {
-      const policy = await SystemConfigService.getPolicy();
-      res.status(200).json({
-        success: true,
-        data: {
-          maxBookingDurationMinutes: policy.maxBookingDurationMinutes,
-          maxAdvanceBookingDays: policy.maxAdvanceBookingDays,
-          minScoreToBook: policy.minScoreToBook,
-          earlyCheckInMinutes: policy.earlyCheckInMinutes,
-          lateThresholdMinutes: policy.lateThresholdMinutes,
-        },
-      });
-    } catch {
-      res.status(200).json({
-        success: true,
-        data: {
-          maxBookingDurationMinutes: DEFAULT_SYSTEM_CONFIG.maxBookingDurationMinutes,
-          maxAdvanceBookingDays: DEFAULT_SYSTEM_CONFIG.maxAdvanceBookingDays,
-          minScoreToBook: DEFAULT_SYSTEM_CONFIG.minScoreToBook,
-          earlyCheckInMinutes: DEFAULT_SYSTEM_CONFIG.earlyCheckInMinutes,
-          lateThresholdMinutes: DEFAULT_SYSTEM_CONFIG.lateThresholdMinutes,
-        },
-      });
-    }
-  }
+  static getBookingLimits = createBookingLimitsHandler(prisma);
 
   /**
    * GET /api/system-config/policy (หรือ /api/admin/system-config)
@@ -52,7 +52,7 @@ export class SystemConfigController {
 
   /**
    * PUT /api/system-config/policy (และ PATCH /api/admin/system-config)
-   * บันทึกและตรวจสอบค่าพารามิเตอร์นโยบายการจอง (US7-4: Andy & Punt)
+   * บันทึกและตรวจสอบค่าพารามิเตอร์นโยบายการจอง (US7-4)
    */
   static async updateBookingPolicy(req: Request, res: Response): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');

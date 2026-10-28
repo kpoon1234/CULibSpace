@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { readBookingPolicy, type BookingPolicy } from './bookingPolicyService.js';
 
 const defaultPrisma = new PrismaClient();
 
@@ -14,11 +15,10 @@ export class ScoreGuard {
   static async enforceMinScore(
     uid: number,
     prisma: any = defaultPrisma,
-    user?: { behaviourScore: number }
+    user?: { behaviourScore: number },
+    policy?: Pick<BookingPolicy, 'minScoreToBook'>
   ): Promise<void> {
-    // Only a missing config row uses the default. A failed query must not grant booking privileges.
-    const config = await prisma.systemConfig.findFirst();
-    const minScoreToBook = Number(config?.minScoreToBook ?? 50);
+    const { minScoreToBook } = policy ?? (await readBookingPolicy(prisma, ['minScoreToBook']));
 
     // Use pre-fetched user if provided, otherwise query
     let userScore: number;
