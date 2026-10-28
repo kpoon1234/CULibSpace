@@ -120,9 +120,12 @@ async function runTests() {
       systemConfig: { findFirst: async () => null },
       user: { findUnique: async () => ({ behaviourScore: 49 }) },
     });
-    assert(false, 'Missing config should use default threshold of 50');
+    assert(false, 'Missing config must not grant booking privileges');
   } catch (err: any) {
-    assert(err.status === 403, 'Missing config still rejects score 49');
+    assert(
+      err.status === 503 && err.code === 'BOOKING_POLICY_NOT_CONFIGURED',
+      'Missing config fails closed'
+    );
   }
 
   const configError = new Error('SystemConfig query failed');
@@ -140,10 +143,28 @@ async function runTests() {
     );
     assert(false, 'Failed config query must not fall back to 50');
   } catch (err: any) {
-    assert(err === configError, 'Failed config query is propagated');
+    assert(
+      err.status === 503 && err.code === 'BOOKING_SETTINGS_UNAVAILABLE',
+      'Failed config query returns safe 503'
+    );
   }
 
   console.log('\n--- Test Group 2: acquireLock Score Guard ---');
+
+  // Hold acquisition now checks issue availability inside a transaction.
+  function transactionalHoldMock(client: any) {
+    return {
+      ...client,
+      $queryRaw: async () => [],
+      issueReport: { findFirst: async () => null },
+      $transaction: async (callback: (tx: any) => Promise<unknown>) =>
+        callback({
+          ...client,
+          $queryRaw: async () => [],
+          issueReport: { findFirst: async () => null },
+        }),
+    };
+  }
 
   // Test 5: acquireLock blocks user with low score
   let lowScoreHoldWrites = 0;
@@ -208,13 +229,19 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds for user with sufficient score');
   } catch (err: any) {
     assert(false, 'acquireLock allows user with sufficient score', err?.message);
   }
 
-  // Test 7: acquireLock with SystemConfig fallback when no config row exists
+  // Test 7: acquireLock must not invent policy when no config row exists
   try {
     const mockPrisma = {
       systemConfig: {
@@ -238,10 +265,19 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
-    assert(!!lock.lockToken, 'acquireLock succeeds with default minScoreToBook (50)');
+    await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
+    assert(false, 'acquireLock must reject missing policy');
   } catch (err: any) {
-    assert(false, 'acquireLock works with default config', err?.message);
+    assert(
+      err.status === 503 && err.code === 'BOOKING_POLICY_NOT_CONFIGURED',
+      'acquireLock rejects missing policy'
+    );
   }
 
   // Test 8: acquireLock with user at exactly threshold (50)
@@ -268,7 +304,13 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds for user at exactly minScoreToBook (50)');
   } catch (err: any) {
     assert(false, 'acquireLock allows user at threshold score (50)', err?.message);
@@ -332,7 +374,13 @@ async function runTests() {
       },
     };
 
-    const lock = await BookingService.acquireLock(1, 42, undefined, undefined, mockPrisma);
+    const lock = await BookingService.acquireLock(
+      1,
+      42,
+      undefined,
+      undefined,
+      transactionalHoldMock(mockPrisma)
+    );
     assert(!!lock.lockToken, 'acquireLock succeeds for user just above threshold (51)');
   } catch (err: any) {
     assert(false, 'acquireLock allows user just above threshold (51)', err?.message);
@@ -356,7 +404,10 @@ async function runTests() {
     });
     assert(false, 'Failed config query must not create a hold');
   } catch (err: any) {
-    assert(err === configError, 'acquireLock propagates config query failure');
+    assert(
+      err.status === 503 && err.code === 'BOOKING_SETTINGS_UNAVAILABLE',
+      'acquireLock rejects unreadable policy'
+    );
   }
   assert(failedConfigHoldWrites === 0, 'Config query failure does not write a table hold');
 
@@ -380,6 +431,7 @@ async function runTests() {
   let bookingConfigReads = 0;
   try {
     const tx = {
+      $queryRaw: async () => [],
       systemConfig: {
         findFirst: async () => {
           bookingConfigReads++;

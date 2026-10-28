@@ -1,6 +1,7 @@
 // apps/backend/src/services/noShowService.ts
 import { PrismaClient, BookingStatus } from '@prisma/client';
 import { lockTableForStatusChange, refreshTableStatus } from './tableStatusService.js';
+import { readBookingPolicy } from './bookingPolicyService.js';
 
 const defaultPrisma = new PrismaClient();
 
@@ -13,13 +14,7 @@ export class NoShowService {
     now: Date = new Date(),
     prisma: any = defaultPrisma
   ): Promise<any[]> {
-    let config = null;
-    try {
-      config = await prisma.systemConfig.findFirst();
-    } catch {
-      // Fallback defaults if SystemConfig query fails
-    }
-    const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
+    const { lateThresholdMinutes } = await readBookingPolicy(prisma, ['lateThresholdMinutes']);
     const cutoffTime = new Date(now.getTime() - lateThresholdMinutes * 60 * 1000);
 
     return await prisma.booking.findMany({
@@ -43,12 +38,17 @@ export class NoShowService {
     const executeInTx = async (tx: any) => {
       await lockTableForStatusChange(tx, booking.tableId);
 
+      // The policy may have changed since the scan. Never penalize a stale candidate.
+      const { lateThresholdMinutes } = await readBookingPolicy(tx, ['lateThresholdMinutes']);
+      const cutoffTime = new Date(now.getTime() - lateThresholdMinutes * 60_000);
+
       // 1. Guard: Atomic conditional update เป็น NO_SHOW เฉพาะเมื่อสถานะยังเป็น PENDING
       // ป้องกัน Race Condition กรณีที่ user เพิ่ง check-in (ACTIVE) หรือ cancel ก่อน Worker ประมวลผล
       const updatedBooking = await tx.booking.updateMany({
         where: {
           bookingId: booking.bookingId,
           status: BookingStatus.PENDING, // <-- CRITICAL: Blocks the check-in race condition
+          startDateTime: { lt: cutoffTime },
         },
         data: { status: BookingStatus.NO_SHOW },
       });
@@ -57,7 +57,7 @@ export class NoShowService {
       // Abort penalty ทั้งหมดอย่างปลอดภัย ไม่ตัดคะแนน ไม่คืนโต๊ะ
       if (updatedBooking.count === 0) {
         console.log(
-          `[NoShowWorker] Booking #${booking.bookingId} already transitioned (checked-in or cancelled). Skipping penalty.`
+          `[NoShowWorker] Booking #${booking.bookingId} is no longer pending or late. Skipping penalty.`
         );
         return false;
       }

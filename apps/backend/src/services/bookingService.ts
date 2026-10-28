@@ -10,7 +10,9 @@ import {
 } from '@prisma/client';
 import { ScheduleService } from './scheduleService.js';
 import { ScoreGuard } from './scoreGuard.js';
+import { readBookingPolicy } from './bookingPolicyService.js';
 import { lockTableForStatusChange, refreshTableStatus } from './tableStatusService.js';
+import { hasBlockingIssue, isFacilityClosed } from './facilityAvailabilityService.js';
 import { randomUUID } from 'crypto';
 
 export interface BookingWithTableAndZone {
@@ -119,7 +121,7 @@ export class BookingService {
    *
    * Validates:
    * 1. Target time window, operating schedule hours, maxAdvanceBookingDays, maxBookingDuration (reusing ScheduleService)
-   * 2. User existence & minimum behavior score requirement (SystemConfig.minScoreToBook, default 50)
+   * 2. User existence & saved minimum behavior score requirement (SystemConfig.minScoreToBook)
    * 3. 1-Booking-Per-User policy (no overlapping active/pending reservations for the same user)
    * 4. Table existence, maintenance status (not CLOSED), and availability (no overlapping bookings)
    * 5. Table hold-lock concurrency (if lockedUntil > now, verifies lockToken matches)
@@ -135,22 +137,19 @@ export class BookingService {
     const { userId, tableId, startDateTime, endDateTime, lockToken } = input;
 
     // ==========================================
-    // 1. Time Window & Operating Schedule Validation (US2-4 / US3-1)
-    // ==========================================
-    const scheduleValidation = await ScheduleService.validateTargetTimeWindow(
-      startDateTime,
-      endDateTime,
-      true
-    );
-
-    const durationMinutes = Math.round(
-      (endDateTime.getTime() - startDateTime.getTime()) / (60 * 1000)
-    );
-
-    // ==========================================
     // Database Queries protected with Concurrency Timeout Guard
     // ==========================================
     return await this.withTimeout(async () => {
+      const scheduleValidation = await ScheduleService.validateTargetTimeWindow(
+        startDateTime,
+        endDateTime,
+        true,
+        prisma
+      );
+      const durationMinutes = Math.round(
+        (endDateTime.getTime() - startDateTime.getTime()) / (60 * 1000)
+      );
+
       // ==========================================
       // 2. User Lookup & Behavior Credit Score Check (US3-1 / FR-5.3)
       // ==========================================
@@ -194,7 +193,7 @@ export class BookingService {
       }
 
       // Score guard - shared with acquireLock (US5-3)
-      await ScoreGuard.enforceMinScore(userId, prisma, user);
+      await ScoreGuard.enforceMinScore(userId, prisma, user, scheduleValidation.policy);
 
       // ==========================================
       // 3. Table Existence, Maintenance & Availability (US3-1 / FR-3.1, FR-3.4)
@@ -211,7 +210,7 @@ export class BookingService {
         } as BookingValidationError;
       }
 
-      if (table.status === TableStatus.CLOSED) {
+      if (isFacilityClosed(table.status, await hasBlockingIssue(prisma, tableId))) {
         throw {
           status: 400,
           code: 'TABLE_CLOSED',
@@ -353,63 +352,84 @@ export class BookingService {
       const now = new Date();
 
       if (startDateTime && endDateTime) {
-        await ScheduleService.validateTargetTimeWindow(startDateTime, endDateTime, true);
+        await ScheduleService.validateTargetTimeWindow(startDateTime, endDateTime, true, prisma);
+      }
 
-        const overlap = await prisma.booking.findFirst({
+      return prisma.$transaction(async (tx: any) => {
+        // Lock the target and this user's old holds in the same order. This
+        // serializes issue changes and avoids reversed-order table-switch locks.
+        await tx.$queryRaw`SELECT tableid FROM "table"
+          WHERE tableid = ${tableId} OR locked_by_uid = ${userId}
+          ORDER BY tableid FOR UPDATE`;
+        const table = await tx.table.findUnique({ where: { tableId } });
+        if (!table) {
+          throw { status: 404, code: 'TABLE_NOT_FOUND', message: 'Table not found.' };
+        }
+        if (isFacilityClosed(table.status, await hasBlockingIssue(tx, tableId))) {
+          throw {
+            status: 400,
+            code: 'TABLE_CLOSED',
+            message: 'This table is currently closed for maintenance.',
+          };
+        }
+
+        if (startDateTime && endDateTime) {
+          const overlap = await tx.booking.findFirst({
+            where: {
+              tableId,
+              status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
+              startDateTime: { lt: endDateTime },
+              endDateTime: { gt: startDateTime },
+            },
+          });
+
+          if (overlap) {
+            throw {
+              status: 409,
+              code: 'TABLE_ALREADY_BOOKED',
+              message: 'This table is already booked for the requested time window.',
+            };
+          }
+        }
+
+        await tx.table.updateMany({
           where: {
-            tableId,
-            status: { in: [BookingStatus.PENDING, BookingStatus.ACTIVE] },
-            startDateTime: { lt: endDateTime },
-            endDateTime: { gt: startDateTime },
+            lockedByUid: userId,
+            tableId: { not: tableId },
+          },
+          data: {
+            lockToken: null,
+            lockedUntil: null,
+            lockedByUid: null,
           },
         });
 
-        if (overlap) {
+        const lockToken = randomUUID();
+        const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
+
+        const updated = await tx.table.updateMany({
+          where: {
+            tableId,
+            status: { not: TableStatus.CLOSED },
+            OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }, { lockedByUid: userId }],
+          },
+          data: {
+            lockToken,
+            lockedUntil,
+            lockedByUid: userId,
+          },
+        });
+
+        if (updated.count === 0) {
           throw {
             status: 409,
-            code: 'TABLE_ALREADY_BOOKED',
-            message: 'This table is already booked for the requested time window.',
+            code: 'TABLE_LOCKED',
+            message: 'Table is currently on hold, closed, or unavailable.',
           };
         }
-      }
 
-      await prisma.table.updateMany({
-        where: {
-          lockedByUid: userId,
-          tableId: { not: tableId },
-        },
-        data: {
-          lockToken: null,
-          lockedUntil: null,
-          lockedByUid: null,
-        },
+        return { lockToken, lockedUntil };
       });
-
-      const lockToken = randomUUID();
-      const lockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
-
-      const updated = await prisma.table.updateMany({
-        where: {
-          tableId,
-          status: { not: TableStatus.CLOSED },
-          OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }, { lockedByUid: userId }],
-        },
-        data: {
-          lockToken,
-          lockedUntil,
-          lockedByUid: userId,
-        },
-      });
-
-      if (updated.count === 0) {
-        throw {
-          status: 409,
-          code: 'TABLE_LOCKED',
-          message: 'Table is currently on hold, closed, or unavailable.',
-        };
-      }
-
-      return { lockToken, lockedUntil };
     });
   }
 
@@ -463,6 +483,8 @@ export class BookingService {
     }
 
     return await prisma.$transaction(async (tx: any) => {
+      // Shared with issue changes: re-read availability only after acquiring it.
+      await lockTableForStatusChange(tx, input.tableId);
       // 1. Run all rule checks INSIDE the transaction using tx
       await this.validateBookingRules(input, tx);
 
@@ -508,16 +530,6 @@ export class BookingService {
     now: Date = new Date(),
     prisma: any = defaultPrisma
   ) {
-    // 1. ดึงการตั้งค่าระบบ (พร้อม fallback ค่าเริ่มต้น 15 นาที)
-    let config = null;
-    try {
-      config = await prisma.systemConfig.findFirst();
-    } catch {
-      // Fallback defaults if SystemConfig query fails
-    }
-    const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
-    const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
-
     // 2. ดึงข้อมูลการจอง
     const booking = await prisma.booking.findUnique({
       where: { bookingId },
@@ -570,6 +582,10 @@ export class BookingService {
     }
 
     // 3. คำนวณ Check-in Window (AC 4.1.1, AC 4.1.2)
+    const { earlyCheckInMinutes, lateThresholdMinutes } = await readBookingPolicy(prisma, [
+      'earlyCheckInMinutes',
+      'lateThresholdMinutes',
+    ]);
     const earlyCheckInMs = earlyCheckInMinutes * 60 * 1000;
     const lateThresholdMs = lateThresholdMinutes * 60 * 1000;
 
@@ -646,8 +662,8 @@ export class BookingService {
    *    - CANCELLED -> 400 BOOKING_ALREADY_CANCELLED
    *    - COMPLETED / NO_SHOW -> 400 BOOKING_NOT_PENDING
    * 3. Cutoff deadline check:
-   *    - Cancellation must occur before startDateTime (cutoff time).
-   *    - If now >= startDateTime -> 400 CANCELLATION_DEADLINE_PASSED
+   *    - Cancellation must occur before the saved early check-in window opens.
+   *    - At or after that cutoff -> 400 CANCELLATION_DEADLINE_PASSED
    * 4. Atomic Transaction:
    *    - Updates booking status to CANCELLED
    *    - Recalculates the table status after cancellation
@@ -661,16 +677,6 @@ export class BookingService {
     prisma: any = defaultPrisma
   ) {
     return await this.withTimeout(async () => {
-      // 1. Fetch system configuration (with fallback) for check-in window & cancellation cutoff
-      let config = null;
-      try {
-        config = prisma.systemConfig?.findFirst ? await prisma.systemConfig.findFirst() : null;
-      } catch {
-        // Fallback defaults if SystemConfig query fails
-      }
-      const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
-      const cancellationCutoffMs = earlyCheckInMinutes * 60 * 1000;
-
       const booking = await prisma.booking.findUnique({
         where: { bookingId },
         include: { table: true },
@@ -713,6 +719,8 @@ export class BookingService {
       }
 
       // Cutoff deadline check: Must cancel before the early check-in window opens (AC 5.1.1)
+      const { earlyCheckInMinutes } = await readBookingPolicy(prisma, ['earlyCheckInMinutes']);
+      const cancellationCutoffMs = earlyCheckInMinutes * 60 * 1000;
       const cutoffTime = new Date(booking.startDateTime.getTime() - cancellationCutoffMs);
       if (now >= cutoffTime) {
         throw {
@@ -1028,14 +1036,10 @@ export async function getActiveBooking(
   if (!booking) return null;
 
   // Read the same check-in limits used by checkIn() and the No-show worker.
-  let config = null;
-  try {
-    config = prisma.systemConfig?.findFirst ? await prisma.systemConfig.findFirst() : null;
-  } catch {
-    // fallback
-  }
-  const earlyCheckInMinutes = config?.earlyCheckInMinutes ?? 15;
-  const lateThresholdMinutes = config?.lateThresholdMinutes ?? 15;
+  const { earlyCheckInMinutes, lateThresholdMinutes } = await readBookingPolicy(prisma, [
+    'earlyCheckInMinutes',
+    'lateThresholdMinutes',
+  ]);
   const cancellationCutoffMs = earlyCheckInMinutes * 60 * 1000;
   const deadline = new Date(booking.startDateTime.getTime() - cancellationCutoffMs);
 

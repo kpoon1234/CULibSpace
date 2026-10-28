@@ -25,6 +25,7 @@ function createMockPrisma(overrides: {
   config?: any;
 }) {
   return {
+    issueReport: { findFirst: async () => null },
     systemConfig: {
       findFirst: async () =>
         overrides.config !== undefined
@@ -34,10 +35,27 @@ function createMockPrisma(overrides: {
               maxBookingDurationMinutes: 120,
               minScoreToBook: 50.0,
               maxAdvanceBookingDays: 7,
+              earlyCheckInMinutes: 15,
+              lateThresholdMinutes: 15,
             },
     },
     user: {
       findUnique: async () => overrides.user,
+    },
+    operatingSchedule: {
+      findMany: async () => [
+        {
+          scheduleId: 1,
+          name: 'Test regular hours',
+          startDate: new Date('2000-01-01T00:00:00Z'),
+          endDate: new Date('2100-12-31T00:00:00Z'),
+          openTime: '08:00',
+          closeTime: '21:00',
+          is24Hours: false,
+          isClosed: false,
+          priority: 1,
+        },
+      ],
     },
     table: {
       findUnique: async () => overrides.table,
