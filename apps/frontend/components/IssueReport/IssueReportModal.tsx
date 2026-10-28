@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { createIssueReport } from '@/lib/issues';
+import { createIssueReport, type CreateIssueReportResult } from '@/lib/issues';
+import IssueReportResultModal from './IssueReportResultModal';
 
 export interface IssueReportLocation {
   tableId: number;
@@ -19,7 +20,7 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
   const [details, setDetails] = useState('');
   const [reportedAt] = useState(() => new Date().toISOString());
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CreateIssueReportResult | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -42,21 +43,14 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
     if (issueInformation.length < 5 || submitting) return;
 
     setSubmitting(true);
-    setError(null);
 
-    const result = await createIssueReport({
+    const response = await createIssueReport({
       tableId: location.tableId,
       issueInformation,
     });
 
+    setResult(response);
     setSubmitting(false);
-
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-
-    onClose();
   }
 
   return (
@@ -128,12 +122,6 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
             <p className="ml-1 text-xs text-gray-500">5–1000 characters.</p>
           </div>
 
-          {error && (
-            <p role="alert" className="ml-1 text-sm font-medium text-red-600">
-              {error}
-            </p>
-          )}
-
           <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-4">
             <button
               type="button"
@@ -154,6 +142,10 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
           </div>
         </form>
       </section>
+
+      {result && (
+        <IssueReportResultModal result={result} onClose={onClose} onRetry={() => setResult(null)} />
+      )}
     </div>
   );
 }
