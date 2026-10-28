@@ -9,6 +9,9 @@ They run in the PR workflow before the frontend build.
   and reconciliation of unknown outcomes.
 - `bookings.test.ts`: backend error codes, timeout/5xx classification, exact-match
   confirmation, and credentials captured before requests enter the queue.
+- `ticketHistory.test.ts` (US6-2): visitor ticket phase (active, upcoming, awaiting
+  payment, unpaid, expired, refunded), which ticket is shown as current, validity
+  window and amount formatting, and the `fetchMyTickets` HTTP client contract.
 
 ## Manual browser checks
 
