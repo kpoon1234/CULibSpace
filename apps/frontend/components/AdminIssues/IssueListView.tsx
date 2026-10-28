@@ -230,63 +230,63 @@ function PageButton({
     </button>
   );
 }
-
 function IssueResultsList({ issues }: { issues: AdminIssue[] }) {
-  const COLS = 'md:grid md:grid-cols-[minmax(0,1fr)_8rem_9rem_10rem_6rem] md:items-center md:gap-4';
-
   return (
     <div>
-      <div
-        aria-hidden="true"
-        className={`hidden border-b border-gray-200 px-4 py-2 text-xs font-medium text-gray-500 ${COLS}`}
-      >
-        <span>Table / Zone</span>
-        <span>Reported by</span>
-        <span className="text-right">Reported at</span>
-        <span className="text-right">Status</span>
-      </div>
-
       <ul className="divide-y divide-gray-100">
         {issues.map((issue) => (
-          <li key={issue.issueId} className={COLS}>
-            <div className="px-4 py-3 text-left transition-colors hover:bg-gray-50">
-              <span className="block text-sm font-medium text-gray-900 truncate">
-                Table {issue.table.tableId}
-              </span>
-              <span className="block truncate text-sm text-gray-500">
-                Zone {issue.table.zoneType}
-              </span>
-            </div>
-            <div className="px-4 py-3 text-left">
-              <span className="block truncate text-sm font-medium text-gray-900">
-                {issue.user.firstname} {issue.user.lastname}
-              </span>
-              <span className="block truncate text-sm text-gray-500">{issue.user.email}</span>
-            </div>
-            <div className="px-4 py-3 text-right">
-              <span className="block text-sm text-gray-600 tabular-nums">
-                {new Date(issue.time).toLocaleString(undefined, {
-                  dateStyle: 'short',
-                  timeStyle: 'short',
-                })}
-              </span>
-            </div>
-            <div className="px-4 py-3 text-right">
-              <span
-                className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                  STATUS_COLOR[issue.status]
-                }`}
-              >
-                {issue.status}
-              </span>
-              {issue.blocksTable && (
-                <span className="ml-2 inline-block rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                  Blocks table
+          <li
+            key={issue.issueId}
+            className="px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-4 md:flex-nowrap md:items-center">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2 text-sm">
+                  <span className="font-medium text-gray-900 truncate">#{issue.issueId}</span>
+                  <span className="text-gray-400 text-xs font-mono tabular-nums">
+                    Table {issue.table.tableId}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-gray-600 truncate md:line-clamp-1 lg:line-clamp-2">
+                  {issue.issueInformation}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <span className="text-gray-500">
+                    Zone {issue.table.zoneType} &middot;
+                    {new Date(issue.time).toLocaleString(undefined, {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}
+                  </span>
+                  <span className="text-gray-500">
+                    Last update{' '}
+                    {new Date(issue.updatedAt).toLocaleString(undefined, {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-2 md:flex-row md:items-center md:gap-4">
+                <span
+                  className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                    STATUS_COLOR[issue.status]
+                  }`}
+                >
+                  {issue.status}
                 </span>
-              )}
-            </div>
-            <div className="md:hidden px-4 py-2 text-left">
-              <p className="text-sm text-gray-700 truncate">{issue.issueInformation}</p>
+                {issue.blocksTable && (
+                  <span className="inline-block rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                    Blocks table
+                  </span>
+                )}
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-900">
+                    {issue.user.firstname} {issue.user.lastname}
+                  </p>
+                  <p className="text-xs text-gray-500">{issue.user.email}</p>
+                </div>
+              </div>
             </div>
           </li>
         ))}

@@ -3,6 +3,7 @@ export type IssueStatusLabel = 'Pending' | 'In Progress' | 'Completed';
 export interface AdminIssue {
   issueId: number;
   time: string;
+  updatedAt: string;
   issueInformation: string;
   status: IssueStatusLabel;
   blocksTable: boolean;
