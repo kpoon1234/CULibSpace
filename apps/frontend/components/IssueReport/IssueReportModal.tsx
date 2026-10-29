@@ -21,6 +21,7 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
   const [reportedAt] = useState(() => new Date().toISOString());
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateIssueReportResult | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -39,8 +40,22 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    setValidationError(null);
+
     const issueInformation = details.trim();
-    if (issueInformation.length < 5 || submitting) return;
+    if (issueInformation.length === 0) {
+      setValidationError('Please describe the issue before submitting.');
+      return;
+    }
+    if (issueInformation.length < 5) {
+      setValidationError('Issue details must be at least 5 characters.');
+      return;
+    }
+    if (issueInformation.length > 1000) {
+      setValidationError('Issue details must be at most 1000 characters.');
+      return;
+    }
+    if (submitting) return;
 
     setSubmitting(true);
 
@@ -121,6 +136,12 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
             />
             <p className="ml-1 text-xs text-gray-500">5–1000 characters.</p>
           </div>
+
+          {validationError && (
+            <p role="alert" className="ml-1 text-sm font-medium text-red-600">
+              {validationError}
+            </p>
+          )}
 
           <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-4">
             <button

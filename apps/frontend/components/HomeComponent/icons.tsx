@@ -268,9 +268,9 @@ export function MegaphoneIcon({ className }: IconProps) {
       className={className}
       aria-hidden="true"
     >
-      <path d="M1 9v6l4 2v2l4-2v-2z" />
-      <path d="M9 9h2a7 7 0 0 0 7-7H9z" />
-      <circle cx="11" cy="5" r="1" />
+      <path d="M4 8h10c2 0 3 1 3 3v4c0 2-1 3-3 3H4c-2 0-3-1-3-3V11c0-2 1-3 3-3" />
+      <path d="M14 8h3v8h-3z" />
+      <path d="M19 8h3M19 16h3M20 12h2" />
     </svg>
   );
 }
