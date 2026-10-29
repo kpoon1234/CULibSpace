@@ -6,7 +6,7 @@ export class AdminScheduleController {
    * GET /api/admin/schedules
    * List operating schedules with optional query filters (q, startDate, endDate, priority, isClosed, is24Hours).
    */
-  static async list(req: Request, res: Response): Promise<void> {
+  static async list(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     try {
@@ -25,16 +25,19 @@ export class AdminScheduleController {
       const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
       const pageSize = req.query.pageSize !== undefined ? Number(req.query.pageSize) : undefined;
 
-      const result = await AdminScheduleService.listSchedules({
-        q,
-        startDate,
-        endDate,
-        priority,
-        isClosed,
-        is24Hours,
-        page,
-        pageSize,
-      });
+      const result = await AdminScheduleService.listSchedules(
+        {
+          q,
+          startDate,
+          endDate,
+          priority,
+          isClosed,
+          is24Hours,
+          page,
+          pageSize,
+        },
+        prisma
+      );
 
       res.status(200).json({
         success: true,
@@ -55,15 +58,17 @@ export class AdminScheduleController {
 
   /**
    * GET /api/admin/schedules/active
-   * Get the active operating schedule for a given date (or today if omitted) according to priority.
+   * Get the active operating schedule for a given date (or today in Asia/Bangkok if omitted) according to priority.
    */
-  static async getActive(req: Request, res: Response): Promise<void> {
+  static async getActive(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     try {
       const dateParam =
-        typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
-      const schedule = await AdminScheduleService.getActiveScheduleOnDate(dateParam);
+        typeof req.query.date === 'string' && req.query.date.trim().length > 0
+          ? req.query.date.trim()
+          : AdminScheduleService.getTodayDateStringBangkok();
+      const schedule = await AdminScheduleService.getActiveScheduleOnDate(dateParam, prisma);
 
       res.status(200).json({
         success: true,
@@ -85,7 +90,7 @@ export class AdminScheduleController {
    * GET /api/admin/schedules/:scheduleId
    * Fetch a single schedule by scheduleId.
    */
-  static async getById(req: Request, res: Response): Promise<void> {
+  static async getById(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     const scheduleId = Number(req.params.scheduleId);
@@ -95,7 +100,7 @@ export class AdminScheduleController {
     }
 
     try {
-      const schedule = await AdminScheduleService.getScheduleById(scheduleId);
+      const schedule = await AdminScheduleService.getScheduleById(scheduleId, prisma);
       res.status(200).json({
         success: true,
         data: schedule,
@@ -116,11 +121,11 @@ export class AdminScheduleController {
    * POST /api/admin/schedules
    * Add a new library operating schedule with date/time checks.
    */
-  static async create(req: Request, res: Response): Promise<void> {
+  static async create(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     try {
-      const schedule = await AdminScheduleService.createSchedule(req.body ?? {});
+      const schedule = await AdminScheduleService.createSchedule(req.body ?? {}, prisma);
       res.status(201).json({
         success: true,
         data: schedule,
@@ -143,7 +148,7 @@ export class AdminScheduleController {
    * PATCH /api/admin/schedules/:scheduleId
    * Edit an operating schedule with valid date/time checks.
    */
-  static async update(req: Request, res: Response): Promise<void> {
+  static async update(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     const rawId =
@@ -156,7 +161,11 @@ export class AdminScheduleController {
     }
 
     try {
-      const schedule = await AdminScheduleService.updateSchedule(scheduleId, req.body ?? {});
+      const schedule = await AdminScheduleService.updateSchedule(
+        scheduleId,
+        req.body ?? {},
+        prisma
+      );
       res.status(200).json({
         success: true,
         data: schedule,
@@ -177,7 +186,7 @@ export class AdminScheduleController {
    * DELETE /api/admin/schedules/:scheduleId
    * Delete an operating schedule.
    */
-  static async delete(req: Request, res: Response): Promise<void> {
+  static async delete(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     const scheduleId = Number(req.params.scheduleId);
@@ -187,7 +196,7 @@ export class AdminScheduleController {
     }
 
     try {
-      await AdminScheduleService.deleteSchedule(scheduleId);
+      await AdminScheduleService.deleteSchedule(scheduleId, prisma);
       res.status(200).json({
         success: true,
         message: 'Operating schedule deleted successfully',

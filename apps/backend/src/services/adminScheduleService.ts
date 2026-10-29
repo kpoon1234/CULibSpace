@@ -4,7 +4,7 @@ const defaultPrisma = new PrismaClient();
 
 const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ISO_DATETIME =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d+)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const TIME_FORMAT = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export interface ParsedDateResult {
@@ -62,9 +62,23 @@ export class AdminScheduleService {
   }
 
   /**
+   * Helper to format a Date as YYYY-MM-DD in Asia/Bangkok time zone (UTC+7).
+   */
+  static getTodayDateStringBangkok(referenceDate: Date = new Date()): string {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Bangkok',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(referenceDate);
+  }
+
+  /**
    * Parse and validate a calendar date string (YYYY-MM-DD or full ISO 8601).
    * Validates month (1-12), day according to days in month (including leap year rules),
-   * and returns a normalized UTC Date at midnight (00:00:00.000Z) along with "YYYY-MM-DD".
+   * and full datetime components (hours, minutes, seconds, timezone offset).
+   * Returns a normalized UTC Date at midnight (00:00:00.000Z) along with "YYYY-MM-DD".
    */
   static parseCalendarDate(value: unknown): ParsedDateResult | null {
     if (value instanceof Date) {
@@ -82,16 +96,20 @@ export class AdminScheduleService {
     let monthStr = '';
     let dayStr = '';
 
-    const dateOnlyMatch = ISO_DATE_ONLY.exec(value.trim());
+    const trimmed = value.trim();
+    const dateOnlyMatch = ISO_DATE_ONLY.exec(trimmed);
     if (dateOnlyMatch) {
       [, yearStr, monthStr, dayStr] = dateOnlyMatch;
     } else {
-      const dateTimeMatch = ISO_DATETIME.exec(value.trim());
-      if (dateTimeMatch) {
-        [, yearStr, monthStr, dayStr] = dateTimeMatch;
-      } else {
+      const dateTimeMatch = ISO_DATETIME.exec(trimmed);
+      if (!dateTimeMatch) {
         return null;
       }
+      const parsedFullDate = new Date(trimmed);
+      if (Number.isNaN(parsedFullDate.getTime())) {
+        return null;
+      }
+      [, yearStr, monthStr, dayStr] = dateTimeMatch;
     }
 
     const year = Number(yearStr);
@@ -149,9 +167,16 @@ export class AdminScheduleService {
       };
     }
 
-    // 3. Status flags validation
-    const is24Hours = Boolean(input.is24Hours);
-    const isClosed = Boolean(input.isClosed);
+    // 3. Status flags validation: strictly require boolean type if provided
+    if (input.is24Hours !== undefined && typeof input.is24Hours !== 'boolean') {
+      throw { status: 400, message: 'is24Hours must be a boolean (true or false)' };
+    }
+    if (input.isClosed !== undefined && typeof input.isClosed !== 'boolean') {
+      throw { status: 400, message: 'isClosed must be a boolean (true or false)' };
+    }
+
+    const is24Hours = input.is24Hours === true;
+    const isClosed = input.isClosed === true;
 
     if (is24Hours && isClosed) {
       throw { status: 400, message: 'Schedule cannot be both 24 hours and closed simultaneously' };
@@ -336,11 +361,17 @@ export class AdminScheduleService {
         };
       }
 
-      // 3. Flags validation
+      // 3. Flags validation: strictly require boolean type if provided
+      if (input.is24Hours !== undefined && typeof input.is24Hours !== 'boolean') {
+        throw { status: 400, message: 'is24Hours must be a boolean (true or false)' };
+      }
+      if (input.isClosed !== undefined && typeof input.isClosed !== 'boolean') {
+        throw { status: 400, message: 'isClosed must be a boolean (true or false)' };
+      }
+
       const effectiveIs24Hours =
-        input.is24Hours !== undefined ? Boolean(input.is24Hours) : existing.is24Hours;
-      const effectiveIsClosed =
-        input.isClosed !== undefined ? Boolean(input.isClosed) : existing.isClosed;
+        input.is24Hours !== undefined ? input.is24Hours : existing.is24Hours;
+      const effectiveIsClosed = input.isClosed !== undefined ? input.isClosed : existing.isClosed;
 
       if (effectiveIs24Hours && effectiveIsClosed) {
         throw {
@@ -578,12 +609,22 @@ export class AdminScheduleService {
   /**
    * Determine the effective active schedule on a specific target date,
    * respecting the priority hierarchy (Holiday/Closed (3) > Exam 24h (2) > Regular (1)).
+   * If targetDate is not provided or null, defaults to today in Bangkok time (Asia/Bangkok, UTC+7).
    */
   static async getActiveScheduleOnDate(
-    targetDate: Date | string,
+    targetDate?: Date | string | null,
     prisma: PrismaClient = defaultPrisma
   ): Promise<OperatingSchedule | null> {
-    const parsed = this.parseCalendarDate(targetDate);
+    const effectiveDate =
+      targetDate === undefined ||
+      targetDate === null ||
+      (typeof targetDate === 'string' && targetDate.trim() === '')
+        ? this.getTodayDateStringBangkok()
+        : targetDate instanceof Date
+          ? this.getTodayDateStringBangkok(targetDate)
+          : targetDate;
+
+    const parsed = this.parseCalendarDate(effectiveDate);
     if (!parsed) {
       throw { status: 400, message: 'Invalid targetDate' };
     }

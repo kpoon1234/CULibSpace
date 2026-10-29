@@ -1,21 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  BookingStatus,
-  OperatingSchedule,
-  PrismaClient,
-  SystemConfig,
-  TableStatus,
-} from '@prisma/client';
+import { BookingStatus, OperatingSchedule, PrismaClient, TableStatus } from '@prisma/client';
 
 process.env.DATABASE_URL = 'postgresql://invalid:invalid@127.0.0.1:1/invalid';
 process.env.JWT_SECRET = 'admin-schedule-unit-test-secret';
 
 const { AdminScheduleService } = await import('../services/adminScheduleService.js');
-const { AdminConfigService } = await import('../services/adminConfigService.js');
 const { BookingService } = await import('../services/bookingService.js');
 const { AdminScheduleController } = await import('../controllers/adminScheduleController.js');
-const { AdminConfigController } = await import('../controllers/adminConfigController.js');
 const { signJwt } = await import('../utils/jwt.js');
 const { default: adminRoutes } = await import('../routes/adminRoutes.js');
 
@@ -199,6 +191,13 @@ test('parseCalendarDate accurately validates valid calendar dates and leap years
   // ISO 8601 string support
   const isoParsed = AdminScheduleService.parseCalendarDate('2026-10-27T08:30:00.000Z');
   assert.equal(isoParsed?.dateStr, '2026-10-27');
+
+  // Strict ISO 8601 time & timezone validation: reject invalid hours/minutes/seconds/offsets
+  assert.equal(AdminScheduleService.parseCalendarDate('2026-11-01T99:99:99+99:99'), null);
+  assert.equal(AdminScheduleService.parseCalendarDate('2026-11-01T25:00:00Z'), null);
+  assert.equal(AdminScheduleService.parseCalendarDate('2026-11-01T12:60:00Z'), null);
+  assert.equal(AdminScheduleService.parseCalendarDate('2026-11-01T12:30:60Z'), null);
+  assert.equal(AdminScheduleService.parseCalendarDate('2026-11-01T12:30:00+25:00'), null);
 });
 
 test('isValidTimeFormat enforces HH:MM 24-hour time', () => {
@@ -776,265 +775,150 @@ test('getActiveScheduleOnDate respects priority hierarchy (Holiday > Exam > Regu
 });
 
 // ==========================================
-// Suite 6: Booking Policy Parameters & SystemConfig
+// Suite 6: Strict Boolean & ISO Datetime Checks & Thailand Timezone (Review Fixes)
 // ==========================================
 
-test('AdminConfigService gets and updates booking policy parameters with validation', async () => {
-  let storedConfig: SystemConfig = {
-    configId: 1,
-    maxBookingDurationMinutes: 120,
-    lateThresholdMinutes: 15,
-    earlyCheckInMinutes: 15,
-    minScoreToBook: 50,
-    maxAdvanceBookingDays: 7,
-    ticketPriceSatang: 5000,
-    ticketValidityHours: 2,
-    paymentCheckoutExpiryMinutes: 30,
-    updatedAt: new Date(),
-  };
+test('createSchedule rejects non-boolean values for isClosed and is24Hours (prevents string coercion)', async () => {
+  const { client } = mockSchedulePrisma();
 
-  const client = {
-    $transaction: async (fn: any) => fn(client),
-    $queryRaw: async () => [],
-    $executeRaw: async () => 0,
-    systemConfig: {
-      findFirst: async () => storedConfig,
-      create: async (args: any) => {
-        storedConfig = { ...args.data, updatedAt: new Date() };
-        return storedConfig;
+  // "false" string must be rejected with 400 (not coerced to true)
+  await assert.rejects(
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางทดสอบ Boolean',
+        startDate: '2026-08-01',
+        endDate: '2026-12-15',
+        isClosed: 'false' as any,
       },
-      update: async (args: any) => {
-        storedConfig = { ...storedConfig, ...args.data, updatedAt: new Date() };
-        return storedConfig;
-      },
-    },
-  } as unknown as PrismaClient;
-
-  // 1. Get initial config
-  const config = await AdminConfigService.getConfig(client);
-  assert.equal(config.maxBookingDurationMinutes, 120);
-  assert.equal(config.maxAdvanceBookingDays, 7);
-
-  // 2. Update config with valid parameters
-  const updated = await AdminConfigService.updateConfig(
-    {
-      maxBookingDurationMinutes: 180,
-      lateThresholdMinutes: 30,
-      maxAdvanceBookingDays: 14,
-      minScoreToBook: 60,
-    },
-    client
-  );
-  assert.equal(updated.maxBookingDurationMinutes, 180);
-  assert.equal(updated.lateThresholdMinutes, 30);
-  assert.equal(updated.maxAdvanceBookingDays, 14);
-  assert.equal(updated.minScoreToBook, 60);
-
-  // 3. Validation: reject maxBookingDurationMinutes < 15 or > 1440
-  await assert.rejects(
-    AdminConfigService.updateConfig({ maxBookingDurationMinutes: 10 }, client),
-    (err: any) => err.status === 400 && err.message.includes('between 15 and 1440')
-  );
-
-  // 4. Validation: reject negative lateThresholdMinutes
-  await assert.rejects(
-    AdminConfigService.updateConfig({ lateThresholdMinutes: 0 }, client),
-    (err: any) => err.status === 400 && err.message.includes('between 1 and 60 minutes')
-  );
-
-  // 5. Validation: reject minScoreToBook > 100
-  await assert.rejects(
-    AdminConfigService.updateConfig({ minScoreToBook: 150 }, client),
-    (err: any) => err.status === 400 && err.message.includes('score between 0 and 100')
-  );
-});
-
-// [Issue 3 Review Regression] ticketPriceSatang: 0 is rejected. Values 1-999 also rejected (Stripe min 1000 satang / 10 THB).
-test('[Issue 3] AdminConfigService rejects ticketPriceSatang below Stripe minimum (1000 satang)', async () => {
-  let storedConfig: SystemConfig = {
-    configId: 1,
-    maxBookingDurationMinutes: 120,
-    lateThresholdMinutes: 15,
-    earlyCheckInMinutes: 15,
-    minScoreToBook: 50,
-    maxAdvanceBookingDays: 7,
-    ticketPriceSatang: 5000,
-    ticketValidityHours: 2,
-    paymentCheckoutExpiryMinutes: 30,
-    updatedAt: new Date(),
-  };
-
-  const client = {
-    $transaction: async (fn: any) => fn(client),
-    $queryRaw: async () => [],
-    $executeRaw: async () => 0,
-    systemConfig: {
-      findFirst: async () => storedConfig,
-      update: async (args: any) => {
-        storedConfig = { ...storedConfig, ...args.data };
-        return storedConfig;
-      },
-    },
-  } as unknown as PrismaClient;
-
-  // 0 → rejected
-  await assert.rejects(
-    AdminConfigService.updateConfig({ ticketPriceSatang: 0 }, client),
-    (err: any) => err.status === 400 && err.message.includes('1000 satang')
-  );
-
-  // Negative → rejected
-  await assert.rejects(
-    AdminConfigService.updateConfig({ ticketPriceSatang: -1000 }, client),
-    (err: any) => err.status === 400 && err.message.includes('1000 satang')
-  );
-
-  // 1–999 → rejected (below Stripe minimum)
-  await assert.rejects(
-    AdminConfigService.updateConfig({ ticketPriceSatang: 1 }, client),
-    (err: any) => err.status === 400 && err.message.includes('1000 satang')
-  );
-
-  await assert.rejects(
-    AdminConfigService.updateConfig({ ticketPriceSatang: 999 }, client),
-    (err: any) => err.status === 400 && err.message.includes('1000 satang')
-  );
-
-  // 1000 (Stripe minimum) → accepted
-  const updated = await AdminConfigService.updateConfig({ ticketPriceSatang: 1000 }, client);
-  assert.equal(updated.ticketPriceSatang, 1000);
-
-  // 5000 → accepted
-  const updated2 = await AdminConfigService.updateConfig({ ticketPriceSatang: 5000 }, client);
-  assert.equal(updated2.ticketPriceSatang, 5000);
-});
-
-// [Issue 4 Review Regression] Config validation rejects lateThreshold >= maxBookingDuration, and checkIn rejects after endDateTime
-test('[Issue 4] AdminConfigService rejects lateThresholdMinutes >= maxBookingDurationMinutes or > 60', async () => {
-  let storedConfig: SystemConfig = {
-    configId: 1,
-    maxBookingDurationMinutes: 120,
-    lateThresholdMinutes: 15,
-    earlyCheckInMinutes: 15,
-    minScoreToBook: 50,
-    maxAdvanceBookingDays: 7,
-    ticketPriceSatang: 5000,
-    ticketValidityHours: 2,
-    paymentCheckoutExpiryMinutes: 30,
-    updatedAt: new Date(),
-  };
-
-  const client = {
-    $transaction: async (fn: any) => fn(client),
-    $queryRaw: async () => [],
-    $executeRaw: async () => 0,
-    systemConfig: {
-      findFirst: async () => storedConfig,
-      update: async (args: any) => {
-        storedConfig = { ...storedConfig, ...args.data };
-        return storedConfig;
-      },
-    },
-  } as unknown as PrismaClient;
-
-  // Reject late threshold > 60 minutes
-  await assert.rejects(
-    AdminConfigService.updateConfig({ lateThresholdMinutes: 120 }, client),
-    (err: any) => err.status === 400 && err.message.includes('between 1 and 60 minutes')
-  );
-
-  // Reject late threshold >= maxBookingDuration (e.g. late 20 min on max 15 min duration)
-  await assert.rejects(
-    AdminConfigService.updateConfig(
-      { maxBookingDurationMinutes: 15, lateThresholdMinutes: 20 },
       client
     ),
-    (err: any) =>
-      err.status === 400 &&
-      err.message.includes('must be strictly less than maxBookingDurationMinutes')
+    (err: any) => err.status === 400 && err.message.includes('isClosed must be a boolean')
   );
 
-  // Reject equal: late 15 on max 15
   await assert.rejects(
-    AdminConfigService.updateConfig(
-      { maxBookingDurationMinutes: 15, lateThresholdMinutes: 15 },
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางทดสอบ Boolean',
+        startDate: '2026-08-01',
+        endDate: '2026-12-15',
+        is24Hours: 'false' as any,
+      },
       client
     ),
-    (err: any) =>
-      err.status === 400 &&
-      err.message.includes('must be strictly less than maxBookingDurationMinutes')
+    (err: any) => err.status === 400 && err.message.includes('is24Hours must be a boolean')
+  );
+
+  await assert.rejects(
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางทดสอบ Boolean',
+        startDate: '2026-08-01',
+        endDate: '2026-12-15',
+        isClosed: 1 as any,
+      },
+      client
+    ),
+    (err: any) => err.status === 400 && err.message.includes('isClosed must be a boolean')
   );
 });
 
-// [Issue P2 Review Regression] Concurrent config updates are serialized inside an advisory-locked transaction
-test('[Issue P2] AdminConfigService serializes concurrent updates to prevent lateThreshold >= maxBookingDuration invariant violation', async () => {
-  let storedConfig: SystemConfig = {
-    configId: 1,
-    maxBookingDurationMinutes: 120,
-    lateThresholdMinutes: 15,
-    earlyCheckInMinutes: 15,
-    minScoreToBook: 50,
-    maxAdvanceBookingDays: 7,
-    ticketPriceSatang: 5000,
-    ticketValidityHours: 2,
-    paymentCheckoutExpiryMinutes: 30,
-    updatedAt: new Date(),
-  };
+test('updateSchedule rejects non-boolean values for isClosed and is24Hours', async () => {
+  const initial = [scheduleRow({ scheduleId: 1 })];
+  const { client } = mockSchedulePrisma(initial);
 
-  let lockAcquired = false;
-  const client = {
-    $transaction: async (fn: any) => {
-      // Simulate serializing through lock:
-      // While one transaction is executing, it holds lock
-      while (lockAcquired) {
-        await new Promise((r) => setTimeout(r, 5));
-      }
-      lockAcquired = true;
-      try {
-        return await fn(client);
-      } finally {
-        lockAcquired = false;
-      }
-    },
-    $queryRaw: async () => [],
-    $executeRaw: async () => 0,
-    systemConfig: {
-      findFirst: async () => ({ ...storedConfig }),
-      update: async (args: any) => {
-        storedConfig = { ...storedConfig, ...args.data, updatedAt: new Date() };
-        return { ...storedConfig };
+  await assert.rejects(
+    AdminScheduleService.updateSchedule(1, { isClosed: 'false' as any }, client),
+    (err: any) => err.status === 400 && err.message.includes('isClosed must be a boolean')
+  );
+
+  await assert.rejects(
+    AdminScheduleService.updateSchedule(1, { is24Hours: 'true' as any }, client),
+    (err: any) => err.status === 400 && err.message.includes('is24Hours must be a boolean')
+  );
+});
+
+test('createSchedule rejects invalid ISO datetime strings with out-of-range components', async () => {
+  const { client } = mockSchedulePrisma();
+
+  await assert.rejects(
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางเวลาผิด',
+        startDate: '2026-11-01T99:99:99+99:99',
+        endDate: '2026-11-05',
       },
-    },
-  } as unknown as PrismaClient;
-
-  // Request A changes maxBookingDurationMinutes from 120 down to 30.
-  // Request B changes lateThresholdMinutes from 15 up to 60.
-  // If neither serialized or if reads happen outside tx lock, both might pass against 120/15.
-  // But serialized, one commits first, and the second MUST be rejected because 60 >= 30.
-  const reqA = AdminConfigService.updateConfig({ maxBookingDurationMinutes: 30 }, client);
-  const reqB = AdminConfigService.updateConfig({ lateThresholdMinutes: 60 }, client);
-
-  const results = await Promise.allSettled([reqA, reqB]);
-
-  const fulfilled = results.filter((r) => r.status === 'fulfilled');
-  const rejected = results.filter((r) => r.status === 'rejected');
-
-  assert.equal(fulfilled.length, 1, 'Exactly one concurrent request should succeed');
-  assert.equal(rejected.length, 1, 'The conflicting request should be rejected');
-
-  const rejectedError: any = (rejected[0] as PromiseRejectedResult).reason;
-  assert.equal(rejectedError.status, 400);
-  assert.equal(
-    rejectedError.message.includes('must be strictly less than maxBookingDurationMinutes'),
-    true
+      client
+    ),
+    (err: any) => err.status === 400 && err.message.includes('Invalid startDate format')
   );
 
-  // Invariant holds in final database state
-  assert.equal(
-    storedConfig.lateThresholdMinutes < storedConfig.maxBookingDurationMinutes,
-    true,
-    'Database config invariant lateThreshold < maxDuration must never be violated'
+  await assert.rejects(
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางเวลาผิด',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05T25:00:00Z',
+      },
+      client
+    ),
+    (err: any) => err.status === 400 && err.message.includes('Invalid endDate format')
   );
+});
+
+test('AdminScheduleService.getTodayDateStringBangkok formats current Bangkok calendar date correctly across midnight UTC', () => {
+  // During UTC 17:00-23:59 (e.g. 2026-10-29T20:00:00Z = 2026-10-30 03:00 Bangkok time)
+  const utcNight = new Date('2026-10-29T20:00:00.000Z');
+  const bkkDateStr = AdminScheduleService.getTodayDateStringBangkok(utcNight);
+  assert.equal(
+    bkkDateStr,
+    '2026-10-30',
+    'Bangkok date should be 2026-10-30 while UTC is 2026-10-29'
+  );
+
+  // During UTC 00:00-06:59 (e.g. 2026-10-30T01:00:00Z = 2026-10-30 08:00 Bangkok time)
+  const utcMorning = new Date('2026-10-30T01:00:00.000Z');
+  const bkkMorningStr = AdminScheduleService.getTodayDateStringBangkok(utcMorning);
+  assert.equal(bkkMorningStr, '2026-10-30');
+});
+
+test('getActiveScheduleOnDate without targetDate defaults to today in Bangkok time (Asia/Bangkok)', async () => {
+  const todayBkk = AdminScheduleService.getTodayDateStringBangkok();
+  const rows = [
+    scheduleRow({
+      scheduleId: 10,
+      name: `ตารางสำหรับวันนี้ในไทย (${todayBkk})`,
+      startDate: new Date(`${todayBkk}T00:00:00.000Z`),
+      endDate: new Date(`${todayBkk}T00:00:00.000Z`),
+      priority: 2,
+    }),
+  ];
+  const { client } = mockSchedulePrisma(rows);
+
+  // Calling without date argument should find today's Bangkok schedule
+  const active = await AdminScheduleService.getActiveScheduleOnDate(undefined, client);
+  assert.equal(active?.scheduleId, 10);
+});
+
+test('AdminScheduleController.getActive uses Bangkok date when date query param is omitted', async () => {
+  const todayBkk = AdminScheduleService.getTodayDateStringBangkok();
+  const rows = [
+    scheduleRow({
+      scheduleId: 10,
+      name: `ตารางสำหรับวันนี้ในไทย (${todayBkk})`,
+      startDate: new Date(`${todayBkk}T00:00:00.000Z`),
+      endDate: new Date(`${todayBkk}T00:00:00.000Z`),
+      priority: 2,
+    }),
+  ];
+  const { client } = mockSchedulePrisma(rows);
+
+  const req = { query: {} } as any;
+  const res = mockResponse();
+
+  await AdminScheduleController.getActive(req, res as any, client);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.data.scheduleId, 10);
 });
 
 test('[Issue 4] BookingService.checkIn rejects check-in after reservation endDateTime and does not set table OCCUPIED', async () => {

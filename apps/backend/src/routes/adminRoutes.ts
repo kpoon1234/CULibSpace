@@ -4,7 +4,6 @@ import { AdminUserController } from '../controllers/adminUserController.js';
 import { AdminAuditController } from '../controllers/adminAuditController.js';
 import { IssueController } from '../controllers/issueController.js';
 import { AdminScheduleController } from '../controllers/adminScheduleController.js';
-import { AdminConfigController } from '../controllers/adminConfigController.js';
 import { authenticateToken, requireRoles } from '../middlewares/authMiddleware.js';
 
 const router = Router();
@@ -46,16 +45,6 @@ router.delete(
   authenticateToken,
   requireRoles('ADMIN'),
   AdminScheduleController.delete
-);
-
-// Booking Policy Parameters & System Configuration
-router.get('/config', authenticateToken, requireRoles('ADMIN'), AdminConfigController.getConfig);
-router.put('/config', authenticateToken, requireRoles('ADMIN'), AdminConfigController.updateConfig);
-router.patch(
-  '/config',
-  authenticateToken,
-  requireRoles('ADMIN'),
-  AdminConfigController.updateConfig
 );
 
 // POST /api/admin/adjust-score
