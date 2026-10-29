@@ -66,6 +66,7 @@ function clientFor(state: State, actor: Actor, afterRead?: (actor: Actor) => Pro
       const audits: Audit[] = [];
       const tx = {
         $queryRaw: async () => [],
+        systemConfig: { findFirst: async () => ({ lateThresholdMinutes: 15 }) },
         admin: {
           findUnique: async () => ({ adminId }),
           findFirst: async () => ({ adminId }),

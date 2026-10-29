@@ -160,6 +160,34 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
 - Admin ตรวจสอบรายการ อัปเดตสถานะปัญหา (`ManageIssue`) และปรับสถานะโต๊ะเป็น `CLOSED` หากชำรุด
 - Admin ตั้งค่าตารางเวลาเปิด-ปิด (`OperatingSchedule`) และเงื่อนไขระบบ (`SystemConfig`)
 
+#### US7-4: Applying saved schedules and booking policies
+
+- This task consumes saved settings, not the admin schedule/policy CRUD or settings UI.
+  Settings writers must update/upsert `SystemConfig.configId = 1` (the existing seed contract).
+  `bookingPolicyService.ts` reads and validates only the fields needed by each consumer;
+  missing/invalid policy or failed reads return a safe `503`, never guessed defaults.
+- Layout queries, time-specific holds and final booking validation share `ScheduleService`.
+  Final booking reads schedules and policies again through its transaction client, so a hold
+  does not bypass settings saved before confirmation. Existing issue/table/ticket/overlap guards remain.
+- Schedule dates and local `date`/`timeSlot` inputs use `Asia/Bangkok`, independent of the server
+  timezone. ISO timestamps must include an offset. Each covered calendar day uses its highest-priority
+  schedule; equal top priorities fail with `SCHEDULE_CONFLICT`. Closed dates override operating hours,
+  `is24Hours` covers the entire day, and intervals are half-open (ending at midnight does not use the next day).
+- Compatibility decisions retained pending team confirmation: a date with **no saved schedule** uses
+  the existing 08:00–21:00 regular hours; advance booking means a rolling `N * 24 hours` from now.
+  No schema migration or booking-policy snapshot is added. Existing bookings continue using the latest
+  saved early/late limits for check-in, cancellation and No-show; schedule changes do not cancel them.
+- Cancellation closes when the saved early check-in window opens. Check-in includes the exact late
+  boundary; No-show applies strictly after it. The worker rechecks the saved late threshold inside its
+  transaction before deducting score, so a stale scan cannot ignore an extended grace period.
+- `GET /api/system-config/booking-limits` exposes the five saved booking policy fields with `no-store`.
+  Existing active-booking metadata uses the same early/late values. Hold expiry (5 minutes), score
+  deduction (10 points) and ticket/payment settings are unchanged.
+- Regression coverage: `test_booking_policy.ts`, `test_saved_schedules.ts`, and
+  `test_saved_booking_rules_integration.ts`. The integration suite requires a distinct PostgreSQL
+  `TEST_DATABASE_URL` ending in `_test`, an empty operating-schedule table, and cleans its own fixtures.
+  It runs in `npm run test:integration --workspace=apps/backend` and therefore in the existing PR checks.
+
 #### US7-3: Issue-driven facility availability
 
 - Reuses the issue statuses from US7-1/US7-2. `IssueReport.blocksTable` defaults to
@@ -207,6 +235,51 @@ ightarrow$ เมื่อชำระสำเร็จ อัปเดต `Tic
   `npm run test:integration --workspace=apps/backend` includes real PostgreSQL
   issue/hold/booking/expiration-worker races and rollback checks, guarded by a distinct
   `TEST_DATABASE_URL` whose database name ends in `_test`.
+
+#### US7-3: Admin issue status and notes API
+
+- `PATCH /api/admin/issues/:issueId` requires an admin Bearer token and an
+  existing admin account. The issue ID must be a positive PostgreSQL integer.
+  The JSON body contains exactly these required fields:
+
+  ```json
+  {
+    "status": "In Progress",
+    "blocksTable": true,
+    "notes": "Waiting for a replacement power socket"
+  }
+  ```
+
+- Status labels match the list API: `Pending`, `In Progress`, `Completed`.
+  Any of the three statuses can be selected, including reopening a completed
+  report or saving notes without changing its status. `blocksTable` must always
+  be an explicit boolean; the shared availability helper normalizes it to
+  `false` for `Pending` and `Completed`. The UI should send the current status
+  and checkbox value when changing only notes.
+- Notes are trimmed and limited to 2,000 characters. Send `"notes": ""` to
+  clear the current notes. Each save appends a `ManageIssue` record with the
+  authenticated admin ID and notes in `info`; earlier records and the original
+  user report remain intact. No new schema or migration is required.
+- The helper's issue/availability update, hold cleanup, and audit insert run in
+  one transaction. All API updates share the helper's table lock; server audit
+  timestamps increase strictly per issue so rapid saves cannot collide on the
+  compound audit key or return an older note as the latest one.
+- Success returns `{ success: true, message, data }`, where `data` contains
+  `issueId`, `tableId`, `status`, `blocksTable`, `closed` (effective facility
+  closure), `notes`, `updatedBy`, and `updatedAt` (ISO audit timestamp).
+  `GET /api/admin/issues` also includes the latest `notes` on each issue,
+  defaulting to `""` before the first update. Responses disable caching.
+- Invalid IDs/payloads return `400`, missing authentication returns `401`,
+  non-admin or deleted admin accounts return `403`, and missing issues return
+  `404` with `ISSUE_NOT_FOUND`. Unexpected transaction failures return `500`
+  and roll back both issue and hold changes. Existing booking, check-in, and
+  no-show policies remain as documented above; deployment of closure controls
+  still depends on the team's existing-booking policy decision.
+- `npm run test:issues --workspace=apps/backend` runs the isolated controller,
+  route authorization, list, and facility suites. With a separate migrated
+  `TEST_DATABASE_URL` ending in `_test`, run
+  `npm run test:issues:integration --workspace=apps/backend` to check real
+  status/notes persistence, concurrent saves, and full audit-failure rollback.
 
 ---
 

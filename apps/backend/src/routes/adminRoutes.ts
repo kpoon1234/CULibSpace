@@ -11,6 +11,12 @@ const router = Router();
 router.get('/users', authenticateToken, requireRoles('ADMIN'), AdminUserController.search);
 router.get('/audit-logs', authenticateToken, requireRoles('ADMIN'), AdminAuditController.list);
 router.get('/issues', authenticateToken, requireRoles('ADMIN'), IssueController.listAdmin);
+router.patch(
+  '/issues/:issueId',
+  authenticateToken,
+  requireRoles('ADMIN'),
+  IssueController.updateAdmin
+);
 
 // Operating Schedules (US7-4: Add and edit operating schedules with valid date/time checks)
 router.get('/schedules', authenticateToken, requireRoles('ADMIN'), AdminScheduleController.list);
