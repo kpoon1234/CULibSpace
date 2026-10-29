@@ -33,6 +33,21 @@ function formatDate(value: string): string {
       }).format(date);
 }
 
+function makeDraft(issue: AdminIssue): IssueDraft {
+  return {
+    status: issue.status,
+    blocksTable: issue.blocksTable,
+    notes: '',
+    notesTouched: false,
+  };
+}
+
+function draftIsEdited(draft: IssueDraft, issue: AdminIssue): boolean {
+  const notesChanged = draft.notesTouched && draft.notes !== (issue.notes ?? '');
+
+  return draft.status !== issue.status || draft.blocksTable !== issue.blocksTable || notesChanged;
+}
+
 function AutoGrowTextarea({
   value,
   onChange,
@@ -65,15 +80,6 @@ function AutoGrowTextarea({
   );
 }
 
-function makeDraft(issue: AdminIssue): IssueDraft {
-  return {
-    status: issue.status,
-    blocksTable: issue.blocksTable,
-    notes: '',
-    notesTouched: false,
-  };
-}
-
 export function IssueManagementView() {
   const [issues, setIssues] = useState<AdminIssue[]>([]);
   const [query, setQuery] = useState('');
@@ -84,10 +90,16 @@ export function IssueManagementView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<number | null>(null);
+  const [savingIds, setSavingIds] = useState<Set<number>>(() => new Set());
+
+  const requestSeq = useRef(0);
+
+  const pageCount = Math.max(1, Math.ceil(total / ADMIN_ISSUE_PAGE_SIZE));
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      const seq = ++requestSeq.current;
+
       setLoading(true);
       setError(null);
 
@@ -102,32 +114,35 @@ export function IssueManagementView() {
           signal
         );
 
+        // Ignore results from a request that was superseded by a newer one.
+        if (seq !== requestSeq.current) return;
+
         setIssues(result.issues);
         setTotal(result.total);
 
         setDrafts((current) => {
-          const next = { ...current };
+          const next: Record<number, IssueDraft> = {};
 
           for (const issue of result.issues) {
-            if (!(issue.issueId in next)) {
-              next[issue.issueId] = makeDraft(issue);
-            }
-          }
+            const draft = current[issue.issueId];
 
-          for (const id of Object.keys(next)) {
-            if (!result.issues.some((issue) => issue.issueId === Number(id))) {
-              delete next[Number(id)];
-            }
+            // Keep a draft only while the admin has unsaved edits.
+            // Otherwise refresh it from the latest server response.
+            next[issue.issueId] = draft && draftIsEdited(draft, issue) ? draft : makeDraft(issue);
           }
 
           return next;
         });
       } catch (cause) {
+        if (seq !== requestSeq.current) return;
+
         if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
           setError(cause instanceof Error ? cause.message : 'Failed to load issue reports.');
         }
       } finally {
-        setLoading(false);
+        if (seq === requestSeq.current) {
+          setLoading(false);
+        }
       }
     },
     [query, statusFilter, page]
@@ -140,8 +155,15 @@ export function IssueManagementView() {
     return () => {
       window.clearTimeout(timer);
       controller.abort();
+      requestSeq.current += 1;
     };
   }, [load, query]);
+
+  useEffect(() => {
+    if (!loading && page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [loading, page, pageCount]);
 
   function changeQuery(value: string) {
     setQuery(value);
@@ -191,18 +213,14 @@ export function IssueManagementView() {
 
   function isDirty(issue: AdminIssue): boolean {
     const draft = drafts[issue.issueId];
-    if (!draft) return false;
-
-    const notesChanged = draft.notesTouched && draft.notes !== (issue.notes ?? '');
-
-    return draft.status !== issue.status || draft.blocksTable !== issue.blocksTable || notesChanged;
+    return !!draft && draftIsEdited(draft, issue);
   }
 
   async function save(issue: AdminIssue) {
     const draft = drafts[issue.issueId];
     if (!draft || !isDirty(issue)) return;
 
-    setSavingId(issue.issueId);
+    setSavingIds((current) => new Set(current).add(issue.issueId));
     setError(null);
     setNotice(null);
 
@@ -215,26 +233,18 @@ export function IssueManagementView() {
         notes: notesToSave,
       });
 
-      setDrafts((current) => ({
-        ...current,
-        [issue.issueId]: {
-          status: draft.status,
-          blocksTable: draft.status === 'In Progress' ? draft.blocksTable : false,
-          notes: '',
-          notesTouched: false,
-        },
-      }));
-
       setNotice(`Changes to issue #${issue.issueId} were saved.`);
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to save changes.');
     } finally {
-      setSavingId(null);
+      setSavingIds((current) => {
+        const next = new Set(current);
+        next.delete(issue.issueId);
+        return next;
+      });
     }
   }
-
-  const pageCount = Math.max(1, Math.ceil(total / ADMIN_ISSUE_PAGE_SIZE));
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -329,6 +339,7 @@ export function IssueManagementView() {
             {issues.map((issue) => {
               const draft = drafts[issue.issueId] ?? makeDraft(issue);
               const dirty = isDirty(issue);
+              const saving = savingIds.has(issue.issueId);
               const hasSavedNote = Boolean(issue.notes?.trim());
               const notesPlaceholder = draft.notesTouched
                 ? 'Add repair progress or other maintenance notes…'
@@ -397,10 +408,9 @@ export function IssueManagementView() {
                         </label>
                       )}
 
-                      {draft.status === 'Completed' && issue.blocksTable && (
-                        <p className="rounded-md bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">
-                          Saving as Completed clears the table closure and recalculates its
-                          effective status.
+                      {issue.blocksTable && !draft.blocksTable && (
+                        <p className="rounded-md bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                          Saving will reopen this table and recalculate its effective status.
                         </p>
                       )}
 
@@ -444,11 +454,11 @@ export function IssueManagementView() {
 
                       <button
                         type="button"
-                        disabled={!dirty || savingId === issue.issueId || draft.notes.length > 2000}
+                        disabled={!dirty || saving || draft.notes.length > 2000}
                         onClick={() => void save(issue)}
                         className="rounded-md bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:bg-gray-300"
                       >
-                        {savingId === issue.issueId ? 'Saving…' : 'Save changes'}
+                        {saving ? 'Saving…' : 'Save changes'}
                       </button>
                     </div>
                   </div>
