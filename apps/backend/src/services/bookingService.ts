@@ -598,7 +598,9 @@ export class BookingService {
     const lateThresholdMs = lateThresholdMinutes * 60 * 1000;
 
     const startWindow = new Date(booking.startDateTime.getTime() - earlyCheckInMs);
-    const endWindow = new Date(booking.startDateTime.getTime() + lateThresholdMs);
+    const endWindow = new Date(
+      Math.min(booking.startDateTime.getTime() + lateThresholdMs, booking.endDateTime.getTime())
+    );
 
     if (now < startWindow) {
       throw {
@@ -609,7 +611,7 @@ export class BookingService {
       };
     }
 
-    if (now > endWindow) {
+    if (now > endWindow || now >= booking.endDateTime) {
       throw {
         status: 400,
         code: 'CHECK_IN_TOO_LATE',

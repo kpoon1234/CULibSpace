@@ -52,6 +52,16 @@ export class AdminConfigService {
 
     const updateData: Partial<SystemConfig> = {};
 
+    const effectiveMaxDuration =
+      input.maxBookingDurationMinutes !== undefined
+        ? Number(input.maxBookingDurationMinutes)
+        : current.maxBookingDurationMinutes;
+
+    const effectiveLateThreshold =
+      input.lateThresholdMinutes !== undefined
+        ? Number(input.lateThresholdMinutes)
+        : current.lateThresholdMinutes;
+
     if (input.maxBookingDurationMinutes !== undefined) {
       const val = Number(input.maxBookingDurationMinutes);
       if (!Number.isSafeInteger(val) || val < 15 || val > 1440) {
@@ -66,13 +76,21 @@ export class AdminConfigService {
 
     if (input.lateThresholdMinutes !== undefined) {
       const val = Number(input.lateThresholdMinutes);
-      if (!Number.isSafeInteger(val) || val < 1 || val > 120) {
+      if (!Number.isSafeInteger(val) || val < 1 || val > 60) {
         throw {
           status: 400,
-          message: 'lateThresholdMinutes must be an integer between 1 and 120 minutes',
+          message: 'lateThresholdMinutes must be an integer between 1 and 60 minutes',
         };
       }
       updateData.lateThresholdMinutes = val;
+    }
+
+    // lateThresholdMinutes must be strictly less than maxBookingDurationMinutes
+    if (effectiveLateThreshold >= effectiveMaxDuration) {
+      throw {
+        status: 400,
+        message: `lateThresholdMinutes (${effectiveLateThreshold}) must be strictly less than maxBookingDurationMinutes (${effectiveMaxDuration})`,
+      };
     }
 
     if (input.earlyCheckInMinutes !== undefined) {
@@ -110,10 +128,10 @@ export class AdminConfigService {
 
     if (input.ticketPriceSatang !== undefined) {
       const val = Number(input.ticketPriceSatang);
-      if (!Number.isSafeInteger(val) || val < 0) {
+      if (!Number.isSafeInteger(val) || val <= 0) {
         throw {
           status: 400,
-          message: 'ticketPriceSatang must be a non-negative integer',
+          message: 'ticketPriceSatang must be a positive integer greater than 0',
         };
       }
       updateData.ticketPriceSatang = val;

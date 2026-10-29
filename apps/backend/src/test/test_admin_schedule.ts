@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OperatingSchedule, PrismaClient, SystemConfig } from '@prisma/client';
+import {
+  BookingStatus,
+  OperatingSchedule,
+  PrismaClient,
+  SystemConfig,
+  TableStatus,
+} from '@prisma/client';
 
 process.env.DATABASE_URL = 'postgresql://invalid:invalid@127.0.0.1:1/invalid';
 process.env.JWT_SECRET = 'admin-schedule-unit-test-secret';
 
 const { AdminScheduleService } = await import('../services/adminScheduleService.js');
 const { AdminConfigService } = await import('../services/adminConfigService.js');
+const { BookingService } = await import('../services/bookingService.js');
 const { AdminScheduleController } = await import('../controllers/adminScheduleController.js');
 const { AdminConfigController } = await import('../controllers/adminConfigController.js');
 const { signJwt } = await import('../utils/jwt.js');
@@ -39,9 +46,22 @@ function mockSchedulePrisma(initialRows: OperatingSchedule[] = []) {
     update?: any;
     delete?: any;
     count?: any;
-  } = {};
+    transactionCount: number;
+  } = {
+    transactionCount: 0,
+  };
 
   const client = {
+    $transaction: async (fn: any) => {
+      calls.transactionCount++;
+      if (typeof fn === 'function') {
+        return await fn(client);
+      }
+      return Promise.all(fn);
+    },
+    $executeRaw: async () => 0,
+    $executeRawUnsafe: async () => 0,
+    $queryRaw: async () => [],
     operatingSchedule: {
       findMany: async (args: any) => {
         calls.findMany = args;
@@ -206,7 +226,7 @@ test('timeToMinutes calculates total minutes from midnight', () => {
 // ==========================================
 
 test('createSchedule successfully creates standard semester hours (08:00 - 21:00, priority 1)', async () => {
-  const { client } = mockSchedulePrisma();
+  const { client, calls } = mockSchedulePrisma();
   const created = await AdminScheduleService.createSchedule(
     {
       name: 'เวลาทำการปกติ ภาคการศึกษา 1/2569',
@@ -219,6 +239,7 @@ test('createSchedule successfully creates standard semester hours (08:00 - 21:00
     client
   );
 
+  assert.equal(calls.transactionCount, 1);
   assert.equal(created.name, 'เวลาทำการปกติ ภาคการศึกษา 1/2569');
   assert.equal(created.openTime, '08:00');
   assert.equal(created.closeTime, '21:00');
@@ -473,6 +494,38 @@ test('createSchedule rejects same-priority overlapping schedule with 409 conflic
   );
 });
 
+// [Issue 1 Review Regression] Overlap check under transaction blocks concurrent same-priority same-date creation
+test('[Issue 1] concurrent schedule creation with same priority and date rejects second request with 409 Conflict', async () => {
+  const { client } = mockSchedulePrisma([]);
+
+  // First request creates a closed schedule on 2026-11-10 with priority 2
+  await AdminScheduleService.createSchedule(
+    {
+      name: 'ตารางปิดบริการ',
+      startDate: '2026-11-10',
+      endDate: '2026-11-10',
+      isClosed: true,
+      priority: 2,
+    },
+    client
+  );
+
+  // Second concurrent request attempts to create a 24-hour schedule on the same date with priority 2
+  await assert.rejects(
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางเปิด 24 ชั่วโมง',
+        startDate: '2026-11-10',
+        endDate: '2026-11-10',
+        is24Hours: true,
+        priority: 2,
+      },
+      client
+    ),
+    (err: any) => err.status === 409 && err.message.includes('Conflicting schedule')
+  );
+});
+
 test('createSchedule allows different-priority overlapping schedules (priority hierarchy)', async () => {
   const existing = scheduleRow({
     scheduleId: 1,
@@ -505,7 +558,7 @@ test('createSchedule allows different-priority overlapping schedules (priority h
 
 test('updateSchedule successfully updates schedule name and times', async () => {
   const existing = scheduleRow({ scheduleId: 1, openTime: '08:00', closeTime: '21:00' });
-  const { client } = mockSchedulePrisma([existing]);
+  const { client, calls } = mockSchedulePrisma([existing]);
 
   const updated = await AdminScheduleService.updateSchedule(
     1,
@@ -517,9 +570,38 @@ test('updateSchedule successfully updates schedule name and times', async () => 
     client
   );
 
+  assert.equal(calls.transactionCount, 1);
   assert.equal(updated.name, 'เวลาทำการใหม่');
   assert.equal(updated.openTime, '09:00');
   assert.equal(updated.closeTime, '20:00');
+});
+
+// [Issue 2 Review Regression] PATCH only updates specified fields without overwriting concurrent modifications to other fields
+test('[Issue 2] PATCH updates only provided fields and preserves other fields updated concurrently', async () => {
+  const existing = scheduleRow({
+    scheduleId: 1,
+    name: 'Original Semester Name',
+    openTime: '08:00',
+    closeTime: '21:00',
+  });
+  const { client, getRows } = mockSchedulePrisma([existing]);
+
+  // Request A updates only the name
+  const resA = await AdminScheduleService.updateSchedule(1, { name: 'Renamed by Admin A' }, client);
+  assert.equal(resA.name, 'Renamed by Admin A');
+  assert.equal(resA.closeTime, '21:00');
+
+  // Request B updates only closeTime without sending name
+  const resB = await AdminScheduleService.updateSchedule(1, { closeTime: '20:00' }, client);
+
+  // Request B must NOT overwrite name back to 'Original Semester Name'!
+  assert.equal(resB.name, 'Renamed by Admin A');
+  assert.equal(resB.closeTime, '20:00');
+
+  // Verify in the underlying persistent store that both changes survived
+  const persisted = getRows().find((r) => r.scheduleId === 1);
+  assert.equal(persisted?.name, 'Renamed by Admin A');
+  assert.equal(persisted?.closeTime, '20:00');
 });
 
 test('updateSchedule returns 404 when scheduleId does not exist', async () => {
@@ -734,12 +816,14 @@ test('AdminConfigService gets and updates booking policy parameters with validat
   const updated = await AdminConfigService.updateConfig(
     {
       maxBookingDurationMinutes: 180,
+      lateThresholdMinutes: 30,
       maxAdvanceBookingDays: 14,
       minScoreToBook: 60,
     },
     client
   );
   assert.equal(updated.maxBookingDurationMinutes, 180);
+  assert.equal(updated.lateThresholdMinutes, 30);
   assert.equal(updated.maxAdvanceBookingDays, 14);
   assert.equal(updated.minScoreToBook, 60);
 
@@ -752,7 +836,7 @@ test('AdminConfigService gets and updates booking policy parameters with validat
   // 4. Validation: reject negative lateThresholdMinutes
   await assert.rejects(
     AdminConfigService.updateConfig({ lateThresholdMinutes: 0 }, client),
-    (err: any) => err.status === 400 && err.message.includes('between 1 and 120')
+    (err: any) => err.status === 400 && err.message.includes('between 1 and 60 minutes')
   );
 
   // 5. Validation: reject minScoreToBook > 100
@@ -760,6 +844,148 @@ test('AdminConfigService gets and updates booking policy parameters with validat
     AdminConfigService.updateConfig({ minScoreToBook: 150 }, client),
     (err: any) => err.status === 400 && err.message.includes('score between 0 and 100')
   );
+});
+
+// [Issue 3 Review Regression] Setting ticketPriceSatang <= 0 is rejected to prevent 503 INVALID_TICKET_PRICE
+test('[Issue 3] AdminConfigService rejects ticketPriceSatang <= 0 with 400', async () => {
+  let storedConfig: SystemConfig = {
+    configId: 1,
+    maxBookingDurationMinutes: 120,
+    lateThresholdMinutes: 15,
+    earlyCheckInMinutes: 15,
+    minScoreToBook: 50,
+    maxAdvanceBookingDays: 7,
+    ticketPriceSatang: 5000,
+    ticketValidityHours: 2,
+    paymentCheckoutExpiryMinutes: 30,
+    updatedAt: new Date(),
+  };
+
+  const client = {
+    systemConfig: {
+      findFirst: async () => storedConfig,
+      update: async (args: any) => {
+        storedConfig = { ...storedConfig, ...args.data };
+        return storedConfig;
+      },
+    },
+  } as unknown as PrismaClient;
+
+  await assert.rejects(
+    AdminConfigService.updateConfig({ ticketPriceSatang: 0 }, client),
+    (err: any) => err.status === 400 && err.message.includes('greater than 0')
+  );
+
+  await assert.rejects(
+    AdminConfigService.updateConfig({ ticketPriceSatang: -1000 }, client),
+    (err: any) => err.status === 400 && err.message.includes('greater than 0')
+  );
+});
+
+// [Issue 4 Review Regression] Config validation rejects lateThreshold >= maxBookingDuration, and checkIn rejects after endDateTime
+test('[Issue 4] AdminConfigService rejects lateThresholdMinutes >= maxBookingDurationMinutes or > 60', async () => {
+  let storedConfig: SystemConfig = {
+    configId: 1,
+    maxBookingDurationMinutes: 120,
+    lateThresholdMinutes: 15,
+    earlyCheckInMinutes: 15,
+    minScoreToBook: 50,
+    maxAdvanceBookingDays: 7,
+    ticketPriceSatang: 5000,
+    ticketValidityHours: 2,
+    paymentCheckoutExpiryMinutes: 30,
+    updatedAt: new Date(),
+  };
+
+  const client = {
+    systemConfig: {
+      findFirst: async () => storedConfig,
+      update: async (args: any) => {
+        storedConfig = { ...storedConfig, ...args.data };
+        return storedConfig;
+      },
+    },
+  } as unknown as PrismaClient;
+
+  // Reject late threshold > 60 minutes
+  await assert.rejects(
+    AdminConfigService.updateConfig({ lateThresholdMinutes: 120 }, client),
+    (err: any) => err.status === 400 && err.message.includes('between 1 and 60 minutes')
+  );
+
+  // Reject late threshold >= maxBookingDuration (e.g. late 20 min on max 15 min duration)
+  await assert.rejects(
+    AdminConfigService.updateConfig(
+      { maxBookingDurationMinutes: 15, lateThresholdMinutes: 20 },
+      client
+    ),
+    (err: any) =>
+      err.status === 400 &&
+      err.message.includes('must be strictly less than maxBookingDurationMinutes')
+  );
+
+  // Reject equal: late 15 on max 15
+  await assert.rejects(
+    AdminConfigService.updateConfig(
+      { maxBookingDurationMinutes: 15, lateThresholdMinutes: 15 },
+      client
+    ),
+    (err: any) =>
+      err.status === 400 &&
+      err.message.includes('must be strictly less than maxBookingDurationMinutes')
+  );
+});
+
+test('[Issue 4] BookingService.checkIn rejects check-in after reservation endDateTime and does not set table OCCUPIED', async () => {
+  const mockNow = new Date('2026-10-01T11:00:00Z'); // 11:00
+  let tableStatus = TableStatus.RESERVED;
+  let bookingStatus = BookingStatus.PENDING;
+
+  const mockBooking = {
+    bookingId: 101,
+    uid: 42,
+    tableId: 7,
+    startDateTime: new Date('2026-10-01T10:00:00Z'),
+    endDateTime: new Date('2026-10-01T10:15:00Z'), // Ended at 10:15
+    status: BookingStatus.PENDING,
+    table: { tableId: 7, status: TableStatus.RESERVED },
+  };
+
+  const mockPrisma = {
+    systemConfig: {
+      findFirst: async () => ({
+        earlyCheckInMinutes: 15,
+        lateThresholdMinutes: 60, // 60 min late threshold
+      }),
+    },
+    booking: {
+      findUnique: async () => mockBooking,
+      updateMany: async ({ data }: any) => {
+        bookingStatus = data.status;
+        return { count: 1 };
+      },
+    },
+    table: {
+      findUnique: async () => ({ tableId: 7, status: tableStatus }),
+      update: async ({ data }: any) => {
+        tableStatus = data.status;
+        return { tableId: 7, status: data.status };
+      },
+    },
+    $transaction: async (cb: any) => cb(mockPrisma),
+    $queryRaw: async () => [],
+  };
+
+  await assert.rejects(BookingService.checkIn(42, 101, mockNow, mockPrisma as any), (err: any) => {
+    assert.equal(err.status, 400);
+    assert.equal(err.code, 'CHECK_IN_TOO_LATE');
+    assert.equal(err.message, 'Check-in window has expired.');
+    return true;
+  });
+
+  // Verify table is NOT transitioned to OCCUPIED and booking remains PENDING
+  assert.equal(tableStatus, TableStatus.RESERVED);
+  assert.equal(bookingStatus, BookingStatus.PENDING);
 });
 
 // ==========================================
