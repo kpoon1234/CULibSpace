@@ -43,129 +43,162 @@ export class AdminConfigService {
 
   /**
    * Update booking policy parameters and system configuration with validation.
+   *
+   * Wraps the entire read-validate-write cycle inside a serialized interactive transaction
+   * protected by an advisory lock (key 7402, slot 1) to prevent concurrent PATCH requests
+   * from each reading a stale snapshot, both passing validation, and writing conflicting values
+   * (e.g. two requests that together set lateThreshold >= maxDuration).
    */
   static async updateConfig(
     input: UpdateSystemConfigInput,
     prisma: PrismaClient = defaultPrisma
   ): Promise<SystemConfig> {
-    const current = await this.getConfig(prisma);
+    const runInTx = async (tx: any): Promise<SystemConfig> => {
+      // Acquire advisory lock so concurrent updateConfig calls are serialized.
+      // Key 7402 (config namespace), slot 1 (single config row).
+      // NOTE: pg_advisory_xact_lock(int, int) requires both params as PostgreSQL integer.
+      // Prisma $executeRaw sends JS numbers as bigint → error 42883 on two-param form.
+      // ::integer cast in the SQL string resolves the type mismatch.
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(7402, 1::integer)`;
+      } else if (typeof tx.$executeRaw === 'function') {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7402, 1::integer)`;
+      }
 
-    const updateData: Partial<SystemConfig> = {};
+      // Read inside the lock so we always see the most up-to-date committed values.
+      let current = await tx.systemConfig.findFirst();
+      if (!current) {
+        current = await tx.systemConfig.create({
+          data: { configId: 1, ...DEFAULT_CONFIG_VALUES },
+        });
+      }
 
-    const effectiveMaxDuration =
-      input.maxBookingDurationMinutes !== undefined
-        ? Number(input.maxBookingDurationMinutes)
-        : current.maxBookingDurationMinutes;
+      const updateData: Partial<SystemConfig> = {};
 
-    const effectiveLateThreshold =
-      input.lateThresholdMinutes !== undefined
-        ? Number(input.lateThresholdMinutes)
-        : current.lateThresholdMinutes;
+      const effectiveMaxDuration =
+        input.maxBookingDurationMinutes !== undefined
+          ? Number(input.maxBookingDurationMinutes)
+          : current.maxBookingDurationMinutes;
 
-    if (input.maxBookingDurationMinutes !== undefined) {
-      const val = Number(input.maxBookingDurationMinutes);
-      if (!Number.isSafeInteger(val) || val < 15 || val > 1440) {
+      const effectiveLateThreshold =
+        input.lateThresholdMinutes !== undefined
+          ? Number(input.lateThresholdMinutes)
+          : current.lateThresholdMinutes;
+
+      if (input.maxBookingDurationMinutes !== undefined) {
+        const val = Number(input.maxBookingDurationMinutes);
+        if (!Number.isSafeInteger(val) || val < 15 || val > 1440) {
+          throw {
+            status: 400,
+            message:
+              'maxBookingDurationMinutes must be an integer between 15 and 1440 minutes (24 hours)',
+          };
+        }
+        updateData.maxBookingDurationMinutes = val;
+      }
+
+      if (input.lateThresholdMinutes !== undefined) {
+        const val = Number(input.lateThresholdMinutes);
+        if (!Number.isSafeInteger(val) || val < 1 || val > 60) {
+          throw {
+            status: 400,
+            message: 'lateThresholdMinutes must be an integer between 1 and 60 minutes',
+          };
+        }
+        updateData.lateThresholdMinutes = val;
+      }
+
+      // Cross-field invariant: lateThreshold must be strictly less than maxDuration.
+      // Checked against fresh locked data to catch concurrent updates.
+      if (effectiveLateThreshold >= effectiveMaxDuration) {
         throw {
           status: 400,
-          message:
-            'maxBookingDurationMinutes must be an integer between 15 and 1440 minutes (24 hours)',
+          message: `lateThresholdMinutes (${effectiveLateThreshold}) must be strictly less than maxBookingDurationMinutes (${effectiveMaxDuration})`,
         };
       }
-      updateData.maxBookingDurationMinutes = val;
-    }
 
-    if (input.lateThresholdMinutes !== undefined) {
-      const val = Number(input.lateThresholdMinutes);
-      if (!Number.isSafeInteger(val) || val < 1 || val > 60) {
-        throw {
-          status: 400,
-          message: 'lateThresholdMinutes must be an integer between 1 and 60 minutes',
-        };
+      if (input.earlyCheckInMinutes !== undefined) {
+        const val = Number(input.earlyCheckInMinutes);
+        if (!Number.isSafeInteger(val) || val < 0 || val > 60) {
+          throw {
+            status: 400,
+            message: 'earlyCheckInMinutes must be an integer between 0 and 60 minutes',
+          };
+        }
+        updateData.earlyCheckInMinutes = val;
       }
-      updateData.lateThresholdMinutes = val;
-    }
 
-    // lateThresholdMinutes must be strictly less than maxBookingDurationMinutes
-    if (effectiveLateThreshold >= effectiveMaxDuration) {
-      throw {
-        status: 400,
-        message: `lateThresholdMinutes (${effectiveLateThreshold}) must be strictly less than maxBookingDurationMinutes (${effectiveMaxDuration})`,
-      };
-    }
-
-    if (input.earlyCheckInMinutes !== undefined) {
-      const val = Number(input.earlyCheckInMinutes);
-      if (!Number.isSafeInteger(val) || val < 0 || val > 60) {
-        throw {
-          status: 400,
-          message: 'earlyCheckInMinutes must be an integer between 0 and 60 minutes',
-        };
+      if (input.minScoreToBook !== undefined) {
+        const val = Number(input.minScoreToBook);
+        if (Number.isNaN(val) || val < 0 || val > 100) {
+          throw {
+            status: 400,
+            message: 'minScoreToBook must be a score between 0 and 100',
+          };
+        }
+        updateData.minScoreToBook = Math.round(val);
       }
-      updateData.earlyCheckInMinutes = val;
-    }
 
-    if (input.minScoreToBook !== undefined) {
-      const val = Number(input.minScoreToBook);
-      if (Number.isNaN(val) || val < 0 || val > 100) {
-        throw {
-          status: 400,
-          message: 'minScoreToBook must be a score between 0 and 100',
-        };
+      if (input.maxAdvanceBookingDays !== undefined) {
+        const val = Number(input.maxAdvanceBookingDays);
+        if (!Number.isSafeInteger(val) || val < 1 || val > 90) {
+          throw {
+            status: 400,
+            message: 'maxAdvanceBookingDays must be an integer between 1 and 90 days',
+          };
+        }
+        updateData.maxAdvanceBookingDays = val;
       }
-      updateData.minScoreToBook = Math.round(val);
-    }
 
-    if (input.maxAdvanceBookingDays !== undefined) {
-      const val = Number(input.maxAdvanceBookingDays);
-      if (!Number.isSafeInteger(val) || val < 1 || val > 90) {
-        throw {
-          status: 400,
-          message: 'maxAdvanceBookingDays must be an integer between 1 and 90 days',
-        };
+      if (input.ticketPriceSatang !== undefined) {
+        const val = Number(input.ticketPriceSatang);
+        // Stripe minimum charge for THB-settled accounts is 1,000 satang (10 THB).
+        // Accepting 1–999 would cause Stripe to return INVALID_TICKET_PRICE / 503.
+        if (!Number.isSafeInteger(val) || val < 1000) {
+          throw {
+            status: 400,
+            message:
+              'ticketPriceSatang must be at least 1000 satang (10 THB, Stripe minimum charge for THB)',
+          };
+        }
+        updateData.ticketPriceSatang = val;
       }
-      updateData.maxAdvanceBookingDays = val;
-    }
 
-    if (input.ticketPriceSatang !== undefined) {
-      const val = Number(input.ticketPriceSatang);
-      if (!Number.isSafeInteger(val) || val <= 0) {
-        throw {
-          status: 400,
-          message: 'ticketPriceSatang must be a positive integer greater than 0',
-        };
+      if (input.ticketValidityHours !== undefined) {
+        const val = Number(input.ticketValidityHours);
+        if (!Number.isSafeInteger(val) || val < 1 || val > 72) {
+          throw {
+            status: 400,
+            message: 'ticketValidityHours must be an integer between 1 and 72 hours',
+          };
+        }
+        updateData.ticketValidityHours = val;
       }
-      updateData.ticketPriceSatang = val;
-    }
 
-    if (input.ticketValidityHours !== undefined) {
-      const val = Number(input.ticketValidityHours);
-      if (!Number.isSafeInteger(val) || val < 1 || val > 72) {
-        throw {
-          status: 400,
-          message: 'ticketValidityHours must be an integer between 1 and 72 hours',
-        };
+      if (input.paymentCheckoutExpiryMinutes !== undefined) {
+        const val = Number(input.paymentCheckoutExpiryMinutes);
+        if (!Number.isSafeInteger(val) || val < 30 || val > 1440) {
+          throw {
+            status: 400,
+            message: 'paymentCheckoutExpiryMinutes must be an integer >= 30 minutes',
+          };
+        }
+        updateData.paymentCheckoutExpiryMinutes = val;
       }
-      updateData.ticketValidityHours = val;
-    }
 
-    if (input.paymentCheckoutExpiryMinutes !== undefined) {
-      const val = Number(input.paymentCheckoutExpiryMinutes);
-      if (!Number.isSafeInteger(val) || val < 30 || val > 1440) {
-        throw {
-          status: 400,
-          message: 'paymentCheckoutExpiryMinutes must be an integer >= 30 minutes',
-        };
+      if (Object.keys(updateData).length === 0) {
+        return current;
       }
-      updateData.paymentCheckoutExpiryMinutes = val;
-    }
 
-    if (Object.keys(updateData).length === 0) {
-      return current;
-    }
+      return await tx.systemConfig.update({
+        where: { configId: current.configId },
+        data: updateData,
+      });
+    };
 
-    return await prisma.systemConfig.update({
-      where: { configId: current.configId },
-      data: updateData,
-    });
+    if (typeof (prisma as any).$transaction === 'function') {
+      return await (prisma as any).$transaction(runInTx);
+    }
+    return await runInTx(prisma);
   }
 }

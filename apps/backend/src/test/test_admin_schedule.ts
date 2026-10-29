@@ -794,6 +794,9 @@ test('AdminConfigService gets and updates booking policy parameters with validat
   };
 
   const client = {
+    $transaction: async (fn: any) => fn(client),
+    $queryRaw: async () => [],
+    $executeRaw: async () => 0,
     systemConfig: {
       findFirst: async () => storedConfig,
       create: async (args: any) => {
@@ -846,8 +849,8 @@ test('AdminConfigService gets and updates booking policy parameters with validat
   );
 });
 
-// [Issue 3 Review Regression] Setting ticketPriceSatang <= 0 is rejected to prevent 503 INVALID_TICKET_PRICE
-test('[Issue 3] AdminConfigService rejects ticketPriceSatang <= 0 with 400', async () => {
+// [Issue 3 Review Regression] ticketPriceSatang: 0 is rejected. Values 1-999 also rejected (Stripe min 1000 satang / 10 THB).
+test('[Issue 3] AdminConfigService rejects ticketPriceSatang below Stripe minimum (1000 satang)', async () => {
   let storedConfig: SystemConfig = {
     configId: 1,
     maxBookingDurationMinutes: 120,
@@ -862,6 +865,9 @@ test('[Issue 3] AdminConfigService rejects ticketPriceSatang <= 0 with 400', asy
   };
 
   const client = {
+    $transaction: async (fn: any) => fn(client),
+    $queryRaw: async () => [],
+    $executeRaw: async () => 0,
     systemConfig: {
       findFirst: async () => storedConfig,
       update: async (args: any) => {
@@ -871,15 +877,36 @@ test('[Issue 3] AdminConfigService rejects ticketPriceSatang <= 0 with 400', asy
     },
   } as unknown as PrismaClient;
 
+  // 0 → rejected
   await assert.rejects(
     AdminConfigService.updateConfig({ ticketPriceSatang: 0 }, client),
-    (err: any) => err.status === 400 && err.message.includes('greater than 0')
+    (err: any) => err.status === 400 && err.message.includes('1000 satang')
+  );
+
+  // Negative → rejected
+  await assert.rejects(
+    AdminConfigService.updateConfig({ ticketPriceSatang: -1000 }, client),
+    (err: any) => err.status === 400 && err.message.includes('1000 satang')
+  );
+
+  // 1–999 → rejected (below Stripe minimum)
+  await assert.rejects(
+    AdminConfigService.updateConfig({ ticketPriceSatang: 1 }, client),
+    (err: any) => err.status === 400 && err.message.includes('1000 satang')
   );
 
   await assert.rejects(
-    AdminConfigService.updateConfig({ ticketPriceSatang: -1000 }, client),
-    (err: any) => err.status === 400 && err.message.includes('greater than 0')
+    AdminConfigService.updateConfig({ ticketPriceSatang: 999 }, client),
+    (err: any) => err.status === 400 && err.message.includes('1000 satang')
   );
+
+  // 1000 (Stripe minimum) → accepted
+  const updated = await AdminConfigService.updateConfig({ ticketPriceSatang: 1000 }, client);
+  assert.equal(updated.ticketPriceSatang, 1000);
+
+  // 5000 → accepted
+  const updated2 = await AdminConfigService.updateConfig({ ticketPriceSatang: 5000 }, client);
+  assert.equal(updated2.ticketPriceSatang, 5000);
 });
 
 // [Issue 4 Review Regression] Config validation rejects lateThreshold >= maxBookingDuration, and checkIn rejects after endDateTime
@@ -898,6 +925,9 @@ test('[Issue 4] AdminConfigService rejects lateThresholdMinutes >= maxBookingDur
   };
 
   const client = {
+    $transaction: async (fn: any) => fn(client),
+    $queryRaw: async () => [],
+    $executeRaw: async () => 0,
     systemConfig: {
       findFirst: async () => storedConfig,
       update: async (args: any) => {
@@ -933,6 +963,77 @@ test('[Issue 4] AdminConfigService rejects lateThresholdMinutes >= maxBookingDur
     (err: any) =>
       err.status === 400 &&
       err.message.includes('must be strictly less than maxBookingDurationMinutes')
+  );
+});
+
+// [Issue P2 Review Regression] Concurrent config updates are serialized inside an advisory-locked transaction
+test('[Issue P2] AdminConfigService serializes concurrent updates to prevent lateThreshold >= maxBookingDuration invariant violation', async () => {
+  let storedConfig: SystemConfig = {
+    configId: 1,
+    maxBookingDurationMinutes: 120,
+    lateThresholdMinutes: 15,
+    earlyCheckInMinutes: 15,
+    minScoreToBook: 50,
+    maxAdvanceBookingDays: 7,
+    ticketPriceSatang: 5000,
+    ticketValidityHours: 2,
+    paymentCheckoutExpiryMinutes: 30,
+    updatedAt: new Date(),
+  };
+
+  let lockAcquired = false;
+  const client = {
+    $transaction: async (fn: any) => {
+      // Simulate serializing through lock:
+      // While one transaction is executing, it holds lock
+      while (lockAcquired) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      lockAcquired = true;
+      try {
+        return await fn(client);
+      } finally {
+        lockAcquired = false;
+      }
+    },
+    $queryRaw: async () => [],
+    $executeRaw: async () => 0,
+    systemConfig: {
+      findFirst: async () => ({ ...storedConfig }),
+      update: async (args: any) => {
+        storedConfig = { ...storedConfig, ...args.data, updatedAt: new Date() };
+        return { ...storedConfig };
+      },
+    },
+  } as unknown as PrismaClient;
+
+  // Request A changes maxBookingDurationMinutes from 120 down to 30.
+  // Request B changes lateThresholdMinutes from 15 up to 60.
+  // If neither serialized or if reads happen outside tx lock, both might pass against 120/15.
+  // But serialized, one commits first, and the second MUST be rejected because 60 >= 30.
+  const reqA = AdminConfigService.updateConfig({ maxBookingDurationMinutes: 30 }, client);
+  const reqB = AdminConfigService.updateConfig({ lateThresholdMinutes: 60 }, client);
+
+  const results = await Promise.allSettled([reqA, reqB]);
+
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+
+  assert.equal(fulfilled.length, 1, 'Exactly one concurrent request should succeed');
+  assert.equal(rejected.length, 1, 'The conflicting request should be rejected');
+
+  const rejectedError: any = (rejected[0] as PromiseRejectedResult).reason;
+  assert.equal(rejectedError.status, 400);
+  assert.equal(
+    rejectedError.message.includes('must be strictly less than maxBookingDurationMinutes'),
+    true
+  );
+
+  // Invariant holds in final database state
+  assert.equal(
+    storedConfig.lateThresholdMinutes < storedConfig.maxBookingDurationMinutes,
+    true,
+    'Database config invariant lateThreshold < maxDuration must never be violated'
   );
 });
 

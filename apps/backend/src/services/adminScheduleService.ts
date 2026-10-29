@@ -208,10 +208,13 @@ export class AdminScheduleService {
 
     const runInTx = async (tx: any) => {
       // Advisory transaction lock by priority to serialize concurrent overlap checks for the same priority
+      // NOTE: pg_advisory_xact_lock(int, int) requires both params as integer.
+      // Prisma $executeRaw sends JS numbers as bigint which triggers PostgreSQL error 42883.
+      // Using Prisma.sql with ::integer cast ensures correct type for the two-param overload.
       if (typeof tx.$executeRaw === 'function') {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7401, ${priority});`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7401, ${priority}::integer);`;
       } else if (typeof tx.$executeRawUnsafe === 'function') {
-        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7401, ${priority});`);
+        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7401, ${priority}::integer);`);
       }
 
       // 6. Same-priority overlap check to prevent ambiguous schedule precedence
@@ -424,10 +427,13 @@ export class AdminScheduleService {
       }
 
       // 6. Same-priority overlap check against other schedules
+      // NOTE: ::integer cast required — see note in createSchedule advisory lock above.
       if (typeof tx.$executeRaw === 'function') {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7401, ${effectivePriority});`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7401, ${effectivePriority}::integer);`;
       } else if (typeof tx.$executeRawUnsafe === 'function') {
-        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7401, ${effectivePriority});`);
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(7401, ${effectivePriority}::integer);`
+        );
       }
 
       const conflicting = await tx.operatingSchedule.findFirst({
