@@ -3,46 +3,115 @@ import { Prisma, PrismaClient, OperatingSchedule } from '@prisma/client';
 const defaultPrisma = new PrismaClient();
 
 const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+// Full ISO 8601 instant: every time component and the timezone offset are range-checked.
 const ISO_DATETIME =
-  /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d+)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i;
 const TIME_FORMAT = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Thailand has no DST, so Asia/Bangkok is always UTC+7 (same rule as ScheduleService). */
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
+const MIN_YEAR = 1970;
+const MAX_YEAR = 2100;
+const MAX_PRISMA_INT = 2_147_483_647;
+const MAX_NAME_LENGTH = 100;
+const MAX_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * Advisory-lock namespace for schedule writes. Writers of the same priority are serialized
+ * so the "no overlapping schedules with the same priority" rule cannot be raced.
+ */
+const SCHEDULE_LOCK_NAMESPACE = 7401;
+
+const SCHEDULE_FIELDS = [
+  'name',
+  'startDate',
+  'endDate',
+  'openTime',
+  'closeTime',
+  'is24Hours',
+  'isClosed',
+  'priority',
+] as const;
+
+type ScheduleField = (typeof SCHEDULE_FIELDS)[number];
 
 export interface ParsedDateResult {
   date: Date;
   dateStr: string;
 }
 
-export interface CreateScheduleInput {
-  name: string;
-  startDate: string;
-  endDate: string;
-  openTime?: string;
-  closeTime?: string;
-  is24Hours?: boolean;
-  isClosed?: boolean;
-  priority?: number;
-}
-
-export interface UpdateScheduleInput {
-  name?: string;
-  startDate?: string;
-  endDate?: string;
-  openTime?: string;
-  closeTime?: string;
-  is24Hours?: boolean;
-  isClosed?: boolean;
-  priority?: number;
-}
+/** Request bodies are untrusted JSON, so every field is validated at runtime. */
+export type CreateScheduleInput = Partial<Record<ScheduleField, unknown>> & Record<string, unknown>;
+export type UpdateScheduleInput = Partial<Record<ScheduleField | 'scheduleId', unknown>> &
+  Record<string, unknown>;
 
 export interface ListSchedulesFilters {
   q?: string;
   startDate?: string;
   endDate?: string;
-  priority?: number;
+  priority?: unknown;
   isClosed?: boolean;
   is24Hours?: boolean;
-  page?: number;
-  pageSize?: number;
+  page?: unknown;
+  pageSize?: unknown;
+}
+
+export interface ScheduleServiceError {
+  status: number;
+  code: string;
+  message: string;
+}
+
+function scheduleError(status: number, code: string, message: string): ScheduleServiceError {
+  return { status, code, message };
+}
+
+function invalidInput(message: string): ScheduleServiceError {
+  return scheduleError(400, 'INVALID_SCHEDULE_INPUT', message);
+}
+
+function notFound(): ScheduleServiceError {
+  return scheduleError(404, 'SCHEDULE_NOT_FOUND', 'Operating schedule not found');
+}
+
+function isValidCalendarDay(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || year < MIN_YEAR || year > MAX_YEAR) return false;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return false;
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][
+    month - 1
+  ]!;
+  return Number.isInteger(day) && day >= 1 && day <= daysInMonth;
+}
+
+/** "YYYY-MM-DD" of an instant as seen on a calendar in Asia/Bangkok. */
+function bangkokDateKey(instantMs: number): string {
+  return new Date(instantMs + BANGKOK_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function parseStrictInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) ? value : null;
+  }
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function assertPlainObject(input: unknown): asserts input is Record<string, unknown> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw invalidInput('Request body must be a JSON object');
+  }
+}
+
+function rejectUnknownFields(input: Record<string, unknown>, allowed: readonly string[]): void {
+  const unknownKeys = Object.keys(input).filter((key) => !allowed.includes(key));
+  if (unknownKeys.length > 0) {
+    throw invalidInput(`Unknown schedule field(s): ${unknownKeys.join(', ')}`);
+  }
 }
 
 export class AdminScheduleService {
@@ -62,74 +131,172 @@ export class AdminScheduleService {
   }
 
   /**
-   * Helper to format a Date as YYYY-MM-DD in Asia/Bangkok time zone (UTC+7).
+   * Today's calendar date ("YYYY-MM-DD") in Asia/Bangkok (UTC+7).
+   * Used whenever the caller does not specify a date, so the active schedule follows Thai time
+   * instead of the server's UTC date (which is still "yesterday" between 00:00 and 06:59 in Thailand).
    */
   static getTodayDateStringBangkok(referenceDate: Date = new Date()): string {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Bangkok',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-    return formatter.format(referenceDate);
+    return bangkokDateKey(referenceDate.getTime());
   }
 
   /**
-   * Parse and validate a calendar date string (YYYY-MM-DD or full ISO 8601).
-   * Validates month (1-12), day according to days in month (including leap year rules),
-   * and full datetime components (hours, minutes, seconds, timezone offset).
-   * Returns a normalized UTC Date at midnight (00:00:00.000Z) along with "YYYY-MM-DD".
+   * Parse and validate a calendar date (YYYY-MM-DD or a full ISO 8601 instant with offset).
+   *
+   * - YYYY-MM-DD is taken as the calendar date itself (month, day-of-month and leap years checked).
+   * - An ISO instant must have valid hours/minutes/seconds/offset and is converted to its
+   *   Asia/Bangkok calendar date, matching how ScheduleService maps @db.Date columns to bookings
+   *   (e.g. "2026-10-26T17:00:00.000Z" is 2026-10-27 in Bangkok).
+   *
+   * Returns the @db.Date value (UTC midnight of that calendar date) and "YYYY-MM-DD".
    */
   static parseCalendarDate(value: unknown): ParsedDateResult | null {
+    let key: string;
+
     if (value instanceof Date) {
-      if (Number.isNaN(value.getTime())) return null;
-      const y = value.getUTCFullYear();
-      const m = value.getUTCMonth() + 1;
-      const d = value.getUTCDate();
-      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      return { date: new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0)), dateStr };
-    }
-
-    if (typeof value !== 'string') return null;
-
-    let yearStr = '';
-    let monthStr = '';
-    let dayStr = '';
-
-    const trimmed = value.trim();
-    const dateOnlyMatch = ISO_DATE_ONLY.exec(trimmed);
-    if (dateOnlyMatch) {
-      [, yearStr, monthStr, dayStr] = dateOnlyMatch;
+      if (!Number.isFinite(value.getTime())) return null;
+      key = bangkokDateKey(value.getTime());
+    } else if (typeof value === 'string') {
+      const trimmed = value.trim();
+      const dateOnly = ISO_DATE_ONLY.exec(trimmed);
+      if (dateOnly) {
+        key = trimmed;
+      } else {
+        const dateTime = ISO_DATETIME.exec(trimmed);
+        if (!dateTime) return null;
+        // Reject impossible literal dates (e.g. 2026-02-30T10:00:00Z) before Date() rolls them over.
+        if (!isValidCalendarDay(Number(dateTime[1]), Number(dateTime[2]), Number(dateTime[3]))) {
+          return null;
+        }
+        const instant = new Date(trimmed).getTime();
+        if (!Number.isFinite(instant)) return null;
+        key = bangkokDateKey(instant);
+      }
     } else {
-      const dateTimeMatch = ISO_DATETIME.exec(trimmed);
-      if (!dateTimeMatch) {
-        return null;
-      }
-      const parsedFullDate = new Date(trimmed);
-      if (Number.isNaN(parsedFullDate.getTime())) {
-        return null;
-      }
-      [, yearStr, monthStr, dayStr] = dateTimeMatch;
+      return null;
     }
 
-    const year = Number(yearStr);
-    const month = Number(monthStr);
-    const day = Number(dayStr);
+    const [year, month, day] = key.split('-').map(Number);
+    if (!isValidCalendarDay(year!, month!, day!)) return null;
 
-    if (year < 1970 || year > 2100) return null;
-    if (month < 1 || month > 12) return null;
+    return { date: new Date(`${key}T00:00:00.000Z`), dateStr: key };
+  }
 
-    const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-    const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][
-      month - 1
-    ];
+  private static parseName(value: unknown): string {
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      throw invalidInput('Schedule name is required');
+    }
+    const trimmed = value.trim();
+    if (trimmed.length > MAX_NAME_LENGTH) {
+      throw invalidInput(`Schedule name must not exceed ${MAX_NAME_LENGTH} characters`);
+    }
+    return trimmed;
+  }
 
-    if (day < 1 || day > daysInMonth) return null;
+  private static parseDateField(value: unknown, field: 'startDate' | 'endDate'): ParsedDateResult {
+    const parsed = this.parseCalendarDate(value);
+    if (!parsed) {
+      throw invalidInput(
+        `Invalid ${field} format. Expected YYYY-MM-DD or ISO 8601 with timezone offset`
+      );
+    }
+    return parsed;
+  }
 
-    const normalizedDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  /** Booleans must be real JSON booleans: "false" or 0 must never be coerced. */
+  private static parseFlag(value: unknown, field: 'is24Hours' | 'isClosed'): boolean {
+    if (typeof value !== 'boolean') {
+      throw invalidInput(`${field} must be a boolean (true or false)`);
+    }
+    return value;
+  }
 
-    return { date: normalizedDate, dateStr };
+  private static parseTime(value: unknown, field: 'openTime' | 'closeTime'): string {
+    if (!this.isValidTimeFormat(value)) {
+      throw invalidInput(`Invalid ${field} format. Expected HH:MM (00:00 - 23:59)`);
+    }
+    return value;
+  }
+
+  /** Accepts a JSON integer or an integer string; rejects booleans, decimals and empty strings. */
+  private static parsePriority(value: unknown): number {
+    const priority = parseStrictInteger(value);
+    if (priority === null || priority < 1 || priority > MAX_PRISMA_INT) {
+      throw invalidInput('Priority must be a positive integer (e.g. 1=Normal, 2=Exam, 3=Holiday)');
+    }
+    return priority;
+  }
+
+  private static assertChronological(start: Date, end: Date): void {
+    if (start.getTime() > end.getTime()) {
+      const startStr = start.toISOString().slice(0, 10);
+      const endStr = end.toISOString().slice(0, 10);
+      throw invalidInput(`startDate (${startStr}) cannot be after endDate (${endStr})`);
+    }
+  }
+
+  private static assertFlagsAndHours(
+    is24Hours: boolean,
+    isClosed: boolean,
+    openTime: string,
+    closeTime: string
+  ): void {
+    if (is24Hours && isClosed) {
+      throw invalidInput('Schedule cannot be both 24 hours and closed simultaneously');
+    }
+    // Closed days and 24-hour days do not use the opening window (same as ScheduleService).
+    if (!is24Hours && !isClosed) {
+      if (this.timeToMinutes(closeTime) <= this.timeToMinutes(openTime)) {
+        throw invalidInput(
+          `closeTime (${closeTime}) must be strictly after openTime (${openTime}) for standard hours`
+        );
+      }
+    }
+  }
+
+  /**
+   * Transaction-scoped advisory lock per priority.
+   * - Both arguments are cast to integer: the two-argument overload is (integer, integer) and
+   *   Prisma binds JS numbers as bigint, which fails with PostgreSQL 42883.
+   * - The void result is cast to text because Prisma's $queryRaw cannot deserialize `void`
+   *   (same pattern as SystemConfigService on main).
+   */
+  private static async lockPriority(tx: any, priority: number): Promise<void> {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(${SCHEDULE_LOCK_NAMESPACE}::integer, ${priority}::integer)::text`;
+  }
+
+  private static async assertNoSamePriorityOverlap(
+    tx: any,
+    priority: number,
+    startDate: Date,
+    endDate: Date,
+    excludeScheduleId?: number
+  ): Promise<void> {
+    const conflicting = await tx.operatingSchedule.findFirst({
+      where: {
+        ...(excludeScheduleId !== undefined ? { scheduleId: { not: excludeScheduleId } } : {}),
+        priority,
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+      },
+    });
+
+    if (conflicting) {
+      throw scheduleError(
+        409,
+        'SCHEDULE_CONFLICT',
+        `Conflicting schedule: "${conflicting.name}" already exists with the same priority (${priority}) covering this date range`
+      );
+    }
+  }
+
+  private static async runInTransaction<T>(
+    prisma: PrismaClient,
+    work: (tx: any) => Promise<T>
+  ): Promise<T> {
+    if (typeof (prisma as any).$transaction === 'function') {
+      return await (prisma as any).$transaction(work);
+    }
+    return await work(prisma);
   }
 
   /**
@@ -140,128 +307,47 @@ export class AdminScheduleService {
     input: CreateScheduleInput,
     prisma: PrismaClient = defaultPrisma
   ): Promise<OperatingSchedule> {
-    // 1. Name validation
-    if (typeof input.name !== 'string' || input.name.trim().length === 0) {
-      throw { status: 400, message: 'Schedule name is required' };
-    }
-    const trimmedName = input.name.trim();
-    if (trimmedName.length > 100) {
-      throw { status: 400, message: 'Schedule name must not exceed 100 characters' };
-    }
+    assertPlainObject(input);
+    rejectUnknownFields(input, SCHEDULE_FIELDS);
 
-    // 2. Date validation
-    const parsedStart = this.parseCalendarDate(input.startDate);
-    if (!parsedStart) {
-      throw { status: 400, message: 'Invalid startDate format. Expected YYYY-MM-DD or ISO 8601' };
-    }
+    // 1. Name
+    const name = this.parseName(input.name);
 
-    const parsedEnd = this.parseCalendarDate(input.endDate);
-    if (!parsedEnd) {
-      throw { status: 400, message: 'Invalid endDate format. Expected YYYY-MM-DD or ISO 8601' };
-    }
+    // 2. Dates
+    const parsedStart = this.parseDateField(input.startDate, 'startDate');
+    const parsedEnd = this.parseDateField(input.endDate, 'endDate');
+    this.assertChronological(parsedStart.date, parsedEnd.date);
 
-    if (parsedStart.date.getTime() > parsedEnd.date.getTime()) {
-      throw {
-        status: 400,
-        message: `startDate (${parsedStart.dateStr}) cannot be after endDate (${parsedEnd.dateStr})`,
-      };
-    }
+    // 3. Status flags (strict booleans)
+    const is24Hours =
+      input.is24Hours === undefined ? false : this.parseFlag(input.is24Hours, 'is24Hours');
+    const isClosed =
+      input.isClosed === undefined ? false : this.parseFlag(input.isClosed, 'isClosed');
 
-    // 3. Status flags validation: strictly require boolean type if provided
-    if (input.is24Hours !== undefined && typeof input.is24Hours !== 'boolean') {
-      throw { status: 400, message: 'is24Hours must be a boolean (true or false)' };
-    }
-    if (input.isClosed !== undefined && typeof input.isClosed !== 'boolean') {
-      throw { status: 400, message: 'isClosed must be a boolean (true or false)' };
-    }
+    // 4. Times (defaults depend on the schedule type)
+    const [defaultOpen, defaultClose] = isClosed
+      ? ['00:00', '00:00']
+      : is24Hours
+        ? ['00:00', '23:59']
+        : ['08:00', '21:00'];
+    const openTime =
+      input.openTime === undefined ? defaultOpen : this.parseTime(input.openTime, 'openTime');
+    const closeTime =
+      input.closeTime === undefined ? defaultClose : this.parseTime(input.closeTime, 'closeTime');
+    this.assertFlagsAndHours(is24Hours, isClosed, openTime, closeTime);
 
-    const is24Hours = input.is24Hours === true;
-    const isClosed = input.isClosed === true;
+    // 5. Priority
+    const priority = input.priority === undefined ? 1 : this.parsePriority(input.priority);
 
-    if (is24Hours && isClosed) {
-      throw { status: 400, message: 'Schedule cannot be both 24 hours and closed simultaneously' };
-    }
-
-    // 4. Time format & chronological validation
-    let openTime = input.openTime ?? '08:00';
-    let closeTime = input.closeTime ?? '21:00';
-
-    if (isClosed) {
-      openTime = input.openTime ?? '00:00';
-      closeTime = input.closeTime ?? '00:00';
-      if (!this.isValidTimeFormat(openTime)) {
-        throw { status: 400, message: 'Invalid openTime format. Expected HH:MM' };
-      }
-      if (!this.isValidTimeFormat(closeTime)) {
-        throw { status: 400, message: 'Invalid closeTime format. Expected HH:MM' };
-      }
-    } else if (is24Hours) {
-      openTime = input.openTime ?? '00:00';
-      closeTime = input.closeTime ?? '23:59';
-      if (!this.isValidTimeFormat(openTime)) {
-        throw { status: 400, message: 'Invalid openTime format. Expected HH:MM' };
-      }
-      if (!this.isValidTimeFormat(closeTime)) {
-        throw { status: 400, message: 'Invalid closeTime format. Expected HH:MM' };
-      }
-    } else {
-      if (!this.isValidTimeFormat(openTime)) {
-        throw { status: 400, message: 'Invalid openTime format. Expected HH:MM (00:00 - 23:59)' };
-      }
-      if (!this.isValidTimeFormat(closeTime)) {
-        throw { status: 400, message: 'Invalid closeTime format. Expected HH:MM (00:00 - 23:59)' };
-      }
-
-      const openMinutes = this.timeToMinutes(openTime);
-      const closeMinutes = this.timeToMinutes(closeTime);
-      if (closeMinutes <= openMinutes) {
-        throw {
-          status: 400,
-          message: `closeTime (${closeTime}) must be strictly after openTime (${openTime}) for standard hours`,
-        };
-      }
-    }
-
-    // 5. Priority validation
-    let priority = input.priority !== undefined ? Number(input.priority) : 1;
-    if (!Number.isSafeInteger(priority) || priority < 1) {
-      throw {
-        status: 400,
-        message: 'Priority must be a positive integer (e.g. 1=Normal, 2=Exam, 3=Holiday)',
-      };
-    }
-
-    const runInTx = async (tx: any) => {
-      // Advisory transaction lock by priority to serialize concurrent overlap checks for the same priority
-      // NOTE: pg_advisory_xact_lock(int, int) requires both params as integer.
-      // Prisma $executeRaw sends JS numbers as bigint which triggers PostgreSQL error 42883.
-      // Using Prisma.sql with ::integer cast ensures correct type for the two-param overload.
-      if (typeof tx.$executeRaw === 'function') {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7401, ${priority}::integer);`;
-      } else if (typeof tx.$executeRawUnsafe === 'function') {
-        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7401, ${priority}::integer);`);
-      }
-
-      // 6. Same-priority overlap check to prevent ambiguous schedule precedence
-      const conflicting = await tx.operatingSchedule.findFirst({
-        where: {
-          priority,
-          startDate: { lte: parsedEnd.date },
-          endDate: { gte: parsedStart.date },
-        },
-      });
-
-      if (conflicting) {
-        throw {
-          status: 409,
-          message: `Conflicting schedule: "${conflicting.name}" already exists with the same priority (${priority}) covering this date range`,
-        };
-      }
+    return await this.runInTransaction(prisma, async (tx) => {
+      // 6. Serialize writers of this priority, then check for same-priority overlaps
+      await this.lockPriority(tx, priority);
+      await this.assertNoSamePriorityOverlap(tx, priority, parsedStart.date, parsedEnd.date);
 
       // 7. Persist schedule
       return await tx.operatingSchedule.create({
         data: {
-          name: trimmedName,
+          name,
           startDate: parsedStart.date,
           endDate: parsedEnd.date,
           openTime,
@@ -271,12 +357,7 @@ export class AdminScheduleService {
           priority,
         },
       });
-    };
-
-    if (typeof (prisma as any).$transaction === 'function') {
-      return await (prisma as any).$transaction(runInTx);
-    }
-    return await runInTx(prisma);
+    });
   }
 
   /**
@@ -290,215 +371,84 @@ export class AdminScheduleService {
     input: UpdateScheduleInput,
     prisma: PrismaClient = defaultPrisma
   ): Promise<OperatingSchedule> {
-    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1) {
-      throw { status: 400, message: 'scheduleId must be a positive integer' };
+    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1 || scheduleId > MAX_PRISMA_INT) {
+      throw invalidInput('scheduleId must be a positive integer');
     }
 
-    const runInTx = async (tx: any) => {
-      // 1. Acquire row-level lock on the target schedule to prevent concurrent update races
-      if (typeof tx.$executeRaw === 'function') {
-        await tx.$executeRaw`SELECT schedule_id FROM operating_schedule WHERE schedule_id = ${scheduleId} FOR UPDATE;`;
-      } else if (typeof tx.$executeRawUnsafe === 'function') {
-        await tx.$executeRawUnsafe(
-          `SELECT schedule_id FROM operating_schedule WHERE schedule_id = ${scheduleId} FOR UPDATE;`
-        );
-      }
+    assertPlainObject(input);
+    rejectUnknownFields(input, [...SCHEDULE_FIELDS, 'scheduleId']);
 
-      const existing = await tx.operatingSchedule.findUnique({
+    if (input.scheduleId !== undefined && parseStrictInteger(input.scheduleId) !== scheduleId) {
+      throw invalidInput('scheduleId in the body does not match the schedule being updated');
+    }
+
+    // Validate the format of every provided field before opening a transaction.
+    const updateData: Prisma.OperatingScheduleUpdateInput = {};
+    if (input.name !== undefined) updateData.name = this.parseName(input.name);
+    if (input.startDate !== undefined) {
+      updateData.startDate = this.parseDateField(input.startDate, 'startDate').date;
+    }
+    if (input.endDate !== undefined) {
+      updateData.endDate = this.parseDateField(input.endDate, 'endDate').date;
+    }
+    if (input.openTime !== undefined) {
+      updateData.openTime = this.parseTime(input.openTime, 'openTime');
+    }
+    if (input.closeTime !== undefined) {
+      updateData.closeTime = this.parseTime(input.closeTime, 'closeTime');
+    }
+    if (input.is24Hours !== undefined) {
+      updateData.is24Hours = this.parseFlag(input.is24Hours, 'is24Hours');
+    }
+    if (input.isClosed !== undefined) {
+      updateData.isClosed = this.parseFlag(input.isClosed, 'isClosed');
+    }
+    if (input.priority !== undefined) updateData.priority = this.parsePriority(input.priority);
+
+    if (Object.keys(updateData).length === 0) {
+      throw invalidInput('At least one schedule field must be provided');
+    }
+
+    return await this.runInTransaction(prisma, async (tx) => {
+      // 1. Row-level lock so concurrent edits of this schedule are applied one at a time
+      await tx.$queryRaw`SELECT schedule_id FROM operating_schedule WHERE schedule_id = ${scheduleId}::integer FOR UPDATE`;
+
+      const existing: OperatingSchedule | null = await tx.operatingSchedule.findUnique({
         where: { scheduleId },
       });
-
       if (!existing) {
-        throw { status: 404, message: 'Operating schedule not found' };
+        throw notFound();
       }
 
-      const updateData: Prisma.OperatingScheduleUpdateInput = {};
+      // 2. Validate the merged (resulting) state against the freshly locked row
+      const effectiveStart = (updateData.startDate as Date | undefined) ?? existing.startDate;
+      const effectiveEnd = (updateData.endDate as Date | undefined) ?? existing.endDate;
+      this.assertChronological(effectiveStart, effectiveEnd);
 
-      // 1. Name validation
-      let effectiveName = existing.name;
-      if (input.name !== undefined) {
-        if (typeof input.name !== 'string' || input.name.trim().length === 0) {
-          throw { status: 400, message: 'Schedule name cannot be empty' };
-        }
-        effectiveName = input.name.trim();
-        if (effectiveName.length > 100) {
-          throw { status: 400, message: 'Schedule name must not exceed 100 characters' };
-        }
-        updateData.name = effectiveName;
-      }
+      this.assertFlagsAndHours(
+        (updateData.is24Hours as boolean | undefined) ?? existing.is24Hours,
+        (updateData.isClosed as boolean | undefined) ?? existing.isClosed,
+        (updateData.openTime as string | undefined) ?? existing.openTime,
+        (updateData.closeTime as string | undefined) ?? existing.closeTime
+      );
 
-      // 2. Dates validation
-      let effectiveStartDate = existing.startDate;
-      let effectiveEndDate = existing.endDate;
+      // 3. Same-priority overlap check against other schedules (serialized per priority)
+      const effectivePriority = (updateData.priority as number | undefined) ?? existing.priority;
+      await this.lockPriority(tx, effectivePriority);
+      await this.assertNoSamePriorityOverlap(
+        tx,
+        effectivePriority,
+        effectiveStart,
+        effectiveEnd,
+        scheduleId
+      );
 
-      if (input.startDate !== undefined) {
-        const parsedStart = this.parseCalendarDate(input.startDate);
-        if (!parsedStart) {
-          throw {
-            status: 400,
-            message: 'Invalid startDate format. Expected YYYY-MM-DD or ISO 8601',
-          };
-        }
-        effectiveStartDate = parsedStart.date;
-        updateData.startDate = effectiveStartDate;
-      }
-
-      if (input.endDate !== undefined) {
-        const parsedEnd = this.parseCalendarDate(input.endDate);
-        if (!parsedEnd) {
-          throw { status: 400, message: 'Invalid endDate format. Expected YYYY-MM-DD or ISO 8601' };
-        }
-        effectiveEndDate = parsedEnd.date;
-        updateData.endDate = effectiveEndDate;
-      }
-
-      if (effectiveStartDate.getTime() > effectiveEndDate.getTime()) {
-        const startStr = effectiveStartDate.toISOString().slice(0, 10);
-        const endStr = effectiveEndDate.toISOString().slice(0, 10);
-        throw {
-          status: 400,
-          message: `startDate (${startStr}) cannot be after endDate (${endStr})`,
-        };
-      }
-
-      // 3. Flags validation: strictly require boolean type if provided
-      if (input.is24Hours !== undefined && typeof input.is24Hours !== 'boolean') {
-        throw { status: 400, message: 'is24Hours must be a boolean (true or false)' };
-      }
-      if (input.isClosed !== undefined && typeof input.isClosed !== 'boolean') {
-        throw { status: 400, message: 'isClosed must be a boolean (true or false)' };
-      }
-
-      const effectiveIs24Hours =
-        input.is24Hours !== undefined ? input.is24Hours : existing.is24Hours;
-      const effectiveIsClosed = input.isClosed !== undefined ? input.isClosed : existing.isClosed;
-
-      if (effectiveIs24Hours && effectiveIsClosed) {
-        throw {
-          status: 400,
-          message: 'Schedule cannot be both 24 hours and closed simultaneously',
-        };
-      }
-
-      if (input.is24Hours !== undefined) {
-        updateData.is24Hours = effectiveIs24Hours;
-      }
-      if (input.isClosed !== undefined) {
-        updateData.isClosed = effectiveIsClosed;
-      }
-
-      // 4. Time format & chronological validation
-      let effectiveOpenTime = input.openTime !== undefined ? input.openTime : existing.openTime;
-      let effectiveCloseTime = input.closeTime !== undefined ? input.closeTime : existing.closeTime;
-
-      if (effectiveIsClosed) {
-        if (input.openTime !== undefined) {
-          if (!this.isValidTimeFormat(effectiveOpenTime)) {
-            throw { status: 400, message: 'Invalid openTime format. Expected HH:MM' };
-          }
-          updateData.openTime = effectiveOpenTime;
-        }
-        if (input.closeTime !== undefined) {
-          if (!this.isValidTimeFormat(effectiveCloseTime)) {
-            throw { status: 400, message: 'Invalid closeTime format. Expected HH:MM' };
-          }
-          updateData.closeTime = effectiveCloseTime;
-        }
-      } else if (effectiveIs24Hours) {
-        if (input.openTime !== undefined) {
-          if (!this.isValidTimeFormat(effectiveOpenTime)) {
-            throw { status: 400, message: 'Invalid openTime format. Expected HH:MM' };
-          }
-          updateData.openTime = effectiveOpenTime;
-        }
-        if (input.closeTime !== undefined) {
-          if (!this.isValidTimeFormat(effectiveCloseTime)) {
-            throw { status: 400, message: 'Invalid closeTime format. Expected HH:MM' };
-          }
-          updateData.closeTime = effectiveCloseTime;
-        }
-      } else {
-        if (input.openTime !== undefined) {
-          if (!this.isValidTimeFormat(effectiveOpenTime)) {
-            throw {
-              status: 400,
-              message: 'Invalid openTime format. Expected HH:MM (00:00 - 23:59)',
-            };
-          }
-          updateData.openTime = effectiveOpenTime;
-        }
-        if (input.closeTime !== undefined) {
-          if (!this.isValidTimeFormat(effectiveCloseTime)) {
-            throw {
-              status: 400,
-              message: 'Invalid closeTime format. Expected HH:MM (00:00 - 23:59)',
-            };
-          }
-          updateData.closeTime = effectiveCloseTime;
-        }
-
-        const openMinutes = this.timeToMinutes(effectiveOpenTime);
-        const closeMinutes = this.timeToMinutes(effectiveCloseTime);
-        if (closeMinutes <= openMinutes) {
-          throw {
-            status: 400,
-            message: `closeTime (${effectiveCloseTime}) must be strictly after openTime (${effectiveOpenTime}) for standard hours`,
-          };
-        }
-      }
-
-      // 5. Priority validation
-      let effectivePriority = existing.priority;
-      if (input.priority !== undefined) {
-        effectivePriority = Number(input.priority);
-        if (!Number.isSafeInteger(effectivePriority) || effectivePriority < 1) {
-          throw { status: 400, message: 'Priority must be a positive integer' };
-        }
-        updateData.priority = effectivePriority;
-      }
-
-      // 6. Same-priority overlap check against other schedules
-      // NOTE: ::integer cast required — see note in createSchedule advisory lock above.
-      if (typeof tx.$executeRaw === 'function') {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(7401, ${effectivePriority}::integer);`;
-      } else if (typeof tx.$executeRawUnsafe === 'function') {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(7401, ${effectivePriority}::integer);`
-        );
-      }
-
-      const conflicting = await tx.operatingSchedule.findFirst({
-        where: {
-          scheduleId: { not: scheduleId },
-          priority: effectivePriority,
-          startDate: { lte: effectiveEndDate },
-          endDate: { gte: effectiveStartDate },
-        },
-      });
-
-      if (conflicting) {
-        throw {
-          status: 409,
-          message: `Conflicting schedule: "${conflicting.name}" already exists with the same priority (${effectivePriority}) covering this date range`,
-        };
-      }
-
-      // If no fields changed, return existing
-      if (Object.keys(updateData).length === 0) {
-        return existing;
-      }
-
-      // 7. Update only the fields provided in the request
+      // 4. Update only the fields provided in the request
       return await tx.operatingSchedule.update({
         where: { scheduleId },
         data: updateData,
       });
-    };
-
-    if (typeof (prisma as any).$transaction === 'function') {
-      return await (prisma as any).$transaction(runInTx);
-    }
-    return await runInTx(prisma);
+    });
   }
 
   /**
@@ -508,8 +458,8 @@ export class AdminScheduleService {
     scheduleId: number,
     prisma: PrismaClient = defaultPrisma
   ): Promise<OperatingSchedule> {
-    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1) {
-      throw { status: 400, message: 'scheduleId must be a positive integer' };
+    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1 || scheduleId > MAX_PRISMA_INT) {
+      throw invalidInput('scheduleId must be a positive integer');
     }
 
     const schedule = await prisma.operatingSchedule.findUnique({
@@ -517,7 +467,7 @@ export class AdminScheduleService {
     });
 
     if (!schedule) {
-      throw { status: 404, message: 'Operating schedule not found' };
+      throw notFound();
     }
 
     return schedule;
@@ -525,6 +475,7 @@ export class AdminScheduleService {
 
   /**
    * List schedules with optional filters and sorting.
+   * Invalid filters are rejected with 400 instead of being silently ignored.
    */
   static async listSchedules(
     filters: ListSchedulesFilters = {},
@@ -532,47 +483,42 @@ export class AdminScheduleService {
   ): Promise<{ schedules: OperatingSchedule[]; total: number }> {
     const where: Prisma.OperatingScheduleWhereInput = {};
 
-    if (filters.q && filters.q.trim().length > 0) {
+    if (filters.q !== undefined && filters.q.trim().length > 0) {
       where.name = { contains: filters.q.trim(), mode: 'insensitive' };
     }
 
-    if (filters.startDate) {
-      const parsed = this.parseCalendarDate(filters.startDate);
-      if (parsed) {
-        where.endDate = { gte: parsed.date };
-      }
+    // Overlap semantics: schedules that are effective on any day within [startDate, endDate]
+    if (filters.startDate !== undefined) {
+      where.endDate = { gte: this.parseDateField(filters.startDate, 'startDate').date };
     }
-
-    if (filters.endDate) {
-      const parsed = this.parseCalendarDate(filters.endDate);
-      if (parsed) {
-        where.startDate = { lte: parsed.date };
-      }
+    if (filters.endDate !== undefined) {
+      where.startDate = { lte: this.parseDateField(filters.endDate, 'endDate').date };
     }
 
     if (filters.priority !== undefined) {
-      const p = Number(filters.priority);
-      if (Number.isSafeInteger(p) && p >= 1) {
-        where.priority = p;
-      }
+      where.priority = this.parsePriority(filters.priority);
     }
-
     if (filters.isClosed !== undefined) {
-      where.isClosed = Boolean(filters.isClosed);
+      where.isClosed = filters.isClosed;
     }
-
     if (filters.is24Hours !== undefined) {
-      where.is24Hours = Boolean(filters.is24Hours);
+      where.is24Hours = filters.is24Hours;
     }
 
-    const page = filters.page && filters.page >= 1 ? filters.page : 1;
+    const page = filters.page === undefined ? 1 : parseStrictInteger(filters.page);
+    if (page === null || page < 1) {
+      throw invalidInput('page must be a positive integer');
+    }
     const pageSize =
-      filters.pageSize && filters.pageSize >= 1 ? Math.min(filters.pageSize, 100) : 50;
+      filters.pageSize === undefined ? DEFAULT_PAGE_SIZE : parseStrictInteger(filters.pageSize);
+    if (pageSize === null || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+      throw invalidInput(`pageSize must be an integer between 1 and ${MAX_PAGE_SIZE}`);
+    }
 
     const [schedules, total] = await Promise.all([
       prisma.operatingSchedule.findMany({
         where,
-        orderBy: [{ priority: 'desc' }, { startDate: 'asc' }],
+        orderBy: [{ priority: 'desc' }, { startDate: 'asc' }, { scheduleId: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -589,8 +535,8 @@ export class AdminScheduleService {
     scheduleId: number,
     prisma: PrismaClient = defaultPrisma
   ): Promise<OperatingSchedule> {
-    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1) {
-      throw { status: 400, message: 'scheduleId must be a positive integer' };
+    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1 || scheduleId > MAX_PRISMA_INT) {
+      throw invalidInput('scheduleId must be a positive integer');
     }
 
     const existing = await prisma.operatingSchedule.findUnique({
@@ -598,18 +544,25 @@ export class AdminScheduleService {
     });
 
     if (!existing) {
-      throw { status: 404, message: 'Operating schedule not found' };
+      throw notFound();
     }
 
-    return await prisma.operatingSchedule.delete({
-      where: { scheduleId },
-    });
+    try {
+      return await prisma.operatingSchedule.delete({
+        where: { scheduleId },
+      });
+    } catch (error: any) {
+      // Deleted by another request between the lookup and the delete
+      if (error?.code === 'P2025') throw notFound();
+      throw error;
+    }
   }
 
   /**
    * Determine the effective active schedule on a specific target date,
    * respecting the priority hierarchy (Holiday/Closed (3) > Exam 24h (2) > Regular (1)).
    * If targetDate is not provided or null, defaults to today in Bangkok time (Asia/Bangkok, UTC+7).
+   * Returns null when no saved schedule covers the date (bookings then use the default regular hours).
    */
   static async getActiveScheduleOnDate(
     targetDate?: Date | string | null,
@@ -620,13 +573,11 @@ export class AdminScheduleService {
       targetDate === null ||
       (typeof targetDate === 'string' && targetDate.trim() === '')
         ? this.getTodayDateStringBangkok()
-        : targetDate instanceof Date
-          ? this.getTodayDateStringBangkok(targetDate)
-          : targetDate;
+        : targetDate;
 
     const parsed = this.parseCalendarDate(effectiveDate);
     if (!parsed) {
-      throw { status: 400, message: 'Invalid targetDate' };
+      throw invalidInput('Invalid date. Expected YYYY-MM-DD or ISO 8601 with timezone offset');
     }
 
     const schedules = await prisma.operatingSchedule.findMany({
@@ -634,12 +585,20 @@ export class AdminScheduleService {
         startDate: { lte: parsed.date },
         endDate: { gte: parsed.date },
       },
-      orderBy: {
-        priority: 'desc',
-      },
-      take: 1,
+      orderBy: [{ priority: 'desc' }, { scheduleId: 'asc' }],
+      take: 2,
     });
 
-    return schedules.length > 0 ? schedules[0] : null;
+    const [top, runnerUp] = schedules;
+    if (top && runnerUp && top.priority === runnerUp.priority) {
+      // Same rule as ScheduleService: two schedules at the top priority are ambiguous.
+      throw scheduleError(
+        409,
+        'SCHEDULE_CONFLICT',
+        `Multiple schedules have the same effective priority (${top.priority}) on ${parsed.dateStr}`
+      );
+    }
+
+    return top ?? null;
   }
 }

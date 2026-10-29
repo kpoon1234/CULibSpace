@@ -1042,3 +1042,133 @@ test('AdminScheduleController handles create, get, update, and delete HTTP respo
   assert.equal(res.body.success, false);
   assert.equal(res.body.error.includes('cannot be after endDate'), true);
 });
+
+test('createSchedule and updateSchedule reject unknown fields, empty update bodies, and non-object payloads', async () => {
+  const existing = scheduleRow({ scheduleId: 1 });
+  const { client } = mockSchedulePrisma([existing]);
+
+  // Unknown field on create
+  await assert.rejects(
+    AdminScheduleService.createSchedule(
+      {
+        name: 'ตารางทดสอบ',
+        startDate: '2026-08-01',
+        endDate: '2026-12-15',
+        unexpectedField: true,
+      },
+      client
+    ),
+    (err: any) => err.status === 400 && err.message.includes('Unknown schedule field')
+  );
+
+  // Unknown field on update
+  await assert.rejects(
+    AdminScheduleService.updateSchedule(1, { name: 'ใหม่', extra: 123 }, client),
+    (err: any) => err.status === 400 && err.message.includes('Unknown schedule field')
+  );
+
+  // Empty update payload
+  await assert.rejects(
+    AdminScheduleService.updateSchedule(1, {}, client),
+    (err: any) => err.status === 400 && err.message.includes('At least one schedule field')
+  );
+
+  // Non-object payload
+  await assert.rejects(
+    AdminScheduleService.createSchedule(null as any, client),
+    (err: any) => err.status === 400 && err.message.includes('JSON object')
+  );
+
+  // Mismatched scheduleId in body vs URL param
+  await assert.rejects(
+    AdminScheduleService.updateSchedule(1, { scheduleId: 2, name: 'Mismatch' }, client),
+    (err: any) => err.status === 400 && err.message.includes('does not match')
+  );
+});
+
+test('parseCalendarDate converts ISO instants to Asia/Bangkok calendar date and rejects rollover dates', () => {
+  // 2026-10-26T17:00:00.000Z is 2026-10-27 00:00:00 in Asia/Bangkok (UTC+7)
+  const bkkMidnight = AdminScheduleService.parseCalendarDate('2026-10-26T17:00:00.000Z');
+  assert.equal(bkkMidnight?.dateStr, '2026-10-27');
+
+  // Impossible calendar date in ISO datetime (Feb 30) must not roll over to March 2
+  assert.equal(AdminScheduleService.parseCalendarDate('2026-02-30T10:00:00.000Z'), null);
+});
+
+test('getActiveScheduleOnDate throws 409 SCHEDULE_CONFLICT when multiple schedules share the top priority on the same day', async () => {
+  const rows = [
+    scheduleRow({
+      scheduleId: 1,
+      name: 'ตาราง A',
+      startDate: new Date('2026-10-23T00:00:00.000Z'),
+      endDate: new Date('2026-10-23T00:00:00.000Z'),
+      priority: 2,
+    }),
+    scheduleRow({
+      scheduleId: 2,
+      name: 'ตาราง B',
+      startDate: new Date('2026-10-23T00:00:00.000Z'),
+      endDate: new Date('2026-10-23T00:00:00.000Z'),
+      priority: 2,
+    }),
+  ];
+  const { client } = mockSchedulePrisma(rows);
+
+  await assert.rejects(
+    AdminScheduleService.getActiveScheduleOnDate('2026-10-23', client),
+    (err: any) => err.status === 409 && err.code === 'SCHEDULE_CONFLICT'
+  );
+});
+
+test('listSchedules and AdminScheduleController.list reject malformed filter and pagination parameters with 400', async () => {
+  const { client } = mockSchedulePrisma([]);
+
+  await assert.rejects(
+    AdminScheduleService.listSchedules({ startDate: 'bad-date' }, client),
+    (err: any) => err.status === 400 && err.message.includes('Invalid startDate')
+  );
+
+  await assert.rejects(
+    AdminScheduleService.listSchedules({ priority: 0 }, client),
+    (err: any) => err.status === 400 && err.message.includes('Priority must be a positive integer')
+  );
+
+  await assert.rejects(
+    AdminScheduleService.listSchedules({ page: 0 }, client),
+    (err: any) => err.status === 400 && err.message.includes('page must be a positive integer')
+  );
+
+  await assert.rejects(
+    AdminScheduleService.listSchedules({ pageSize: 500 }, client),
+    (err: any) => err.status === 400 && err.message.includes('pageSize must be an integer')
+  );
+
+  const res = mockResponse();
+  await AdminScheduleController.list({ query: { isClosed: 'invalid' } } as any, res as any, client);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.success, false);
+});
+
+test('advisory lock query casts parameters to integer and return value to text for PostgreSQL compatibility', async () => {
+  const executedSql: string[] = [];
+  const base = mockSchedulePrisma([]);
+  (base.client as any).$queryRaw = async (strings: TemplateStringsArray) => {
+    executedSql.push(strings.join('?'));
+    return [{ pg_advisory_xact_lock: '' }];
+  };
+
+  await AdminScheduleService.createSchedule(
+    {
+      name: 'ตารางตรวจ SQL Lock',
+      startDate: '2026-09-01',
+      endDate: '2026-09-30',
+      priority: 2,
+    },
+    base.client
+  );
+
+  assert.equal(executedSql.length, 1);
+  assert.equal(executedSql[0].includes('pg_advisory_xact_lock('), true);
+  assert.equal(executedSql[0].includes('::integer'), true);
+  assert.equal(executedSql[0].includes(')::text'), true);
+});

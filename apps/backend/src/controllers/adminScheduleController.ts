@@ -1,40 +1,56 @@
 import { Request, Response } from 'express';
 import { AdminScheduleService } from '../services/adminScheduleService.js';
 
+function sendError(res: Response, error: any, logLabel: string): void {
+  const status = typeof error?.status === 'number' ? error.status : 500;
+  if (status >= 500) {
+    console.error(`${logLabel}:`, error);
+  }
+  res.status(status).json({
+    success: false,
+    ...(status < 500 && error?.code ? { code: error.code } : {}),
+    error: status < 500 && error?.message ? error.message : 'Internal server error',
+  });
+}
+
+function queryString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** Query booleans must be exactly "true"/"false" (or "1"/"0"); anything else is a 400. */
+function queryBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  throw { status: 400, code: 'INVALID_SCHEDULE_INPUT', message: `${field} must be true or false` };
+}
+
+function parseScheduleId(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) && raw >= 1 ? raw : null;
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id >= 1 ? id : null;
+}
+
 export class AdminScheduleController {
   /**
    * GET /api/admin/schedules
-   * List operating schedules with optional query filters (q, startDate, endDate, priority, isClosed, is24Hours).
+   * List operating schedules with optional query filters (q, startDate, endDate, priority, isClosed, is24Hours, page, pageSize).
    */
   static async list(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     try {
-      const q = typeof req.query.q === 'string' ? req.query.q : undefined;
-      const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
-      const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
-      const priority = req.query.priority !== undefined ? Number(req.query.priority) : undefined;
-      const isClosed =
-        req.query.isClosed !== undefined
-          ? req.query.isClosed === 'true' || req.query.isClosed === '1'
-          : undefined;
-      const is24Hours =
-        req.query.is24Hours !== undefined
-          ? req.query.is24Hours === 'true' || req.query.is24Hours === '1'
-          : undefined;
-      const page = req.query.page !== undefined ? Number(req.query.page) : undefined;
-      const pageSize = req.query.pageSize !== undefined ? Number(req.query.pageSize) : undefined;
-
       const result = await AdminScheduleService.listSchedules(
         {
-          q,
-          startDate,
-          endDate,
-          priority,
-          isClosed,
-          is24Hours,
-          page,
-          pageSize,
+          q: queryString(req.query.q),
+          startDate: queryString(req.query.startDate),
+          endDate: queryString(req.query.endDate),
+          priority: queryString(req.query.priority),
+          isClosed: queryBoolean(req.query.isClosed, 'isClosed'),
+          is24Hours: queryBoolean(req.query.is24Hours, 'is24Hours'),
+          page: queryString(req.query.page),
+          pageSize: queryString(req.query.pageSize),
         },
         prisma
       );
@@ -45,14 +61,7 @@ export class AdminScheduleController {
         total: result.total,
       });
     } catch (error: any) {
-      const status = error.status || 500;
-      if (status >= 500) {
-        console.error('Error listing schedules:', error);
-      }
-      res.status(status).json({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      sendError(res, error, 'Error listing schedules');
     }
   }
 
@@ -75,14 +84,7 @@ export class AdminScheduleController {
         data: schedule,
       });
     } catch (error: any) {
-      const status = error.status || 500;
-      if (status >= 500) {
-        console.error('Error getting active schedule:', error);
-      }
-      res.status(status).json({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      sendError(res, error, 'Error getting active schedule');
     }
   }
 
@@ -93,8 +95,8 @@ export class AdminScheduleController {
   static async getById(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
-    const scheduleId = Number(req.params.scheduleId);
-    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1) {
+    const scheduleId = parseScheduleId(req.params.scheduleId);
+    if (scheduleId === null) {
       res.status(400).json({ success: false, error: 'scheduleId must be a positive integer' });
       return;
     }
@@ -106,14 +108,7 @@ export class AdminScheduleController {
         data: schedule,
       });
     } catch (error: any) {
-      const status = error.status || 500;
-      if (status >= 500) {
-        console.error('Error fetching schedule by ID:', error);
-      }
-      res.status(status).json({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      sendError(res, error, 'Error fetching schedule by ID');
     }
   }
 
@@ -125,20 +120,13 @@ export class AdminScheduleController {
     res.setHeader('Cache-Control', 'no-store');
 
     try {
-      const schedule = await AdminScheduleService.createSchedule(req.body ?? {}, prisma);
+      const schedule = await AdminScheduleService.createSchedule(req.body, prisma);
       res.status(201).json({
         success: true,
         data: schedule,
       });
     } catch (error: any) {
-      const status = error.status || 500;
-      if (status >= 500) {
-        console.error('Error creating schedule:', error);
-      }
-      res.status(status).json({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      sendError(res, error, 'Error creating schedule');
     }
   }
 
@@ -146,39 +134,28 @@ export class AdminScheduleController {
    * PUT /api/admin/schedules/:scheduleId
    * PUT /api/admin/schedules
    * PATCH /api/admin/schedules/:scheduleId
-   * Edit an operating schedule with valid date/time checks.
+   * Edit an operating schedule with valid date/time checks (only the provided fields are written).
    */
   static async update(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
     const rawId =
       req.params.scheduleId !== undefined ? req.params.scheduleId : req.body?.scheduleId;
-    const scheduleId = Number(rawId);
+    const scheduleId = parseScheduleId(rawId);
 
-    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1) {
+    if (scheduleId === null) {
       res.status(400).json({ success: false, error: 'scheduleId must be a positive integer' });
       return;
     }
 
     try {
-      const schedule = await AdminScheduleService.updateSchedule(
-        scheduleId,
-        req.body ?? {},
-        prisma
-      );
+      const schedule = await AdminScheduleService.updateSchedule(scheduleId, req.body, prisma);
       res.status(200).json({
         success: true,
         data: schedule,
       });
     } catch (error: any) {
-      const status = error.status || 500;
-      if (status >= 500) {
-        console.error('Error updating schedule:', error);
-      }
-      res.status(status).json({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      sendError(res, error, 'Error updating schedule');
     }
   }
 
@@ -189,8 +166,8 @@ export class AdminScheduleController {
   static async delete(req: Request, res: Response, prisma?: any): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
 
-    const scheduleId = Number(req.params.scheduleId);
-    if (!Number.isSafeInteger(scheduleId) || scheduleId < 1) {
+    const scheduleId = parseScheduleId(req.params.scheduleId);
+    if (scheduleId === null) {
       res.status(400).json({ success: false, error: 'scheduleId must be a positive integer' });
       return;
     }
@@ -202,14 +179,7 @@ export class AdminScheduleController {
         message: 'Operating schedule deleted successfully',
       });
     } catch (error: any) {
-      const status = error.status || 500;
-      if (status >= 500) {
-        console.error('Error deleting schedule:', error);
-      }
-      res.status(status).json({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      sendError(res, error, 'Error deleting schedule');
     }
   }
 }
