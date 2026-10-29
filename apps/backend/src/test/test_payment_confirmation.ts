@@ -102,6 +102,14 @@ function fixture() {
         Object.assign(state.payment, data);
         return state.payment;
       },
+      updateMany: async ({ where, data }: any) => {
+        if (state.failPayment) throw new Error('payment write failed');
+        if (where?.paymentId && where.paymentId !== state.payment.paymentId) return { count: 0 };
+        if (where?.status?.in && !where.status.in.includes(state.payment.status))
+          return { count: 0 };
+        Object.assign(state.payment, data);
+        return { count: 1 };
+      },
     },
     ticket: {
       findUnique: async () => state.ticket,
@@ -151,7 +159,13 @@ function fixture() {
               ...(checkout.raw as Record<string, unknown>),
               id: 'cs_test_1',
               livemode: checkout.livemode,
-              status: 'complete',
+              status:
+                (checkout.raw as any)?.status ??
+                (checkout.state === 'expired'
+                  ? 'expired'
+                  : checkout.state === 'open'
+                    ? 'open'
+                    : 'complete'),
               payment_status: checkout.state === 'paid' ? 'paid' : 'unpaid',
               amount_total: checkout.amountSatang,
               currency: checkout.currency,
@@ -377,6 +391,7 @@ test('missing payment, unknown gateway state and live mode do not activate', asy
 
 test('failed event updates payment to FAILED and keeps ticket inactive', async () => {
   const f = fixture();
+  f.checkout.state = 'expired';
   const result = await PaymentConfirmationService.handleWebhook(
     event({ type: 'payment.failed' }),
     f.gateway,
@@ -403,6 +418,123 @@ test('expired event updates payment to EXPIRED and keeps ticket inactive', async
   assert.equal(f.state.payment.openUid, null);
   assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
   assert.equal(f.state.receipts.length, 0);
+});
+
+test('payment attempt failure with open checkout does NOT release openUid or mark FAILED (card declined retryable)', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  // Payment status must NOT be FAILED; open slot must NOT be released!
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+
+  // Subsequent successful payment on retry activates the ticket
+  f.checkout.state = 'paid';
+  const successResult = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.succeeded' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(successResult.handled, true);
+  assert.equal(successResult.activated, true);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('failed event does not overwrite a payment that was concurrently marked PAID', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+
+  // Simulate payment marked PAID concurrently
+  f.state.payment.status = PaymentStatus.PAID;
+  f.state.payment.openUid = null;
+  f.state.ticket.status = TicketStatus.PAID;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('failed event conditional update does not overwrite PAID if status changed during execution', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+
+  const origUpdateMany = f.db.payment.updateMany;
+  f.db.payment.updateMany = (async (args: any) => {
+    // Concurrent thread commits PAID right before updateMany
+    f.state.payment.status = PaymentStatus.PAID;
+    return origUpdateMany(args);
+  }) as any;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('expired event does not overwrite a payment that was concurrently marked PAID', async () => {
+  const f = fixture();
+
+  // Simulate payment marked PAID concurrently
+  f.state.payment.status = PaymentStatus.PAID;
+  f.state.payment.openUid = null;
+  f.state.ticket.status = TicketStatus.PAID;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('expired event conditional update does not overwrite PAID if status changed during execution', async () => {
+  const f = fixture();
+
+  const origUpdateMany = f.db.payment.updateMany;
+  f.db.payment.updateMany = (async (args: any) => {
+    // Concurrent thread commits PAID right before updateMany
+    f.state.payment.status = PaymentStatus.PAID;
+    return origUpdateMany(args);
+  }) as any;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
 });
 
 test('unknown events are not handled', async () => {

@@ -231,10 +231,17 @@ export class PaymentConfirmationService {
   }
 
   /**
-   * [US6-3] Handle failed payment: update status to FAILED, keep ticket inactive
-   * -------------------------------------------------------------------------
-   * Payment remains inactive (ticket stays UNPAID) and user can retry with a new purchase.
-   * openUid is released so the user can start a new purchase.
+   * [US6-3] Handle failed payment: check gateway checkout state before closing attempt
+   * -----------------------------------------------------------------------------------
+   * A single card/payment attempt failure (e.g. payment_intent.payment_failed with
+   * requires_payment_method) does NOT terminate the Checkout Session. The customer
+   * can still retry with another card or payment method on the same session.
+   *
+   * Only when the Checkout Session itself is no longer open (e.g. expired or closed)
+   * can we mark the payment as FAILED/EXPIRED and release openUid.
+   *
+   * All status updates use a row lock / conditional update on PENDING/UNCONFIRMED
+   * to ensure a concurrent success webhook is never overwritten with FAILED.
    */
   private static async handleFailedPayment(
     event: GatewayPaymentEvent,
@@ -245,42 +252,95 @@ export class PaymentConfirmationService {
       throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
     }
 
-    const paymentId = paymentIdFrom(event.reference);
-
-    const payment = await prisma.payment.findFirst({
-      where: {
-        OR: [{ paymentId }, { gatewayRef: event.gatewayRef }],
-      },
-    });
-
-    if (!payment) {
-      return { handled: false };
+    let paymentId: number | undefined;
+    try {
+      if (event.reference) {
+        paymentId = paymentIdFrom(event.reference);
+      }
+    } catch {
+      // Fall back to looking up by gatewayRef
     }
 
-    // Only update if still in an open state (PENDING or UNCONFIRMED)
-    if (payment.status !== PaymentStatus.PENDING && payment.status !== PaymentStatus.UNCONFIRMED) {
-      // Already processed (PAID, FAILED, EXPIRED, REFUNDED) - no-op
-      return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+    if (!paymentId) {
+      const found = await prisma.payment.findFirst({
+        where: { gatewayRef: event.gatewayRef },
+        select: { paymentId: true },
+      });
+      if (!found) {
+        return { handled: false };
+      }
+      paymentId = found.paymentId;
     }
 
-    // Update payment to FAILED and release openUid
-    await prisma.payment.update({
-      where: { paymentId: payment.paymentId },
-      data: {
-        status: PaymentStatus.FAILED,
-        openUid: null,
-      },
-    });
+    // Verify current checkout status with the gateway before deciding to close/release
+    const checkout = await gateway.retrieveCheckoutStatus(event.gatewayRef);
 
-    // Ticket stays UNPAID (inactive) - do NOT activate
-    return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
+    // If the checkout session is paid (e.g. customer retried and paid), confirm it
+    if (checkout.state === 'paid') {
+      return this.confirmCheckout(gateway.name, event.gatewayRef, checkout, prisma, event.eventId);
+    }
+
+    // If the checkout session is still open, the customer can still retry.
+    // Do NOT mark as FAILED and do NOT release openUid.
+    if (checkout.state === 'open') {
+      return { handled: true, activated: false, paymentId };
+    }
+
+    // If checkout state is unknown, do not close or release openUid (safe fallback)
+    if (checkout.state === 'unknown') {
+      return { handled: true, activated: false, paymentId };
+    }
+
+    // Checkout is no longer open (expired, not_found, etc.) and cannot be retried.
+    // Use row lock and conditional update to prevent overwriting PAID under concurrency.
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT paymentid FROM payment WHERE paymentid = ${paymentId} FOR UPDATE`;
+      const payment = await tx.payment.findUnique({
+        where: { paymentId },
+      });
+
+      if (!payment) {
+        return { handled: false };
+      }
+
+      // If already processed (PAID, FAILED, EXPIRED, REFUNDED), do not overwrite
+      if (
+        payment.status !== PaymentStatus.PENDING &&
+        payment.status !== PaymentStatus.UNCONFIRMED
+      ) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      const newStatus = PaymentStatus.FAILED;
+
+      const applied = await tx.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: {
+          status: newStatus,
+          openUid: null,
+        },
+      });
+
+      if (applied.count === 0) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      // Ticket stays UNPAID (inactive) - do NOT activate
+      return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
+    });
   }
 
   /**
    * [US6-3] Handle expired payment: update status to EXPIRED, keep ticket inactive
    * -------------------------------------------------------------------------
-   * Payment remains inactive (ticket stays UNPAID) and user can retry with a new purchase.
+   * A checkout.session.expired event means the session has expired and can never be paid.
    * openUid is released so the user can start a new purchase.
+   *
+   * All status updates use a row lock / conditional update on PENDING/UNCONFIRMED
+   * to ensure a concurrent success webhook is never overwritten with EXPIRED.
    */
   private static async handleExpiredPayment(
     event: GatewayPaymentEvent,
@@ -291,35 +351,62 @@ export class PaymentConfirmationService {
       throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
     }
 
-    const paymentId = paymentIdFrom(event.reference);
-
-    const payment = await prisma.payment.findFirst({
-      where: {
-        OR: [{ paymentId }, { gatewayRef: event.gatewayRef }],
-      },
-    });
-
-    if (!payment) {
-      return { handled: false };
+    let paymentId: number | undefined;
+    try {
+      if (event.reference) {
+        paymentId = paymentIdFrom(event.reference);
+      }
+    } catch {
+      // Fall back to looking up by gatewayRef
     }
 
-    // Only update if still in an open state (PENDING or UNCONFIRMED)
-    if (payment.status !== PaymentStatus.PENDING && payment.status !== PaymentStatus.UNCONFIRMED) {
-      // Already processed - no-op
-      return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+    if (!paymentId) {
+      const found = await prisma.payment.findFirst({
+        where: { gatewayRef: event.gatewayRef },
+        select: { paymentId: true },
+      });
+      if (!found) {
+        return { handled: false };
+      }
+      paymentId = found.paymentId;
     }
 
-    // Update payment to EXPIRED and release openUid
-    await prisma.payment.update({
-      where: { paymentId: payment.paymentId },
-      data: {
-        status: PaymentStatus.EXPIRED,
-        openUid: null,
-      },
-    });
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT paymentid FROM payment WHERE paymentid = ${paymentId} FOR UPDATE`;
+      const payment = await tx.payment.findUnique({
+        where: { paymentId },
+      });
 
-    // Ticket stays UNPAID (inactive) - do NOT activate
-    return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
+      if (!payment) {
+        return { handled: false };
+      }
+
+      // Only update if still in an open state (PENDING or UNCONFIRMED)
+      if (
+        payment.status !== PaymentStatus.PENDING &&
+        payment.status !== PaymentStatus.UNCONFIRMED
+      ) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      const applied = await tx.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: {
+          status: PaymentStatus.EXPIRED,
+          openUid: null,
+        },
+      });
+
+      if (applied.count === 0) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      // Ticket stays UNPAID (inactive) - do NOT activate
+      return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
+    });
   }
 
   private static assertReceipt(
