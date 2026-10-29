@@ -138,10 +138,7 @@ export default function TopMenu() {
                           </button>
                         )}
                         {user.role === 'ADMIN' &&
-                          [
-                            { href: '/admin/users', label: 'Users' },
-                            { href: '/admin/audit-logs', label: 'View Audit History' },
-                          ].map((item) => (
+                          [{ href: '/admin', label: 'Admin Dashboard' }].map((item) => (
                             <button
                               key={item.href}
                               role="menuitem"
