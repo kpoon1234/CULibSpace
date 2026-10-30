@@ -1,13 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ADMIN_ISSUE_PAGE_SIZE,
+  ISSUE_SORT_KEYS,
+  ISSUE_SORT_OPTIONS,
   ISSUE_STATUSES,
-  listAdminIssues,
+  listAllAdminIssues,
+  sortIssues,
   updateAdminIssue,
 } from '@/lib/adminIssues';
-import type { AdminIssue, IssueStatus } from '@/lib/adminIssues';
+import type { AdminIssue, IssueSortKey, IssueStatus, SortDirection } from '@/lib/adminIssues';
 
 const STATUS_STYLE: Record<IssueStatus, string> = {
   Pending: 'bg-amber-50 text-amber-800 ring-amber-200',
@@ -81,11 +84,14 @@ function AutoGrowTextarea({
 }
 
 export function IssueManagementView() {
-  const [issues, setIssues] = useState<AdminIssue[]>([]);
+  const [allIssues, setAllIssues] = useState<AdminIssue[]>([]);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IssueStatus | ''>('');
+  const [sortKey, setSortKey] = useState<IssueSortKey>('reported');
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    ISSUE_SORT_OPTIONS.reported.defaultDirection
+  );
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, IssueDraft>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +100,14 @@ export function IssueManagementView() {
 
   const requestSeq = useRef(0);
 
+  // The API cannot sort, so the whole filtered set is sorted and paged here.
+  const sorted = useMemo(
+    () => sortIssues(allIssues, sortKey, sortDirection),
+    [allIssues, sortKey, sortDirection]
+  );
+  const total = sorted.length;
   const pageCount = Math.max(1, Math.ceil(total / ADMIN_ISSUE_PAGE_SIZE));
+  const issues = sorted.slice((page - 1) * ADMIN_ISSUE_PAGE_SIZE, page * ADMIN_ISSUE_PAGE_SIZE);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -104,26 +117,20 @@ export function IssueManagementView() {
       setError(null);
 
       try {
-        const result = await listAdminIssues(
-          {
-            q: query,
-            status: statusFilter || undefined,
-            page,
-            pageSize: ADMIN_ISSUE_PAGE_SIZE,
-          },
+        const result = await listAllAdminIssues(
+          { q: query, status: statusFilter || undefined },
           signal
         );
 
         // Ignore results from a request that was superseded by a newer one.
         if (seq !== requestSeq.current) return;
 
-        setIssues(result.issues);
-        setTotal(result.total);
+        setAllIssues(result);
 
         setDrafts((current) => {
           const next: Record<number, IssueDraft> = {};
 
-          for (const issue of result.issues) {
+          for (const issue of result) {
             const draft = current[issue.issueId];
 
             // Keep a draft only while the admin has unsaved edits.
@@ -145,7 +152,7 @@ export function IssueManagementView() {
         }
       }
     },
-    [query, statusFilter, page]
+    [query, statusFilter]
   );
 
   useEffect(() => {
@@ -167,6 +174,12 @@ export function IssueManagementView() {
 
   function changeQuery(value: string) {
     setQuery(value);
+    setPage(1);
+  }
+
+  function changeSortKey(next: IssueSortKey) {
+    setSortKey(next);
+    setSortDirection(ISSUE_SORT_OPTIONS[next].defaultDirection);
     setPage(1);
   }
 
@@ -268,7 +281,7 @@ export function IssueManagementView() {
       </header>
 
       <section
-        className="mb-4 grid gap-3 rounded-xl border border-hairline bg-white p-4 sm:grid-cols-[minmax(0,1fr)_220px]"
+        className="mb-4 grid gap-3 rounded-xl border border-hairline bg-white p-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_200px_180px_160px]"
         aria-label="Filter issues"
       >
         <label className="text-sm font-medium text-gray-700">
@@ -295,6 +308,39 @@ export function IssueManagementView() {
             {ISSUE_STATUSES.map((status) => (
               <option key={status} value={status}>
                 {status}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="text-sm font-medium text-gray-700">
+          Sort by
+          <select
+            value={sortKey}
+            onChange={(event) => changeSortKey(event.target.value as IssueSortKey)}
+            className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-normal outline-none focus:border-chula-pink focus:ring-2 focus:ring-chula-pink/20"
+          >
+            {ISSUE_SORT_KEYS.map((key) => (
+              <option key={key} value={key}>
+                {ISSUE_SORT_OPTIONS[key].label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="text-sm font-medium text-gray-700">
+          Order
+          <select
+            value={sortDirection}
+            onChange={(event) => {
+              setSortDirection(event.target.value as SortDirection);
+              setPage(1);
+            }}
+            className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-normal outline-none focus:border-chula-pink focus:ring-2 focus:ring-chula-pink/20"
+          >
+            {Object.entries(ISSUE_SORT_OPTIONS[sortKey].directions).map(([direction, label]) => (
+              <option key={direction} value={direction}>
+                {label}
               </option>
             ))}
           </select>
@@ -356,6 +402,11 @@ export function IssueManagementView() {
                         >
                           {issue.status}
                         </span>
+                        {issue.blocksTable && (
+                          <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200">
+                            Blocks table
+                          </span>
+                        )}
                         <span className="text-xs text-gray-500">
                           Reported {formatDate(issue.time)}
                         </span>
