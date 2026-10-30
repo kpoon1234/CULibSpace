@@ -7,9 +7,10 @@ process.env.JWT_SECRET = 'admin-schedule-unit-test-secret';
 
 const { AdminScheduleService } = await import('../services/adminScheduleService.js');
 const { BookingService } = await import('../services/bookingService.js');
-const { AdminScheduleController } = await import('../controllers/adminScheduleController.js');
+const { AdminScheduleController, createAdminScheduleController } =
+  await import('../controllers/adminScheduleController.js');
 const { signJwt } = await import('../utils/jwt.js');
-const { default: adminRoutes } = await import('../routes/adminRoutes.js');
+const { default: adminRoutes, createAdminRouter } = await import('../routes/adminRoutes.js');
 
 function scheduleRow(overrides: Partial<OperatingSchedule> = {}): OperatingSchedule {
   return {
@@ -914,8 +915,9 @@ test('AdminScheduleController.getActive uses Bangkok date when date query param 
 
   const req = { query: {} } as any;
   const res = mockResponse();
+  const controller = createAdminScheduleController(client);
 
-  await AdminScheduleController.getActive(req, res as any, client);
+  await controller.getActive(req, res as any);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.success, true);
   assert.equal(res.body.data.scheduleId, 10);
@@ -1144,7 +1146,8 @@ test('listSchedules and AdminScheduleController.list reject malformed filter and
   );
 
   const res = mockResponse();
-  await AdminScheduleController.list({ query: { isClosed: 'invalid' } } as any, res as any, client);
+  const controller = createAdminScheduleController(client);
+  await controller.list({ query: { isClosed: 'invalid' } } as any, res as any);
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.success, false);
 });
@@ -1171,4 +1174,168 @@ test('advisory lock query casts parameters to integer and return value to text f
   assert.equal(executedSql[0].includes('pg_advisory_xact_lock('), true);
   assert.equal(executedSql[0].includes('::integer'), true);
   assert.equal(executedSql[0].includes(')::text'), true);
+});
+
+test('[P1 Regression] Express router dispatches GET/POST/PUT/PATCH/DELETE /schedules with valid ADMIN token and payload without passing next as Prisma', async () => {
+  const { client } = mockSchedulePrisma([]);
+  const router = createAdminRouter(client);
+
+  const adminToken = signJwt({
+    adminId: 1,
+    email: 'admin@chula.ac.th',
+    firstname: 'Admin',
+    lastname: 'Test',
+    role: 'ADMIN',
+  });
+
+  function dispatchRoute(options: {
+    method: string;
+    url: string;
+    query?: Record<string, any>;
+    body?: any;
+  }): Promise<{ statusCode: number; body: any }> {
+    return new Promise((resolve, reject) => {
+      const req: any = {
+        method: options.method,
+        url: options.url,
+        originalUrl: `/api/admin${options.url}`,
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        query: options.query ?? {},
+        body: options.body ?? {},
+      };
+
+      const res: any = {
+        statusCode: 200,
+        body: undefined,
+        headers: {} as Record<string, string>,
+        setHeader(name: string, value: string) {
+          this.headers[name.toLowerCase()] = value;
+          return this;
+        },
+        status(code: number) {
+          this.statusCode = code;
+          return this;
+        },
+        json(payload: any) {
+          this.body = payload;
+          resolve({ statusCode: this.statusCode, body: this.body });
+          return this;
+        },
+      };
+
+      (router as any)(req, res, (err?: any) => {
+        if (err) {
+          reject(err);
+        } else {
+          reject(new Error(`Route ${options.method} ${options.url} fell through to next()`));
+        }
+      });
+    });
+  }
+
+  // 1. POST /schedules (create schedule through Express router)
+  const createRes = await dispatchRoute({
+    method: 'POST',
+    url: '/schedules',
+    body: {
+      name: 'ตารางเปิด 24 ชม. ช่วงสอบ',
+      startDate: '2026-11-01',
+      endDate: '2026-11-15',
+      is24Hours: true,
+      priority: 2,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+  assert.equal(createRes.body.success, true);
+  const createdId = createRes.body.data.scheduleId;
+  assert.equal(typeof createdId, 'number');
+
+  // 2. GET /schedules (list schedules through Express router)
+  const listRes = await dispatchRoute({
+    method: 'GET',
+    url: '/schedules',
+    query: { priority: '2', page: '1', pageSize: '10' },
+  });
+  assert.equal(listRes.statusCode, 200);
+  assert.equal(listRes.body.success, true);
+  assert.equal(listRes.body.data.length, 1);
+  assert.equal(listRes.body.total, 1);
+
+  // 3. GET /schedules/active (active schedule lookup through Express router)
+  const activeRes = await dispatchRoute({
+    method: 'GET',
+    url: '/schedules/active',
+    query: { date: '2026-11-05' },
+  });
+  assert.equal(activeRes.statusCode, 200);
+  assert.equal(activeRes.body.success, true);
+  assert.equal(activeRes.body.data.scheduleId, createdId);
+
+  // 4. GET /schedules/:scheduleId (get by ID through Express router)
+  const getByIdRes = await dispatchRoute({
+    method: 'GET',
+    url: `/schedules/${createdId}`,
+  });
+  assert.equal(getByIdRes.statusCode, 200);
+  assert.equal(getByIdRes.body.success, true);
+  assert.equal(getByIdRes.body.data.name, 'ตารางเปิด 24 ชม. ช่วงสอบ');
+
+  // 5. PATCH /schedules/:scheduleId (partial update through Express router)
+  const patchRes = await dispatchRoute({
+    method: 'PATCH',
+    url: `/schedules/${createdId}`,
+    body: {
+      name: 'ตารางสอบปลายภาค 24 ชม.',
+    },
+  });
+  assert.equal(patchRes.statusCode, 200);
+  assert.equal(patchRes.body.success, true);
+  assert.equal(patchRes.body.data.name, 'ตารางสอบปลายภาค 24 ชม.');
+
+  // 6. PUT /schedules/:scheduleId (update by URL param through Express router)
+  const putByIdRes = await dispatchRoute({
+    method: 'PUT',
+    url: `/schedules/${createdId}`,
+    body: {
+      is24Hours: false,
+      openTime: '08:00',
+      closeTime: '22:00',
+    },
+  });
+  assert.equal(putByIdRes.statusCode, 200);
+  assert.equal(putByIdRes.body.success, true);
+  assert.equal(putByIdRes.body.data.is24Hours, false);
+  assert.equal(putByIdRes.body.data.closeTime, '22:00');
+
+  // 7. PUT /schedules (update by body.scheduleId through Express router)
+  const putRootRes = await dispatchRoute({
+    method: 'PUT',
+    url: '/schedules',
+    body: {
+      scheduleId: createdId,
+      closeTime: '23:00',
+    },
+  });
+  assert.equal(putRootRes.statusCode, 200);
+  assert.equal(putRootRes.body.success, true);
+  assert.equal(putRootRes.body.data.closeTime, '23:00');
+
+  // 8. DELETE /schedules/:scheduleId (delete through Express router)
+  const deleteRes = await dispatchRoute({
+    method: 'DELETE',
+    url: `/schedules/${createdId}`,
+  });
+  assert.equal(deleteRes.statusCode, 200);
+  assert.equal(deleteRes.body.success, true);
+  assert.equal(deleteRes.body.message, 'Operating schedule deleted successfully');
+
+  // 9. GET /schedules/:scheduleId after deletion returns 404
+  const getDeletedRes = await dispatchRoute({
+    method: 'GET',
+    url: `/schedules/${createdId}`,
+  });
+  assert.equal(getDeletedRes.statusCode, 404);
+  assert.equal(getDeletedRes.body.success, false);
 });
