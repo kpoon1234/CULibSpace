@@ -140,7 +140,11 @@ export class StripePaymentGateway implements PaymentGateway {
       if (session.status === 'expired') {
         state = 'expired';
       } else if (session.status === 'complete') {
-        state = session.payment_status === 'paid' ? 'paid' : 'unknown';
+        // payment_status 'paid'   -> confirmed payment
+        // payment_status 'unpaid' -> async/delayed payment definitively failed on this session;
+        //                            the session is closed and cannot be retried.
+        //                            Treat as 'expired' so the caller releases openUid.
+        state = session.payment_status === 'paid' ? 'paid' : 'expired';
       } else if (session.status === 'open') {
         state = 'open';
       }

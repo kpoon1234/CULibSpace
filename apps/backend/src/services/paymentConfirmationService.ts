@@ -240,6 +240,18 @@ export class PaymentConfirmationService {
    * Only when the Checkout Session itself is no longer open (e.g. expired or closed)
    * can we mark the payment as FAILED/EXPIRED and release openUid.
    *
+   * IMPORTANT – PaymentIntent vs Checkout Session IDs:
+   * The payment_intent.payment_failed Stripe event carries a PaymentIntent ID (pi_…)
+   * as data.object.id, which is what the adapter sets as event.gatewayRef. However,
+   * retrieveCheckoutStatus calls checkout.sessions.retrieve and requires a Checkout
+   * Session ID (cs_…). Passing pi_… returns 404 → 'not_found', which would
+   * incorrectly mark the payment FAILED even though the session is still open.
+   *
+   * Fix: look up the payment record early, then use the stored payment.gatewayRef
+   * (the Checkout Session ID) for the gateway call rather than event.gatewayRef.
+   * If the stored gatewayRef is null (payment not yet bound to a session) we cannot
+   * verify the session state, so we keep openUid intact (safe fallback).
+   *
    * All status updates use a row lock / conditional update on PENDING/UNCONFIRMED
    * to ensure a concurrent success webhook is never overwritten with FAILED.
    */
@@ -252,6 +264,7 @@ export class PaymentConfirmationService {
       throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
     }
 
+    // Resolve paymentId from the signed reference first; fall back to gatewayRef lookup.
     let paymentId: number | undefined;
     try {
       if (event.reference) {
@@ -261,23 +274,53 @@ export class PaymentConfirmationService {
       // Fall back to looking up by gatewayRef
     }
 
-    if (!paymentId) {
+    // Look up the payment record to obtain the stored Checkout Session ID.
+    // We do this BEFORE the gateway call so that:
+    //   (a) we can use the correct cs_… ID even when the event carries a pi_… ID, and
+    //   (b) we can verify gateway ownership before acting.
+    let storedGatewayRef: string | null = null;
+    if (paymentId) {
+      const found = await prisma.payment.findUnique({
+        where: { paymentId },
+        select: { paymentId: true, gatewayRef: true, gateway: true },
+      });
+      if (!found) {
+        return { handled: false };
+      }
+      // Reject events from a different gateway.
+      if (found.gateway !== gateway.name) {
+        return { handled: false };
+      }
+      storedGatewayRef = found.gatewayRef;
+    } else {
+      // No usable reference in the event – look up by the incoming gatewayRef.
       const found = await prisma.payment.findFirst({
-        where: { gatewayRef: event.gatewayRef },
-        select: { paymentId: true },
+        where: { gatewayRef: event.gatewayRef, gateway: gateway.name },
+        select: { paymentId: true, gatewayRef: true },
       });
       if (!found) {
         return { handled: false };
       }
       paymentId = found.paymentId;
+      storedGatewayRef = found.gatewayRef;
     }
 
-    // Verify current checkout status with the gateway before deciding to close/release
-    const checkout = await gateway.retrieveCheckoutStatus(event.gatewayRef);
+    // Use the stored Checkout Session ID (cs_…) for the status check.
+    // If the stored ref is null (payment not yet bound to a session) we cannot
+    // confirm the session state, so preserve openUid as a safe fallback.
+    if (!storedGatewayRef) {
+      return { handled: true, activated: false, paymentId };
+    }
 
-    // If the checkout session is paid (e.g. customer retried and paid), confirm it
+    // Verify current checkout status with the gateway before deciding to close/release.
+    // Uses the stored Checkout Session ID, not the incoming event.gatewayRef, to handle
+    // the case where event.gatewayRef is a PaymentIntent ID (pi_…) rather than cs_….
+    const checkout = await gateway.retrieveCheckoutStatus(storedGatewayRef);
+
+    // If the checkout session is paid (e.g. customer retried and paid), confirm it.
+    // Use storedGatewayRef (cs_…) – not the incoming event.gatewayRef which may be pi_….
     if (checkout.state === 'paid') {
-      return this.confirmCheckout(gateway.name, event.gatewayRef, checkout, prisma, event.eventId);
+      return this.confirmCheckout(gateway.name, storedGatewayRef, checkout, prisma, event.eventId);
     }
 
     // If the checkout session is still open, the customer can still retry.
