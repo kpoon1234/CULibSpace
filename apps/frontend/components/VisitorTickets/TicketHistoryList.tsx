@@ -89,7 +89,7 @@ function TicketRow({ ticket }: { ticket: VisitorTicket }) {
   );
 }
 
-function PaymentTrail({ ticket }: { ticket: VisitorTicket }) {
+export function PaymentTrail({ ticket }: { ticket: VisitorTicket }) {
   if (ticket.payments.length === 0) {
     return <p className="py-3 text-sm text-gray-600">No payment was started for this ticket.</p>;
   }

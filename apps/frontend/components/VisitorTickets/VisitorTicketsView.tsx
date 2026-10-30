@@ -1,14 +1,20 @@
 'use client';
 
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
-import { getAuthSnapshot, getAuthToken, subscribeToAuth, type AuthUser } from '@/lib/auth';
-import { fetchMyTickets, TicketRequestError } from '@/lib/tickets';
+import {
+  clearAuth,
+  getAuthSnapshot,
+  getAuthToken,
+  subscribeToAuth,
+  type AuthUser,
+} from '@/lib/auth';
+import { fetchMyTickets } from '@/lib/tickets';
 import CurrentTicketCard from './CurrentTicketCard';
 import TicketHistoryList from './TicketHistoryList';
 import { RefreshIcon, TicketIcon } from './icons';
-import { getTicketPhase, pickCurrentTicket } from './ticketState';
+import { getTicketPhase, isSessionExpired, pickCurrentTicket } from './ticketState';
 
 const noopSubscribe = () => () => {};
 
@@ -37,6 +43,10 @@ export default function VisitorTicketsView() {
   }
   const isVisitor = user?.role === 'OUTSIDER';
 
+  // Set when the API rejects the stored token, so the page can say why the
+  // visitor was signed out instead of showing a plain "log in" prompt.
+  const [sessionEnded, setSessionEnded] = useState(false);
+
   const { data, error, isValidating, mutate } = useSWR(
     token && isVisitor ? ['myTickets', token] : null,
     () => fetchMyTickets(),
@@ -47,6 +57,14 @@ export default function VisitorTicketsView() {
       refreshInterval: (latest) =>
         latest?.some((ticket) => getTicketPhase(ticket) === 'awaiting') ? 10_000 : 60_000,
       revalidateOnFocus: true,
+      // A rejected token can't recover by retrying. Clear it — also when older
+      // tickets are already on screen — because /login sends anyone with a
+      // stored token straight back out, so a stale one would trap the visitor.
+      onError: (err) => {
+        if (!isSessionExpired(err)) return;
+        setSessionEnded(true);
+        clearAuth();
+      },
     }
   );
 
@@ -91,6 +109,16 @@ export default function VisitorTicketsView() {
 
       {!hydrated ? (
         <LoadingState />
+      ) : isSessionExpired(error) || (sessionEnded && !user) ? (
+        <Notice
+          title="Your session has ended"
+          body="For your security you've been signed out. Log in again to see your tickets."
+          action={
+            <Link href="/login" className={buttonPrimary}>
+              Log in again
+            </Link>
+          }
+        />
       ) : !user ? (
         <Notice
           title="Log in to see your tickets"
@@ -115,22 +143,12 @@ export default function VisitorTicketsView() {
         <Notice
           tone="error"
           title="We couldn't load your tickets"
-          body={
-            error instanceof TicketRequestError && error.status === 401
-              ? 'Your session has ended. Log in again to continue.'
-              : `${error instanceof Error ? error.message : 'Something went wrong.'} Your tickets are safe; try again in a moment.`
-          }
+          body={`${error instanceof Error ? error.message : 'Something went wrong.'} Your tickets are safe; try again in a moment.`}
           action={
-            error instanceof TicketRequestError && error.status === 401 ? (
-              <Link href="/login" className={buttonPrimary}>
-                Log in again
-              </Link>
-            ) : (
-              <button type="button" onClick={refresh} className={buttonSecondary}>
-                <RefreshIcon className="h-4 w-4" />
-                Try again
-              </button>
-            )
+            <button type="button" onClick={refresh} className={buttonSecondary}>
+              <RefreshIcon className="h-4 w-4" />
+              Try again
+            </button>
           }
         />
       ) : !data ? (
@@ -148,7 +166,10 @@ export default function VisitorTicketsView() {
         />
       ) : (
         <div className="flex flex-col gap-10">
-          {current && <CurrentTicketCard ticket={current} onBoundary={refresh} />}
+          {current && (
+            // Keyed so a different ticket starts with fresh boundary tracking.
+            <CurrentTicketCard key={current.ticketId} ticket={current} onBoundary={refresh} />
+          )}
 
           <section aria-labelledby="ticket-history-heading">
             <div className="mb-3 flex items-baseline justify-between gap-4">

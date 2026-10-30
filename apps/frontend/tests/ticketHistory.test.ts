@@ -2,10 +2,16 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import { fetchMyTickets, TicketRequestError, type VisitorTicket } from '../lib/tickets';
 import {
+  crossedBoundary,
   formatAmount,
   formatWindow,
+  getBoundaryKey,
+  getCurrentTicketCopy,
+  getLivePhase,
   getTicketPhase,
+  isSessionExpired,
   pickCurrentTicket,
+  type BoundaryKey,
 } from '../components/VisitorTickets/ticketState';
 
 const NOW = Date.parse('2026-10-26T09:00:00.000Z');
@@ -127,6 +133,116 @@ test('an unparseable window says so instead of rendering Invalid Date', () => {
 test('amounts are formatted from satang, not baht', () => {
   assert.match(formatAmount({ amountSatang: 5000, currency: 'thb' }), /50\.00/);
   assert.match(formatAmount({ amountSatang: 12345, currency: 'THB' }), /123\.45/);
+});
+
+/** Replays countdown samples (ms to start, ms to end) the way CurrentTicketCard
+ *  sees them and counts how many times it would ask the server to refetch. */
+function replay(samples: Array<[number | null, number | null]>) {
+  let prev: BoundaryKey | null = null;
+  let refetches = 0;
+  for (const [startDiff, endDiff] of samples) {
+    const next = getBoundaryKey(startDiff, endDiff);
+    if (crossedBoundary(prev, next)) refetches += 1;
+    prev = next;
+  }
+  return { refetches, last: prev };
+}
+
+test('the boundary key reflects both countdowns, with the end winning', () => {
+  assert.equal(getBoundaryKey(null, null), null);
+  assert.equal(getBoundaryKey(HOUR, 5 * HOUR), 'pending');
+  assert.equal(getBoundaryKey(-HOUR, 3 * HOUR), 'started');
+  assert.equal(getBoundaryKey(-5 * HOUR, 0), 'ended');
+  // A skewed clock can report the start as still ahead while the end has passed.
+  assert.equal(getBoundaryKey(HOUR, -HOUR), 'ended');
+});
+
+test('ticking normally through a ticket refetches once at start and once at end', () => {
+  const { refetches, last } = replay([
+    [null, null],
+    [2_000, 4 * HOUR + 2_000],
+    [1_000, 4 * HOUR + 1_000],
+    [0, 4 * HOUR],
+    [-1_000, 4 * HOUR - 1_000],
+    [-4 * HOUR, 0],
+  ]);
+  assert.equal(refetches, 2);
+  assert.equal(last, 'ended');
+});
+
+test('a late timer that skips past the end still refetches', () => {
+  // Active ticket, then the tab is throttled and the next tick lands an hour
+  // after expiry: the card must not lose its countdown without refetching.
+  const { refetches, last } = replay([
+    [null, null],
+    [-HOUR, 30_000],
+    [-6 * HOUR, -HOUR],
+  ]);
+  assert.equal(refetches, 1);
+  assert.equal(last, 'ended');
+});
+
+test('a late timer that skips both start and end refetches once', () => {
+  const { refetches } = replay([
+    [null, null],
+    [60_000, 4 * HOUR + 60_000],
+    [-5 * HOUR, -HOUR],
+  ]);
+  assert.equal(refetches, 1);
+});
+
+test('opening on a ticket that already ended refetches, opening on an active one does not', () => {
+  assert.equal(
+    replay([
+      [null, null],
+      [-5 * HOUR, -1_000],
+    ]).refetches,
+    1
+  );
+  assert.equal(
+    replay([
+      [null, null],
+      [-HOUR, 3 * HOUR],
+    ]).refetches,
+    0
+  );
+});
+
+test('repeated samples on the same side of a boundary never trigger a refetch loop', () => {
+  const { refetches } = replay([
+    [-5 * HOUR, -1_000],
+    [-5 * HOUR - 1_000, -2_000],
+    [-5 * HOUR - 2_000, -3_000],
+  ]);
+  assert.equal(refetches, 1);
+});
+
+test('once the live clock passes the end, the card reads as expired, not "confirming payment"', () => {
+  const paid = ticket({ ticketId: 1 });
+  const phase = getLivePhase(paid, 'ended');
+  assert.equal(phase, 'expired');
+
+  const copy = getCurrentTicketCopy(phase, paid);
+  assert.match(copy.heading, /^Ended at /);
+  assert.doesNotMatch(copy.heading, /Confirming/);
+});
+
+test('the live phase follows the clock for paid tickets and the server otherwise', () => {
+  const paid = ticket({ ticketId: 1 });
+  assert.equal(getLivePhase(paid, 'pending'), 'upcoming');
+  assert.equal(getLivePhase(paid, 'started'), 'active');
+
+  const awaiting = ticket({ ticketId: 2, status: 'UNPAID', payments: [payment('PENDING')] });
+  assert.equal(getLivePhase(awaiting, null), 'awaiting');
+  assert.equal(getCurrentTicketCopy('awaiting', awaiting).heading, 'Confirming your payment');
+});
+
+test('only a 401 counts as an ended session', () => {
+  assert.equal(isSessionExpired(new TicketRequestError('Unauthorized', 401)), true);
+  assert.equal(isSessionExpired(new TicketRequestError('Forbidden', 403)), false);
+  assert.equal(isSessionExpired(new TicketRequestError('Offline', 0)), false);
+  assert.equal(isSessionExpired(new Error('boom')), false);
+  assert.equal(isSessionExpired(undefined), false);
 });
 
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');

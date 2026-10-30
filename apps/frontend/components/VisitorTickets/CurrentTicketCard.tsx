@@ -1,23 +1,34 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { formatHms, useCountdown } from '@/lib/useCountdown';
 import type { VisitorTicket } from '@/lib/tickets';
+import { ChevronDownIcon } from './icons';
 import { TicketStatusBadge } from './StatusBadge';
+import { PaymentTrail } from './TicketHistoryList';
 import {
+  crossedBoundary,
   formatAmount,
   formatDateTime,
   formatTime,
   formatWindow,
+  getBoundaryKey,
+  getCurrentTicketCopy,
+  getLivePhase,
   getPaidPayment,
-  getTicketPhase,
+  type BoundaryKey,
 } from './ticketState';
 
 interface CurrentTicketCardProps {
   ticket: VisitorTicket;
-  /** Called once when the countdown reaches zero, so the page refetches the
+  /** Called when the ticket crosses its start or end, so the page refetches the
    *  server's verdict instead of waiting for the next poll. */
   onBoundary: () => void;
+}
+
+function parseOrNull(iso: string) {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /**
@@ -27,47 +38,40 @@ interface CurrentTicketCardProps {
  * beside it in words.
  */
 export default function CurrentTicketCard({ ticket, onBoundary }: CurrentTicketCardProps) {
-  const phase = getTicketPhase(ticket);
-  const startMs = Date.parse(ticket.startDateTime);
-  const endMs = Date.parse(ticket.endDateTime);
-  const targetMs = phase === 'active' ? endMs : phase === 'upcoming' ? startMs : null;
+  const isPaid = ticket.status === 'PAID';
+  const startMs = parseOrNull(ticket.startDateTime);
+  const endMs = parseOrNull(ticket.endDateTime);
 
-  const diff = useCountdown(targetMs !== null && Number.isFinite(targetMs) ? targetMs : null);
+  // Both boundaries tick independently, so a late timer still knows which one
+  // it skipped (see getBoundaryKey) rather than dropping the countdown.
+  const startDiff = useCountdown(isPaid ? startMs : null);
+  const endDiff = useCountdown(isPaid ? endMs : null);
+  const key = getBoundaryKey(startDiff, endDiff);
 
-  // Fire on the edge into zero, not on every render, so an unmemoised parent
-  // callback cannot become a refetch loop (same guard as CountdownTimer).
-  const firedRef = useRef(false);
-  const reachedBoundary = diff !== null && diff <= 0;
+  const prevKeyRef = useRef<BoundaryKey | null>(null);
   useEffect(() => {
-    if (!reachedBoundary) {
-      firedRef.current = false;
-      return;
-    }
-    if (firedRef.current) return;
-    firedRef.current = true;
-    onBoundary();
-  }, [reachedBoundary, onBoundary]);
+    const prev = prevKeyRef.current;
+    prevKeyRef.current = key;
+    if (crossedBoundary(prev, key)) onBoundary();
+  }, [key, onBoundary]);
+
+  const phase = getLivePhase(ticket, key);
+  const { heading, lede } = getCurrentTicketCopy(phase, ticket);
+  const remainingMs = phase === 'upcoming' ? startDiff : phase === 'active' ? endDiff : null;
+  const showTimer = isPaid && phase !== 'expired';
 
   const paid = getPaidPayment(ticket);
   const latest = ticket.payments[0];
 
-  const heading =
-    phase === 'active'
-      ? `Valid until ${formatTime(ticket.endDateTime)}`
-      : phase === 'upcoming'
-        ? `Starts at ${formatTime(ticket.startDateTime)}`
-        : 'Confirming your payment';
-
-  const lede =
-    phase === 'awaiting'
-      ? 'Your ticket activates as soon as the payment is confirmed. This page checks again on its own.'
-      : 'Show this page at the library entrance if staff ask for your ticket.';
-
-  const totalMs = endMs - startMs;
+  const totalMs = startMs !== null && endMs !== null ? endMs - startMs : 0;
   const elapsedFraction =
-    phase === 'active' && diff !== null && totalMs > 0
-      ? Math.min(1, Math.max(0, 1 - diff / totalMs))
+    phase === 'active' && endDiff !== null && totalMs > 0
+      ? Math.min(1, Math.max(0, 1 - endDiff / totalMs))
       : null;
+
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
+  const paymentsId = useId();
+  const paymentCount = ticket.payments.length;
 
   return (
     <article
@@ -114,7 +118,7 @@ export default function CurrentTicketCard({ ticket, onBoundary }: CurrentTicketC
           </dl>
         </div>
 
-        {targetMs !== null && (
+        {showTimer && (
           <div
             role="timer"
             className="flex flex-col items-start gap-1 border-t border-hairline pt-5 md:items-end md:border-t-0 md:border-l md:pt-0 md:pl-10"
@@ -126,7 +130,9 @@ export default function CurrentTicketCard({ ticket, onBoundary }: CurrentTicketC
             >
               {/* Withheld until hydration (useCountdown returns null on the
                   server) so the digits never mismatch the prerendered markup. */}
-              {diff === null ? '--:--:--' : formatHms(Math.ceil(Math.max(0, diff) / 1000))}
+              {remainingMs === null
+                ? '--:--:--'
+                : formatHms(Math.ceil(Math.max(0, remainingMs) / 1000))}
             </span>
             <span
               aria-live="polite"
@@ -159,6 +165,33 @@ export default function CurrentTicketCard({ ticket, onBoundary }: CurrentTicketC
           </div>
         </div>
       )}
+
+      {/* The current ticket is left out of the history list below, so its
+          payment trail has to be reachable from here. */}
+      <div className="border-t border-hairline">
+        <button
+          type="button"
+          aria-expanded={paymentsOpen}
+          aria-controls={paymentsId}
+          onClick={() => setPaymentsOpen((value) => !value)}
+          className="flex w-full items-center justify-between gap-4 px-5 py-3 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none focus-visible:ring-inset sm:px-7"
+        >
+          <span>
+            {paymentsOpen ? 'Hide payment history' : 'Show payment history'}
+            <span className="ml-2 text-xs font-normal text-gray-500 tabular-nums">
+              {paymentCount} {paymentCount === 1 ? 'payment' : 'payments'}
+            </span>
+          </span>
+          <ChevronDownIcon
+            className={`h-5 w-5 text-gray-500 transition-transform duration-200 ease-out motion-reduce:transition-none ${
+              paymentsOpen ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+        <div id={paymentsId} hidden={!paymentsOpen} className="bg-gray-50 px-5 pt-1 pb-4 sm:px-7">
+          <PaymentTrail ticket={ticket} />
+        </div>
+      </div>
     </article>
   );
 }
