@@ -1,13 +1,18 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   DEFAULT_PAGE_SIZE,
+  ISSUE_SORT_KEYS,
+  ISSUE_SORT_OPTIONS,
   ISSUE_STATUSES,
   ISSUE_STATUS_LABELS,
+  sortIssues,
   useAdminIssues,
   type AdminIssue,
+  type IssueSortKey,
   type IssueStatusLabel,
+  type SortDirection,
 } from '@/lib/adminIssues';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SearchIcon } from './icons';
 
@@ -24,6 +29,10 @@ export default function IssueListView() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<IssueStatusLabel | undefined>(undefined);
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<IssueSortKey>('reported');
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    ISSUE_SORT_OPTIONS.reported.defaultDirection
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -34,6 +43,12 @@ export default function IssueListView() {
     return () => clearTimeout(id);
   }, [input]);
 
+  // A different filter has a different number of pages; always start from page 1.
+  function changeStatus(next: IssueStatusLabel | undefined) {
+    setStatus(next);
+    setPage(1);
+  }
+
   function clearSearch() {
     setInput('');
     setQ('');
@@ -41,23 +56,34 @@ export default function IssueListView() {
     inputRef.current?.focus();
   }
 
-  const {
-    page: result,
-    isLoading,
-    isFetching,
-    error,
-    retry,
-  } = useAdminIssues({
-    q,
-    status,
-    page,
-    pageSize: DEFAULT_PAGE_SIZE,
-  });
+  function changeSortKey(next: IssueSortKey) {
+    setSortKey(next);
+    setSortDirection(ISSUE_SORT_OPTIONS[next].defaultDirection);
+    setPage(1);
+  }
 
-  const total = result?.total ?? 0;
+  function changeSortDirection(next: SortDirection) {
+    setSortDirection(next);
+    setPage(1);
+  }
+
+  const { issues, isLoading, isFetching, error, retry } = useAdminIssues({ q, status });
+
+  // The API has no sort parameter, so the whole filtered set is sorted and paged here.
+  const sorted = useMemo(
+    () => (issues ? sortIssues(issues, sortKey, sortDirection) : []),
+    [issues, sortKey, sortDirection]
+  );
+
+  const total = sorted.length;
+  const pageCount = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
+
+  // Issues can disappear between fetches; never sit on a page past the end.
+  if (issues && page > pageCount) setPage(pageCount);
+
   const first = total === 0 ? 0 : (page - 1) * DEFAULT_PAGE_SIZE + 1;
   const last = Math.min(page * DEFAULT_PAGE_SIZE, total);
-  const pageCount = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
+  const visible = sorted.slice(first - 1, last);
 
   return (
     <div className="min-w-0">
@@ -87,7 +113,7 @@ export default function IssueListView() {
                 clearSearch();
               }
             }}
-            placeholder="Search by table ID, zone, or description"
+            placeholder="Search by table ID or description"
             autoComplete="off"
             spellCheck={false}
             className="w-full rounded-md border border-gray-300 bg-paper py-2 pl-10 pr-9 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-rose-200 [&::-webkit-search-cancel-button]:hidden"
@@ -109,11 +135,11 @@ export default function IssueListView() {
           aria-label="Issue status"
           className="flex flex-none overflow-x-auto rounded-md bg-gray-100 p-1 gap-1"
         >
-          <StatusTab active={!status} onClick={() => setStatus(undefined)}>
+          <StatusTab active={!status} onClick={() => changeStatus(undefined)}>
             All
           </StatusTab>
           {ISSUE_STATUSES.map((s: IssueStatusLabel) => (
-            <StatusTab key={s} active={status === s} onClick={() => setStatus(s)}>
+            <StatusTab key={s} active={status === s} onClick={() => changeStatus(s)}>
               {ISSUE_STATUS_LABELS[s]}
             </StatusTab>
           ))}
@@ -121,19 +147,35 @@ export default function IssueListView() {
       </form>
 
       <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-paper shadow-sm">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-2.5">
           <p className="text-sm text-gray-600" aria-live="polite">
             {isLoading
               ? 'Loading issues…'
-              : error && !result
+              : error && !issues
                 ? 'Failed to load'
                 : total === 0
                   ? 'No issues'
                   : `${first}–${last} of ${total} ${total === 1 ? 'issue' : 'issues'}`}
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <SortSelect
+              id="admin-issue-sort"
+              label="Sort by"
+              value={sortKey}
+              onChange={(v) => changeSortKey(v as IssueSortKey)}
+              options={ISSUE_SORT_KEYS.map((k) => [k, ISSUE_SORT_OPTIONS[k].label])}
+            />
+            <SortSelect
+              id="admin-issue-order"
+              label="Order"
+              value={sortDirection}
+              onChange={(v) => changeSortDirection(v as SortDirection)}
+              options={Object.entries(ISSUE_SORT_OPTIONS[sortKey].directions)}
+            />
+          </div>
         </div>
 
-        {error && result && (
+        {error && issues && (
           <div
             role="alert"
             className="flex items-center justify-between gap-3 bg-red-50 px-4 py-2 text-sm text-red-700"
@@ -151,7 +193,7 @@ export default function IssueListView() {
 
         {isLoading ? (
           <IssueSkeleton />
-        ) : error && !result ? (
+        ) : error && !issues ? (
           <IssueError message={error.message} onRetry={retry} />
         ) : total === 0 ? (
           <IssueEmpty query={q} filtered={Boolean(status)} onClear={clearSearch} />
@@ -160,7 +202,7 @@ export default function IssueListView() {
             aria-busy={isFetching}
             className={`transition-opacity duration-150 ${isFetching ? 'opacity-60' : ''}`}
           >
-            <IssueResultsList issues={result!.issues} />
+            <IssueResultsList issues={visible} />
           </div>
         )}
 
@@ -210,6 +252,40 @@ function StatusTab({
   );
 }
 
+function SortSelect({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: [value: string, label: string][];
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <label htmlFor={id} className="text-xs text-gray-500">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-gray-300 bg-paper py-1 pl-2 pr-7 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+      >
+        {options.map(([v, text]) => (
+          <option key={v} value={v}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function PageButton({
   disabled,
   onClick,
@@ -247,25 +323,18 @@ function IssueResultsList({ issues }: { issues: AdminIssue[] }) {
                     Table {issue.table.tableId}
                   </span>
                 </div>
-                <p className="mt-1 text-sm text-gray-600 truncate md:line-clamp-1 lg:line-clamp-2">
+                <p className="mt-1 line-clamp-1 text-sm text-gray-600 lg:line-clamp-2">
                   {issue.issueInformation}
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  <span className="text-gray-500">
-                    Zone {issue.table.zoneType} &middot;
+                <p className="mt-2 text-xs text-gray-500">
+                  Zone {issue.table.zoneType} &middot; Reported{' '}
+                  <time dateTime={issue.time}>
                     {new Date(issue.time).toLocaleString(undefined, {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })}
-                  </span>
-                  <span className="text-gray-500">
-                    Last update{' '}
-                    {new Date(issue.updatedAt).toLocaleString(undefined, {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })}
-                  </span>
-                </div>
+                  </time>
+                </p>
               </div>
               <div className="flex flex-col items-end gap-2 md:flex-row md:items-center md:gap-4">
                 <span
@@ -324,7 +393,7 @@ function IssueError({ message, onRetry }: { message: string; onRetry: () => void
       <p className="mx-auto mt-1 max-w-sm text-sm text-gray-600">
         {isSession
           ? message
-          : 'The issue service didn&apos;t respond. Check your connection and try again.'}
+          : "The issue service didn't respond. Check your connection and try again."}
       </p>
       <button
         type="button"
@@ -358,7 +427,7 @@ function IssueEmpty({
       </h2>
       <p className="mx-auto mt-1 max-w-sm text-sm text-gray-600">
         {query
-          ? 'Check the spelling, or try a table ID or zone name instead.'
+          ? 'Check the spelling, or try a table ID instead.'
           : filtered
             ? 'Switch the status back to All to see every issue.'
             : 'Issue reports appear here after members submit them.'}

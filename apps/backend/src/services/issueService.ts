@@ -41,7 +41,6 @@ const adminIssueSelect = {
   issueInformation: true,
   status: true,
   blocksTable: true,
-  updatedAt: true,
   user: { select: { uid: true, firstname: true, lastname: true, email: true } },
   table: {
     select: {
@@ -133,7 +132,6 @@ export class IssueService {
       issues: rows.map((issue: AdminIssue) => ({
         issueId: issue.issueId,
         time: issue.time.toISOString(),
-        updatedAt: issue.updatedAt.toISOString(),
         issueInformation: issue.issueInformation,
         status: toIssueStatusLabel(issue.status),
         blocksTable: issue.blocksTable,

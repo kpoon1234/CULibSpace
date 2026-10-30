@@ -2,7 +2,14 @@
 
 import useSWR from 'swr';
 import { API_URL, getAuthToken } from '@/lib/auth';
-import type { AdminIssuePage, AdminIssueQuery, IssueStatusLabel } from './types';
+import { MAX_API_PAGE_SIZE } from './types';
+import type {
+  AdminIssue,
+  AdminIssueFilter,
+  AdminIssuePage,
+  AdminIssueQuery,
+  IssueStatusLabel,
+} from './types';
 
 const ISSUES_PATH = '/api/admin/issues';
 
@@ -35,28 +42,47 @@ export async function fetchAdminIssues(
   return body.data as AdminIssuePage;
 }
 
+/** Loads every page for a search/status filter so the list can be sorted as a whole. */
+export async function fetchAllAdminIssues(
+  token: string,
+  filter: AdminIssueFilter
+): Promise<AdminIssue[]> {
+  const pageSize = MAX_API_PAGE_SIZE;
+  const first = await fetchAdminIssues(token, { ...filter, page: 1, pageSize });
+  const pageCount = Math.ceil(first.total / pageSize);
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(0, pageCount - 1) }, (_, i) =>
+      fetchAdminIssues(token, { ...filter, page: i + 2, pageSize })
+    )
+  );
+  // Drop duplicates in case a new issue shifted rows between page requests.
+  const byId = new Map<number, AdminIssue>();
+  for (const issue of [first, ...rest].flatMap((p) => p.issues)) byId.set(issue.issueId, issue);
+  return [...byId.values()];
+}
+
 export interface UseAdminIssuesResult {
-  page: AdminIssuePage | undefined;
+  issues: AdminIssue[] | undefined;
   isLoading: boolean;
   isFetching: boolean;
   error: Error | undefined;
   retry: () => void;
 }
 
-export function useAdminIssues(query: AdminIssueQuery): UseAdminIssuesResult {
+export function useAdminIssues(filter: AdminIssueFilter): UseAdminIssuesResult {
   const token = getAuthToken();
-  const res = useSWR<AdminIssuePage, Error>(
-    token ? ['adminIssues', query] : null,
-    async ([, q]: [string, AdminIssueQuery]) => {
+  const res = useSWR<AdminIssue[], Error>(
+    token ? ['adminIssues', filter.q ?? '', filter.status ?? ''] : null,
+    async () => {
       const t = getAuthToken();
       if (!t) throw new Error('No auth token');
-      return fetchAdminIssues(t, q);
+      return fetchAllAdminIssues(t, filter);
     },
     { keepPreviousData: true, revalidateOnFocus: false, dedupingInterval: 2_000 }
   );
 
   return {
-    page: res.data,
+    issues: res.data,
     isLoading: !res.data && !res.error,
     isFetching: res.isValidating,
     error: res.error,
