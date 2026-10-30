@@ -55,6 +55,47 @@ export function clearAuth(): void {
   window.dispatchEvent(new Event(AUTH_CHANGE_EVENT));
 }
 
+/** Seconds-since-epoch `exp` claim of a JWT, or null if it can't be read. */
+function readTokenExpiry(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const json = atob(part.replace(/-/g, '+').replace(/_/g, '/'));
+    const exp = (JSON.parse(json) as { exp?: unknown }).exp;
+    return typeof exp === 'number' ? exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the stored session still works.
+ *   'invalid' → expired, malformed, or rejected by the server: safe to clear.
+ *   'unknown' → the server could not be asked (offline, 5xx): keep the session,
+ *               so a backend outage does not sign everyone out.
+ * The expiry check runs first and needs no network.
+ */
+export async function verifyStoredSession(): Promise<'valid' | 'invalid' | 'unknown'> {
+  const token = getAuthToken();
+  if (!token) return 'invalid';
+
+  const exp = readTokenExpiry(token);
+  if (exp === null || exp * 1000 <= Date.now()) return 'invalid';
+
+  try {
+    const response = await fetch(`${API_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.ok) return 'valid';
+    // 404: the account behind the token no longer exists.
+    if ([401, 403, 404].includes(response.status)) return 'invalid';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export function subscribeToAuth(listener: () => void): () => void {
   window.addEventListener(AUTH_CHANGE_EVENT, listener);
   return () => window.removeEventListener(AUTH_CHANGE_EVENT, listener);

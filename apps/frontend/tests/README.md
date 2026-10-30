@@ -12,6 +12,9 @@ They run in the PR workflow before the frontend build.
 - `ticketHistory.test.ts` (US6-2): visitor ticket phase (active, upcoming, awaiting
   payment, unpaid, expired, refunded), which ticket is shown as current, validity
   window and amount formatting, and the `fetchMyTickets` HTTP client contract.
+- `authSession.test.ts`: `verifyStoredSession`, which `/login` uses before redirecting
+  a stored session away: expired or malformed tokens are invalid without a request,
+  401/403/404 are invalid, and an offline or 5xx backend leaves the session alone.
 
 ## Manual browser checks
 
