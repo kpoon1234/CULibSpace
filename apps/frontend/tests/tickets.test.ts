@@ -97,12 +97,12 @@ test('a paid response without a checkout URL is still valid', () => {
 });
 
 for (const [name, patch] of [
-  ['non-positive amount', { amountSatang: 0 }],
+  ['negative amount', { amountSatang: -1 }],
   ['fractional amount', { amountSatang: 50.5 }],
   ['bad currency', { currency: 'BAHT' }],
   ['unknown payment status', { paymentStatus: 'SOMETHING' }],
   ['unknown ticket status', { ticketStatus: 'ACTIVE' }],
-  ['unsafe checkout URL', { checkoutUrl: 'http://evil.example/pay' }],
+  ['non-string checkout URL', { checkoutUrl: 42 }],
   ['missing ticket id', { ticketId: undefined }],
   ['missing validity date', { ticketEndDateTime: null }],
 ] as const) {
@@ -111,8 +111,24 @@ for (const [name, patch] of [
   });
 }
 
+test('a zero amount from a replayed payment is accepted', () => {
+  assert.equal(parseTicketPurchaseData({ ...validData, amountSatang: 0 })?.amountSatang, 0);
+});
+
+test('a non-https checkout URL does not reject a paid response', () => {
+  const parsed = parseTicketPurchaseData({
+    ...validData,
+    checkoutUrl: 'http://localhost:4242/pay',
+    paymentStatus: 'PAID',
+    ticketStatus: 'PAID',
+  });
+  assert.equal(parsed?.paymentStatus, 'PAID');
+  // The page still refuses to open it, because isSafeCheckoutUrl runs before navigating.
+  assert.ok(!isSafeCheckoutUrl(parsed?.checkoutUrl));
+});
+
 test('a malformed success body becomes INVALID_RESPONSE instead of redirecting', async () => {
-  reply(200, { success: true, data: { ...validData, checkoutUrl: 'javascript:alert(1)' } });
+  reply(200, { success: true, data: { ...validData, ticketId: 'seven' } });
   const result = await purchaseVisitorTicket(crypto.randomUUID());
   assert.equal(result.ok, false);
   assert.equal(!result.ok && result.code, 'INVALID_RESPONSE');
@@ -142,7 +158,17 @@ test('purchase errors map to visitor-facing messages and next steps', () => {
   assert.equal(describePurchaseError(fail(504, 'GATEWAY_TIMEOUT', true)).action, 'retry');
   assert.equal(describePurchaseError(fail(0, 'NETWORK_ERROR', true)).action, 'retry');
   assert.equal(describePurchaseError(fail(500)).action, 'retry');
-  assert.equal(describePurchaseError(fail(418, 'SOMETHING_NEW')).action, 'none');
+  assert.equal(describePurchaseError(fail(418, 'SOMETHING_NEW')).action, 'retry');
+  assert.equal(describePurchaseError(fail(429)).action, 'retry');
+  assert.equal(describePurchaseError(fail(409, 'PAYMENT_REFERENCE_MISMATCH')).action, 'retry');
+  assert.equal(describePurchaseError(fail(403, 'NOT_AN_OUTSIDE_USER')).action, 'none');
+  assert.equal(describePurchaseError(fail(200, 'CHECKOUT_URL_UNSAFE')).action, 'none');
+  // retryable from the backend wins over a code that is final by default...
+  assert.equal(describePurchaseError(fail(503, 'CONFIG_UNAVAILABLE', true)).action, 'retry');
+  assert.match(describePurchaseError(fail(503, 'CONFIG_UNAVAILABLE', true)).message, /try again/);
+  assert.equal(describePurchaseError(fail(503, 'CONFIG_UNAVAILABLE')).action, 'none');
+  // ...but a restart still gets the new purchase key it needs.
+  assert.equal(describePurchaseError(fail(409, 'PAYMENT_NOT_COMPLETED', true)).action, 'restart');
   assert.notEqual(
     describePurchaseError(fail(502, 'GATEWAY_REJECTED')).message,
     'raw backend message'

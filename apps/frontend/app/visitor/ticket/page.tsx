@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getAuthSnapshot, getAuthToken, subscribeToAuth } from '@/lib/auth';
+import { clearAuth, getAuthSnapshot, getAuthToken, subscribeToAuth } from '@/lib/auth';
 import {
   describePurchaseError,
   formatTicketAmount,
+  isSafeCheckoutUrl,
   isValidIdempotencyKey,
   purchaseVisitorTicket,
   type PurchaseErrorAction,
@@ -161,6 +162,7 @@ export default function VisitorTicketPage() {
 
     if (startAnother) {
       purchaseKey = rotatePurchaseKey(uid);
+      setPurchase(null);
       setPaymentConfirmed(false);
       setTicketActive(false);
       setTicketExpired(false);
@@ -177,6 +179,9 @@ export default function VisitorTicketPage() {
       if (!isCurrentRequest()) return;
 
       if (!result.ok) {
+        // The summary must not keep showing an earlier ticket next to this error.
+        setPurchase(null);
+
         if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
           setPaymentPending(true);
           setNotice(
@@ -188,6 +193,8 @@ export default function VisitorTicketPage() {
         const view = describePurchaseError(result);
 
         if (view.action === 'login') {
+          // /login sends a stored token straight back home, so end the session first.
+          clearAuth();
           router.push('/login');
           return;
         }
@@ -275,9 +282,24 @@ export default function VisitorTicketPage() {
       // Check again immediately before navigating to the external checkout.
       if (!isCurrentRequest()) return;
 
+      // Only an https URL may be opened; retrying would return the same URL.
+      if (!isSafeCheckoutUrl(checkoutUrl)) {
+        const unsafe = describePurchaseError({
+          ok: false,
+          status: 200,
+          code: 'CHECKOUT_URL_UNSAFE',
+          message: '',
+          retryable: false,
+        });
+        setError(unsafe.message);
+        setErrorAction(unsafe.action);
+        return;
+      }
+
       window.location.assign(checkoutUrl);
     } catch {
       if (isCurrentRequest()) {
+        setPurchase(null);
         setError('Unable to start checkout. Please try again.');
         setErrorAction('retry');
       }

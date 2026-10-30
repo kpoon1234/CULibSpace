@@ -57,6 +57,10 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 /** Only a well-formed https URL may be used as the external checkout target. */
 export function isSafeCheckoutUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -77,7 +81,8 @@ export function parseTicketPurchaseData(raw: unknown): TicketPurchaseData | null
   const data = raw as Record<string, unknown>;
 
   if (!isPositiveInteger(data.ticketId) || !isPositiveInteger(data.paymentId)) return null;
-  if (!isPositiveInteger(data.amountSatang)) return null;
+  // Only the configured price must be positive; a replayed historical payment may be 0.
+  if (!isNonNegativeInteger(data.amountSatang)) return null;
   if (typeof data.currency !== 'string' || !CURRENCY_PATTERN.test(data.currency)) return null;
 
   if (typeof data.paymentStatus !== 'string' || typeof data.ticketStatus !== 'string') {
@@ -89,9 +94,14 @@ export function parseTicketPurchaseData(raw: unknown): TicketPurchaseData | null
     return null;
   }
 
-  // A checkout URL is optional (e.g. already paid), but if present it must be safe.
-  if (data.checkoutUrl !== null && data.checkoutUrl !== undefined) {
-    if (!isSafeCheckoutUrl(data.checkoutUrl)) return null;
+  // A checkout URL is optional (e.g. already paid). Its scheme is checked only right
+  // before opening checkout, so an unused URL cannot reject an already-paid response.
+  if (
+    data.checkoutUrl !== null &&
+    data.checkoutUrl !== undefined &&
+    typeof data.checkoutUrl !== 'string'
+  ) {
+    return null;
   }
 
   const dates = [data.expiresAt, data.ticketStartDateTime, data.ticketEndDateTime];
@@ -128,7 +138,7 @@ export function formatTicketAmount(amountSatang: number, currency: string): stri
  * - retry: try again with the same purchase key (the backend recovers the same payment)
  * - restart: the previous attempt is final; the next attempt needs a new purchase key
  * - login / onboarding: fix the account first
- * - none: nothing the visitor can do right now
+ * - none: a final error the visitor cannot fix by trying again (e.g. ticket sales not set up)
  */
 export type PurchaseErrorAction = 'retry' | 'restart' | 'login' | 'onboarding' | 'none';
 
@@ -164,6 +174,10 @@ const PURCHASE_ERRORS: Record<string, PurchaseErrorView> = {
   },
   CONFIG_UNAVAILABLE: {
     message: 'Ticket sales are not available right now. Please contact the library.',
+    action: 'none',
+  },
+  CHECKOUT_URL_UNSAFE: {
+    message: 'Secure checkout could not be opened. Please contact the library.',
     action: 'none',
   },
   INVALID_TICKET_PRICE: {
@@ -212,6 +226,14 @@ const PURCHASE_ERRORS: Record<string, PurchaseErrorView> = {
   },
 };
 
+const GENERIC_RETRY_MESSAGE = 'Something went wrong while starting checkout. Please try again.';
+
+/** Messages for codes that are final by default but temporary when the backend says so. */
+const RETRYABLE_MESSAGES: Record<string, string> = {
+  CONFIG_UNAVAILABLE:
+    'Ticket sales are temporarily unavailable. Please try again in a moment — you have not been charged.',
+};
+
 /** Turns a failed purchase into a visitor-facing message and next step. */
 export function describePurchaseError(
   result: Extract<TicketPurchaseResult, { ok: false }>
@@ -219,18 +241,31 @@ export function describePurchaseError(
   if (result.status === 401) return PURCHASE_ERRORS.UNAUTHORIZED;
 
   const known = result.code ? PURCHASE_ERRORS[result.code] : undefined;
-  if (known) return known;
 
-  if (result.retryable || result.status >= 500 || result.status === 0) {
-    return {
-      message: 'Something went wrong while starting checkout. Please try again.',
-      action: 'retry',
-    };
+  // A restart already lets the visitor try again, with the new purchase key it needs.
+  if (known?.action === 'restart') return known;
+
+  // The backend knows whether this particular failure is temporary (e.g. a database
+  // blip behind CONFIG_UNAVAILABLE), so its retryable flag wins over the code mapping.
+  if (result.retryable) {
+    return known?.action === 'retry'
+      ? known
+      : {
+          message: RETRYABLE_MESSAGES[result.code ?? ''] ?? GENERIC_RETRY_MESSAGE,
+          action: 'retry',
+        };
   }
 
+  if (known) return known;
+
+  if (result.status >= 500 || result.status === 0) {
+    return { message: GENERIC_RETRY_MESSAGE, action: 'retry' };
+  }
+
+  // An unmapped 4xx (429, 403, 409, …) is not known to be final, so keep a way forward.
   return {
-    message: 'We could not start your ticket purchase. Please try again later.',
-    action: 'none',
+    message: 'We could not start your ticket purchase. Please try again in a moment.',
+    action: 'retry',
   };
 }
 
