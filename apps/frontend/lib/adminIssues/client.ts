@@ -1,93 +1,62 @@
-'use client';
-
-import useSWR from 'swr';
 import { API_URL, getAuthToken } from '@/lib/auth';
-import { MAX_API_PAGE_SIZE } from './types';
-import type {
-  AdminIssue,
-  AdminIssueFilter,
-  AdminIssuePage,
-  AdminIssueQuery,
-  IssueStatusLabel,
-} from './types';
+import type { AdminIssuePage, AdminIssueQuery, Envelope, UpdateAdminIssueInput } from './types';
 
-const ISSUES_PATH = '/api/admin/issues';
+const ISSUES_PATH = process.env.NEXT_PUBLIC_ADMIN_ISSUES_PATH || '/api/admin/issues';
+export const ADMIN_ISSUE_PAGE_SIZE = 20;
 
-export async function fetchAdminIssues(
-  token: string,
+function queryString(query: AdminIssueQuery): string {
+  const params = new URLSearchParams();
+  if (query.q?.trim()) params.set('q', query.q.trim());
+  if (query.status) params.set('status', query.status);
+  params.set('page', String(query.page ?? 1));
+  params.set('pageSize', String(query.pageSize ?? ADMIN_ISSUE_PAGE_SIZE));
+  return `?${params.toString()}`;
+}
+
+async function readEnvelope<T>(response: Response, label: string): Promise<T> {
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('เซสชันผู้ดูแลระบบหมดอายุหรือไม่มีสิทธิ์ กรุณาเข้าสู่ระบบใหม่');
+  }
+  let body: Envelope<T>;
+  try {
+    body = (await response.json()) as Envelope<T>;
+  } catch {
+    throw new Error(`${label}: เซิร์ฟเวอร์ตอบกลับข้อมูลที่อ่านไม่ได้`);
+  }
+  if (!response.ok || !body.success || body.data === undefined) {
+    throw new Error(body.error || `${label}: HTTP ${response.status}`);
+  }
+  return body.data;
+}
+
+export async function listAdminIssues(
   query: AdminIssueQuery,
   signal?: AbortSignal
 ): Promise<AdminIssuePage> {
-  const params = new URLSearchParams({
-    page: String(query.page ?? 1),
-    pageSize: String(query.pageSize ?? 20),
+  const token = getAuthToken();
+  const response = await fetch(`${API_URL}${ISSUES_PATH}${queryString(query)}`, {
+    signal,
+    headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    cache: 'no-store',
   });
-  if (query.q?.trim()) params.set('q', query.q.trim());
-  if (query.status) params.set('status', query.status);
+  const data = await readEnvelope<AdminIssuePage>(response, 'issues');
+  if (!Array.isArray(data.issues)) throw new Error('issues: รูปแบบรายการไม่ถูกต้อง');
+  return data;
+}
 
-  const response = await fetch(`${API_URL}${ISSUES_PATH}?${params}`, {
+export async function updateAdminIssue(
+  issueId: number,
+  input: UpdateAdminIssueInput
+): Promise<void> {
+  const token = getAuthToken();
+  const response = await fetch(`${API_URL}${ISSUES_PATH}/${issueId}`, {
+    method: 'PATCH',
     headers: {
       Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    signal,
+    body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null);
-  if (response.status === 401 || response.status === 403) {
-    throw new Error('Your admin session has expired. Please log in again.');
-  }
-  if (!response.ok || !body?.success) {
-    throw new Error(body?.error || `Failed to load issue reports (${response.status})`);
-  }
-  return body.data as AdminIssuePage;
+  await readEnvelope<unknown>(response, 'update issue');
 }
-
-/** Loads every page for a search/status filter so the list can be sorted as a whole. */
-export async function fetchAllAdminIssues(
-  token: string,
-  filter: AdminIssueFilter
-): Promise<AdminIssue[]> {
-  const pageSize = MAX_API_PAGE_SIZE;
-  const first = await fetchAdminIssues(token, { ...filter, page: 1, pageSize });
-  const pageCount = Math.ceil(first.total / pageSize);
-  const rest = await Promise.all(
-    Array.from({ length: Math.max(0, pageCount - 1) }, (_, i) =>
-      fetchAdminIssues(token, { ...filter, page: i + 2, pageSize })
-    )
-  );
-  // Drop duplicates in case a new issue shifted rows between page requests.
-  const byId = new Map<number, AdminIssue>();
-  for (const issue of [first, ...rest].flatMap((p) => p.issues)) byId.set(issue.issueId, issue);
-  return [...byId.values()];
-}
-
-export interface UseAdminIssuesResult {
-  issues: AdminIssue[] | undefined;
-  isLoading: boolean;
-  isFetching: boolean;
-  error: Error | undefined;
-  retry: () => void;
-}
-
-export function useAdminIssues(filter: AdminIssueFilter): UseAdminIssuesResult {
-  const token = getAuthToken();
-  const res = useSWR<AdminIssue[], Error>(
-    token ? ['adminIssues', filter.q ?? '', filter.status ?? ''] : null,
-    async () => {
-      const t = getAuthToken();
-      if (!t) throw new Error('No auth token');
-      return fetchAllAdminIssues(t, filter);
-    },
-    { keepPreviousData: true, revalidateOnFocus: false, dedupingInterval: 2_000 }
-  );
-
-  return {
-    issues: res.data,
-    isLoading: !res.data && !res.error,
-    isFetching: res.isValidating,
-    error: res.error,
-    retry: () => void res.mutate(),
-  };
-}
-
-export type { IssueStatusLabel };

@@ -27,6 +27,7 @@ const { LockService } = await import('../services/lockService.js');
 const { ScheduleService } = await import('../services/scheduleService.js');
 const prisma = new PrismaClient();
 const runId = randomUUID();
+let createdConfig = false;
 const userIds: number[] = [],
   tableIds: number[] = [],
   zoneIds: number[] = [];
@@ -176,6 +177,10 @@ async function assertRenewedHold(tableId: number, uid: number, token: string) {
 }
 
 try {
+  if (!(await prisma.systemConfig.findUnique({ where: { configId: 1 } }))) {
+    await prisma.systemConfig.create({ data: { configId: 1 } });
+    createdConfig = true;
+  }
   await test('expiration skips A while holding B, so a table-switch hold cannot deadlock', async () => {
     const { old, target } = await expiredPair();
     const aLocked = deferred(),
@@ -579,6 +584,7 @@ try {
     await prisma.table.deleteMany({ where: { tableId: { in: tableIds } } });
     await prisma.zone.deleteMany({ where: { zoneId: { in: zoneIds } } });
     await prisma.user.deleteMany({ where: { uid: { in: userIds } } });
+    if (createdConfig) await prisma.systemConfig.delete({ where: { configId: 1 } });
   } finally {
     await prisma.$disconnect();
   }

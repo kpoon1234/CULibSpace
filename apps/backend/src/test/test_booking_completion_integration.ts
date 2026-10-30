@@ -30,6 +30,7 @@ const tableIds: number[] = [];
 const zoneIds: number[] = [];
 const userIds: number[] = [];
 let fixtureNumber = 0;
+let createdConfig = false;
 
 function deferred() {
   let resolve!: () => void;
@@ -185,8 +186,12 @@ async function runRace(first: 'worker' | 'check-in') {
 }
 
 try {
-  const config = await prisma.systemConfig.findFirst();
-  const earlyMinutes = config?.earlyCheckInMinutes ?? 15;
+  let config = await prisma.systemConfig.findUnique({ where: { configId: 1 } });
+  if (!config) {
+    config = await prisma.systemConfig.create({ data: { configId: 1 } });
+    createdConfig = true;
+  }
+  const earlyMinutes = config.earlyCheckInMinutes;
   assert.ok(earlyMinutes > 0, 'The integration test needs an early check-in window.');
 
   // A has ended, but B checked in before its scheduled start.
@@ -260,6 +265,7 @@ try {
     if (tableIds.length) await prisma.table.deleteMany({ where: { tableId: { in: tableIds } } });
     if (zoneIds.length) await prisma.zone.deleteMany({ where: { zoneId: { in: zoneIds } } });
     if (userIds.length) await prisma.user.deleteMany({ where: { uid: { in: userIds } } });
+    if (createdConfig) await prisma.systemConfig.delete({ where: { configId: 1 } });
   } finally {
     await prisma.$disconnect();
   }

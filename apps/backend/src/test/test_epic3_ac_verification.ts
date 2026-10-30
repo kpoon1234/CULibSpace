@@ -43,6 +43,8 @@ function createMockPrisma(overrides: {
               maxBookingDurationMinutes: 120,
               minScoreToBook: 50.0,
               maxAdvanceBookingDays: 7,
+              earlyCheckInMinutes: 15,
+              lateThresholdMinutes: 15,
             },
     },
     operatingSchedule: {
@@ -183,7 +185,12 @@ async function runEpic3VerificationSuite() {
   // AC 3.1.2 (Part A): Reject booking exceeding max duration (e.g. 180 min > 120 min max)
   try {
     const excessiveEnd = new Date(validStart.getTime() + 180 * 60 * 1000); // 3 hours
-    await ScheduleService.validateTargetTimeWindow(validStart, excessiveEnd, true);
+    await ScheduleService.validateTargetTimeWindow(
+      validStart,
+      excessiveEnd,
+      true,
+      createMockPrisma({ user: defaultUser, table: defaultTable }) as any
+    );
     assert(false, 'AC 3.1.2: Excessive duration should have been rejected');
   } catch (err: any) {
     assert(
@@ -197,7 +204,12 @@ async function runEpic3VerificationSuite() {
     const lateStart = new Date(tomorrow);
     lateStart.setHours(21, 30, 0, 0);
     const lateEnd = new Date(lateStart.getTime() + 60 * 60 * 1000); // 22:30
-    await ScheduleService.validateTargetTimeWindow(lateStart, lateEnd, true);
+    await ScheduleService.validateTargetTimeWindow(
+      lateStart,
+      lateEnd,
+      true,
+      createMockPrisma({ user: defaultUser, table: defaultTable }) as any
+    );
     assert(false, 'AC 3.1.2: Outside operating hours should have been rejected');
   } catch (err: any) {
     assert(

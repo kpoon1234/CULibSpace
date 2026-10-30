@@ -56,18 +56,17 @@ export const UsersIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const IssuesIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5" y="4" width="14" height="17" rx="2" />
+    <path d="M9 4.5h6M9 10h6M9 14h6M9 18h3" />
+  </Icon>
+);
+
 export const HistoryIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" />
     <path d="M3.5 4v4h4" />
     <path d="M12 7.5V12l3 2" />
-  </Icon>
-);
-
-export const IssueIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M1 9v6l4 2v2l4-2v-2z" />
-    <path d="M9 9h2a7 7 0 0 0 7-7H9z" />
-    <circle cx="11" cy="5" r="1" />
   </Icon>
 );
