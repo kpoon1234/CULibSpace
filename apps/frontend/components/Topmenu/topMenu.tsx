@@ -124,19 +124,24 @@ export default function TopMenu() {
                         role="menu"
                         className="absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-md border border-hairline bg-white py-1 shadow-lg"
                       >
-                        {user.role === 'OUTSIDER' && (
-                          <button
-                            role="menuitem"
-                            type="button"
-                            onClick={() => {
-                              router.push('/visitor/ticket');
-                              setIsDropdownOpen(false);
-                            }}
-                            className="block w-full px-4 py-2 text-left text-sm font-semibold text-chula-pink hover:bg-chula-pink/10"
-                          >
-                            Buy visitor ticket
-                          </button>
-                        )}
+                        {user.role === 'OUTSIDER' &&
+                          [
+                            { href: '/visitor/tickets', label: 'My tickets' },
+                            { href: '/visitor/ticket', label: 'Buy visitor ticket' },
+                          ].map((item) => (
+                            <button
+                              key={item.href}
+                              role="menuitem"
+                              type="button"
+                              onClick={() => {
+                                router.push(item.href);
+                                setIsDropdownOpen(false);
+                              }}
+                              className="block w-full px-4 py-2 text-left text-sm font-semibold text-chula-pink hover:bg-chula-pink/10"
+                            >
+                              {item.label}
+                            </button>
+                          ))}
                         {user.role === 'ADMIN' &&
                           [{ href: '/admin', label: 'Admin Dashboard' }].map((item) => (
                             <button

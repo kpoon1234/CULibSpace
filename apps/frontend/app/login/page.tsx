@@ -3,7 +3,14 @@
 import { useState, FormEvent, Suspense } from 'react';
 import ForgotPassword from './../../components/Login/ForgotPassword';
 import { GoogleIcon } from '@/components/Login/Customicons';
-import { API_URL, saveAuth, getAuthToken, getStoredUser } from '@/lib/auth';
+import {
+  API_URL,
+  saveAuth,
+  getAuthToken,
+  getStoredUser,
+  clearAuth,
+  verifyStoredSession,
+} from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 
@@ -23,13 +30,28 @@ function LoginPageContent() {
   useEffect(() => {
     const token = getAuthToken();
     const user = getStoredUser();
-    if (token && user) {
+    if (!token || !user) return;
+
+    // Only send an already-signed-in user away if their session still works.
+    // A stale token used to bounce visitors straight back out, so a user whose
+    // session had expired could never reach this form to sign in again.
+    let cancelled = false;
+    void verifyStoredSession().then((result) => {
+      if (cancelled) return;
+      if (result === 'invalid') {
+        clearAuth();
+        return;
+      }
       if (user.role === 'ADMIN') {
         router.replace('/admin');
       } else {
         router.replace(user.isProfileComplete ? '/' : '/onboarding');
       }
-    }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const [role, setRole] = useState<Role>('user');
