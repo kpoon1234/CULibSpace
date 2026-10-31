@@ -255,3 +255,22 @@ export function QrCodeIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function MegaphoneIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 8h10c2 0 3 1 3 3v4c0 2-1 3-3 3H4c-2 0-3-1-3-3V11c0-2 1-3 3-3" />
+      <path d="M14 8h3v8h-3z" />
+      <path d="M19 8h3M19 16h3M20 12h2" />
+    </svg>
+  );
+}
