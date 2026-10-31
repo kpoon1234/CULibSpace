@@ -141,10 +141,13 @@ export class StripePaymentGateway implements PaymentGateway {
         state = 'expired';
       } else if (session.status === 'complete') {
         // payment_status 'paid'   -> confirmed payment
-        // payment_status 'unpaid' -> async/delayed payment definitively failed on this session;
-        //                            the session is closed and cannot be retried.
-        //                            Treat as 'expired' so the caller releases openUid.
-        state = session.payment_status === 'paid' ? 'paid' : 'expired';
+        // payment_status 'unpaid' -> checkout session เสร็จสิ้นแต่การชำระเงินยัง
+        //                            อยู่ระหว่างดำเนินการ (async payment เช่น โอนเงิน)
+        //                            Stripe จะส่ง async_payment_succeeded /
+        //                            async_payment_failed ทีหลังเพื่อยืนยันผล
+        //                            ไม่ถือว่า terminal failure จนกว่าจะมี event นั้น
+        //                            -> คืน 'open' เพื่อรักษาช่อง openUid ไว้ ห้ามปล่อยให้ซื้อใหม่
+        state = session.payment_status === 'paid' ? 'paid' : 'open';
       } else if (session.status === 'open') {
         state = 'open';
       }

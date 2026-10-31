@@ -781,11 +781,10 @@ test('payment_intent.payment_failed with pi_… ID marks FAILED when checkout se
 test('checkout.session.async_payment_failed releases openUid and marks payment FAILED', async () => {
   const f = fixture();
   // Simulate the Stripe session being complete but payment failed (delayed payment)
-  // The adapter maps this to state='expired' after the fix.
-  // We model this by setting checkout.state = 'expired' (which the fixed adapter
-  // returns for complete+unpaid) and override the raw session object so that
-  // the mock returns status='complete', payment_status='unpaid'.
-  f.checkout.state = 'expired';
+  // The session is complete/closed at the gateway (no retry possible).
+  // retrieveCheckoutStatus now returns state='open' for complete+unpaid,
+  // but handleFailedPayment checks the raw session and still marks FAILED.
+  f.checkout.state = 'open';
   f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
 
   // The event arrives as 'payment.failed' (adapter mapping for async_payment_failed)
@@ -805,7 +804,7 @@ test('checkout.session.async_payment_failed releases openUid and marks payment F
 
 test('checkout.session.async_payment_failed: user can start a new purchase after async failure', async () => {
   const f = fixture();
-  f.checkout.state = 'expired';
+  f.checkout.state = 'open';
   f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
 
   // Process the async payment failure
@@ -863,4 +862,42 @@ test('checkout.session.async_payment_failed does not overwrite PAID payment (rac
   assert.equal(f.state.payment.status, PaymentStatus.PAID);
   assert.equal(f.state.payment.openUid, null);
   assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('checkout.session.expired with mismatched gatewayRef does NOT expire payment', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+  f.checkout.raw = {};
+
+  // Event claims checkout session 'cs_foreign' expired, but payment is bound to 'cs_test_1'
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired', gatewayRef: 'cs_foreign', reference: '101' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.payment.gatewayRef, 'cs_test_1');
+});
+
+test('checkout.session.expired with mismatched gateway does NOT expire payment', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+  f.checkout.raw = {};
+
+  // Payment belongs to 'other_gateway', not 'stripe'
+  f.state.payment.gateway = 'other_gateway';
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired', gatewayRef: 'cs_test_1', reference: '101' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.payment.gateway, 'other_gateway');
 });

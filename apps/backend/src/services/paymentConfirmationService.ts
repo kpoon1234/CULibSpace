@@ -325,8 +325,16 @@ export class PaymentConfirmationService {
 
     // If the checkout session is still open, the customer can still retry.
     // Do NOT mark as FAILED and do NOT release openUid.
+    // Exception: a session with status='complete' + payment_status='unpaid' is
+    // already closed at the gateway (no retry possible). If we received a
+    // payment.failed event (e.g. checkout.session.async_payment_failed), the
+    // payment definitively failed — mark FAILED and release openUid.
     if (checkout.state === 'open') {
-      return { handled: true, activated: false, paymentId };
+      const raw = checkout.raw as { status?: string; payment_status?: string } | undefined;
+      const isCompleteUnpaid = raw?.status === 'complete' && raw?.payment_status === 'unpaid';
+      if (!isCompleteUnpaid) {
+        return { handled: true, activated: false, paymentId };
+      }
     }
 
     // If checkout state is unknown, do not close or release openUid (safe fallback)
@@ -421,6 +429,16 @@ export class PaymentConfirmationService {
       });
 
       if (!payment) {
+        return { handled: false };
+      }
+
+      // Reject events from a different gateway.
+      if (payment.gateway !== gateway.name) {
+        return { handled: false };
+      }
+
+      // Only act if the expired checkout session belongs to this payment.
+      if (payment.gatewayRef && payment.gatewayRef !== event.gatewayRef) {
         return { handled: false };
       }
 
