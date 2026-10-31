@@ -1,5 +1,5 @@
 import { classifyEmail } from '../utils/roleMapper.js';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, BookingStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -98,6 +98,28 @@ export class ProfileService {
   }
 
   static async updateProfileImage(uid: number, imageUrl: string): Promise<ProfileResult> {
+    // Check if user has an active booking (PENDING or ACTIVE with endDateTime > now)
+    const activeBooking = await prisma.booking.findFirst({
+      where: {
+        uid,
+        status: {
+          in: [BookingStatus.PENDING, BookingStatus.ACTIVE],
+        },
+        endDateTime: {
+          gt: new Date(),
+        },
+      },
+    });
+
+    if (activeBooking) {
+      throw {
+        status: 400,
+        error: 'ACTIVE_BOOKING_EXISTS',
+        message:
+          'Cannot update profile image while you have an active booking. Please complete or cancel your current booking first.',
+      };
+    }
+
     const user = await prisma.user.findUnique({
       where: { uid },
       include: { universityUser: true },
