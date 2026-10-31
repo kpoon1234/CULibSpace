@@ -3,8 +3,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getAuthSnapshot, getAuthToken, subscribeToAuth } from '@/lib/auth';
-import { purchaseVisitorTicket } from '@/lib/tickets';
+import { clearAuth, getAuthSnapshot, getAuthToken, subscribeToAuth } from '@/lib/auth';
+import {
+  describePurchaseError,
+  formatTicketAmount,
+  isSafeCheckoutUrl,
+  isValidIdempotencyKey,
+  purchaseVisitorTicket,
+  type PurchaseErrorAction,
+  type TicketPurchaseData,
+} from '@/lib/tickets';
 
 type VisitorUser = {
   uid?: number;
@@ -36,6 +44,8 @@ export default function VisitorTicketPage() {
   const [ticketActive, setTicketActive] = useState(false);
   const [ticketExpired, setTicketExpired] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
+  const [errorAction, setErrorAction] = useState<PurchaseErrorAction | null>(null);
+  const [purchase, setPurchase] = useState<TicketPurchaseData | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToAuth(() => {
@@ -45,7 +55,9 @@ export default function VisitorTicketPage() {
 
       setIsSubmitting(false);
       setError('');
+      setErrorAction(null);
       setNotice('');
+      setPurchase(null);
       setPaymentPending(false);
       setPaymentConfirmed(false);
       setTicketActive(false);
@@ -81,7 +93,8 @@ export default function VisitorTicketPage() {
       // Fall back to an in-memory key if sessionStorage is unavailable.
     }
 
-    if (!key) {
+    // A corrupted or edited stored key would be rejected by the backend on every retry.
+    if (!isValidIdempotencyKey(key)) {
       key = crypto.randomUUID();
 
       try {
@@ -110,6 +123,7 @@ export default function VisitorTicketPage() {
 
   async function startPurchase(startAnother = false) {
     setError('');
+    setErrorAction(null);
     setNotice('');
     setPaymentPending(false);
 
@@ -148,6 +162,7 @@ export default function VisitorTicketPage() {
 
     if (startAnother) {
       purchaseKey = rotatePurchaseKey(uid);
+      setPurchase(null);
       setPaymentConfirmed(false);
       setTicketActive(false);
       setTicketExpired(false);
@@ -164,15 +179,8 @@ export default function VisitorTicketPage() {
       if (!isCurrentRequest()) return;
 
       if (!result.ok) {
-        if (result.status === 401) {
-          router.push('/login');
-          return;
-        }
-
-        if (result.code === 'PROFILE_INCOMPLETE' || result.code === 'OUTSIDE_PROFILE_INCOMPLETE') {
-          router.push('/onboarding');
-          return;
-        }
+        // The summary must not keep showing an earlier ticket next to this error.
+        setPurchase(null);
 
         if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
           setPaymentPending(true);
@@ -182,17 +190,33 @@ export default function VisitorTicketPage() {
           return;
         }
 
-        if (result.code === 'PAYMENT_NOT_COMPLETED' || result.code === 'GATEWAY_REJECTED') {
+        const view = describePurchaseError(result);
+
+        if (view.action === 'login') {
+          // /login sends a stored token straight back home, so end the session first.
+          clearAuth();
+          router.push('/login');
+          return;
+        }
+
+        if (view.action === 'onboarding') {
+          router.push('/onboarding');
+          return;
+        }
+
+        if (view.action === 'restart') {
           // The previous attempt is terminal; the next attempt needs a new key.
           rotatePurchaseKey(uid);
         }
 
-        setError(result.message);
+        setError(view.message);
+        setErrorAction(view.action);
         return;
       }
 
-      const paymentStatus = result.data.paymentStatus.toUpperCase();
-      const ticketStatus = result.data.ticketStatus.toUpperCase();
+      setPurchase(result.data);
+
+      const { paymentStatus, ticketStatus } = result.data;
 
       // A paid response is final, even when checkoutUrl is null.
       if (paymentStatus === 'PAID') {
@@ -258,10 +282,26 @@ export default function VisitorTicketPage() {
       // Check again immediately before navigating to the external checkout.
       if (!isCurrentRequest()) return;
 
+      // Only an https URL may be opened; retrying would return the same URL.
+      if (!isSafeCheckoutUrl(checkoutUrl)) {
+        const unsafe = describePurchaseError({
+          ok: false,
+          status: 200,
+          code: 'CHECKOUT_URL_UNSAFE',
+          message: '',
+          retryable: false,
+        });
+        setError(unsafe.message);
+        setErrorAction(unsafe.action);
+        return;
+      }
+
       window.location.assign(checkoutUrl);
     } catch {
       if (isCurrentRequest()) {
+        setPurchase(null);
         setError('Unable to start checkout. Please try again.');
+        setErrorAction('retry');
       }
     } finally {
       if (isCurrentRequest()) {
@@ -272,6 +312,15 @@ export default function VisitorTicketPage() {
   }
 
   const displayName = [user?.firstname, user?.lastname].filter(Boolean).join(' ');
+
+  const validFrom = purchase ? Date.parse(purchase.ticketStartDateTime) : NaN;
+  const validUntil = purchase ? Date.parse(purchase.ticketEndDateTime) : NaN;
+  // The backend only sets the real validity period once the ticket is paid.
+  const hasValidityPeriod =
+    purchase?.ticketStatus === 'PAID' &&
+    Number.isFinite(validFrom) &&
+    Number.isFinite(validUntil) &&
+    validUntil > validFrom;
 
   return (
     <section className="mx-auto w-full max-w-5xl px-5 py-10 sm:px-8 sm:py-14">
@@ -348,7 +397,7 @@ export default function VisitorTicketPage() {
                   ? 'Purchase a new ticket'
                   : 'Purchase another ticket'}
             </button>
-          ) : (
+          ) : errorAction === 'none' ? null : (
             <button
               type="button"
               onClick={() => startPurchase()}
@@ -357,11 +406,15 @@ export default function VisitorTicketPage() {
             >
               {isSubmitting
                 ? 'Connecting to checkout…'
-                : paymentConfirmed
-                  ? 'Check ticket activation'
-                  : paymentPending
-                    ? 'Retry existing purchase'
-                    : 'Continue to payment'}
+                : errorAction === 'retry'
+                  ? 'Try again'
+                  : errorAction === 'restart'
+                    ? 'Start a new purchase'
+                    : paymentConfirmed
+                      ? 'Check ticket activation'
+                      : paymentPending
+                        ? 'Retry existing purchase'
+                        : 'Continue to payment'}
             </button>
           )}
         </div>
@@ -371,9 +424,29 @@ export default function VisitorTicketPage() {
 
           <div className="mt-5 border-b border-hairline pb-4">
             <p className="font-medium text-gray-900">Visitor ticket</p>
-            <p className="mt-1 text-sm leading-6 text-gray-600">
-              The current price and validity period will be provided by the ticket service.
-            </p>
+            {purchase ? (
+              <dl className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-600">Amount</dt>
+                  <dd className="font-semibold text-gray-900">
+                    {formatTicketAmount(purchase.amountSatang, purchase.currency)}
+                  </dd>
+                </div>
+                {hasValidityPeriod && (
+                  <div>
+                    <dt className="text-gray-600">Valid</dt>
+                    <dd className="mt-1 text-gray-900">
+                      {new Date(validFrom).toLocaleString()} –{' '}
+                      {new Date(validUntil).toLocaleString()}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            ) : (
+              <p className="mt-1 text-sm leading-6 text-gray-600">
+                The current price and validity period will be provided by the ticket service.
+              </p>
+            )}
           </div>
 
           <p className="mt-4 text-xs leading-5 text-gray-600">
