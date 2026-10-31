@@ -37,25 +37,24 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
     timeStyle: 'short',
   }).format(new Date(reportedAt));
 
+  function validateDetails(text: string): string | null {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return 'Please describe the issue before submitting.';
+    if (trimmed.length < 5) return 'Issue details must be at least 5 characters.';
+    if (trimmed.length > 1000) return 'Issue details must be at most 1000 characters.';
+    return null;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    setValidationError(null);
-
     const issueInformation = details.trim();
-    if (issueInformation.length === 0) {
-      setValidationError('Please describe the issue before submitting.');
+    const error = validateDetails(issueInformation);
+    if (error) {
+      setValidationError(error);
       return;
     }
-    if (issueInformation.length < 5) {
-      setValidationError('Issue details must be at least 5 characters.');
-      return;
-    }
-    if (issueInformation.length > 1000) {
-      setValidationError('Issue details must be at most 1000 characters.');
-      return;
-    }
-    if (submitting) return;
+    setValidationError(null);
 
     setSubmitting(true);
 
@@ -130,7 +129,10 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
               maxLength={1000}
               rows={5}
               value={details}
-              onChange={(event) => setDetails(event.target.value)}
+              onChange={(event) => {
+                setDetails(event.target.value);
+                setValidationError(null);
+              }}
               placeholder="Describe the issue..."
               className="w-full resize-none rounded-xl bg-gray-200 px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
@@ -155,7 +157,7 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
 
             <button
               type="submit"
-              disabled={details.trim().length < 5 || submitting}
+              disabled={validateDetails(details) !== null || submitting}
               className="rounded-full bg-chula-pink px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-chula-pink-hover focus:outline-none focus:ring-2 focus:ring-chula-pink focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? 'Submitting…' : 'Submit report'}
