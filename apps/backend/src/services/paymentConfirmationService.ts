@@ -49,7 +49,17 @@ export class PaymentConfirmationService {
     gateway: PaymentGateway,
     prisma: PrismaClient = defaultPrisma
   ): Promise<ConfirmationResult> {
-    // Dispatcher boundary for Poom/Punt: do not mutate/receipt their events.
+    // Handle failed payments: keep ticket inactive, update payment status to FAILED
+    if (event.type === 'payment.failed') {
+      return this.handleFailedPayment(event, gateway, prisma);
+    }
+
+    // Handle expired payments: keep ticket inactive, update payment status to EXPIRED
+    if (event.type === 'payment.expired') {
+      return this.handleExpiredPayment(event, gateway, prisma);
+    }
+
+    // Only payment.succeeded events are handled for activation.
     if (event.type !== 'payment.succeeded') return { handled: false };
     if (event.paymentState !== 'paid') {
       throw new PaymentConfirmationError('PAYMENT_NOT_PAID', 'Payment has not been paid.');
@@ -217,6 +227,228 @@ export class PaymentConfirmationService {
         },
       });
       return { handled: true, duplicate: false, activated: activate, paymentId };
+    });
+  }
+
+  /**
+   * [US6-3] Handle failed payment: check gateway checkout state before closing attempt
+   * -----------------------------------------------------------------------------------
+   * A single card/payment attempt failure (e.g. payment_intent.payment_failed with
+   * requires_payment_method) does NOT terminate the Checkout Session. The customer
+   * can still retry with another card or payment method on the same session.
+   *
+   * Only when the Checkout Session itself is no longer open (e.g. expired or closed)
+   * can we mark the payment as FAILED/EXPIRED and release openUid.
+   *
+   * IMPORTANT – PaymentIntent vs Checkout Session IDs:
+   * The payment_intent.payment_failed Stripe event carries a PaymentIntent ID (pi_…)
+   * as data.object.id, which is what the adapter sets as event.gatewayRef. However,
+   * retrieveCheckoutStatus calls checkout.sessions.retrieve and requires a Checkout
+   * Session ID (cs_…). Passing pi_… returns 404 → 'not_found', which would
+   * incorrectly mark the payment FAILED even though the session is still open.
+   *
+   * Fix: look up the payment record early, then use the stored payment.gatewayRef
+   * (the Checkout Session ID) for the gateway call rather than event.gatewayRef.
+   * If the stored gatewayRef is null (payment not yet bound to a session) we cannot
+   * verify the session state, so we keep openUid intact (safe fallback).
+   *
+   * All status updates use a row lock / conditional update on PENDING/UNCONFIRMED
+   * to ensure a concurrent success webhook is never overwritten with FAILED.
+   */
+  private static async handleFailedPayment(
+    event: GatewayPaymentEvent,
+    gateway: PaymentGateway,
+    prisma: PrismaClient
+  ): Promise<ConfirmationResult> {
+    if (!event.gatewayRef || event.gatewayRef.length > 255) {
+      throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
+    }
+
+    // Resolve paymentId from the signed reference first; fall back to gatewayRef lookup.
+    let paymentId: number | undefined;
+    try {
+      if (event.reference) {
+        paymentId = paymentIdFrom(event.reference);
+      }
+    } catch {
+      // Fall back to looking up by gatewayRef
+    }
+
+    // Look up the payment record to obtain the stored Checkout Session ID.
+    // We do this BEFORE the gateway call so that:
+    //   (a) we can use the correct cs_… ID even when the event carries a pi_… ID, and
+    //   (b) we can verify gateway ownership before acting.
+    let storedGatewayRef: string | null = null;
+    if (paymentId) {
+      const found = await prisma.payment.findUnique({
+        where: { paymentId },
+        select: { paymentId: true, gatewayRef: true, gateway: true },
+      });
+      if (!found) {
+        return { handled: false };
+      }
+      // Reject events from a different gateway.
+      if (found.gateway !== gateway.name) {
+        return { handled: false };
+      }
+      storedGatewayRef = found.gatewayRef;
+    } else {
+      // No usable reference in the event – look up by the incoming gatewayRef.
+      const found = await prisma.payment.findFirst({
+        where: { gatewayRef: event.gatewayRef, gateway: gateway.name },
+        select: { paymentId: true, gatewayRef: true },
+      });
+      if (!found) {
+        return { handled: false };
+      }
+      paymentId = found.paymentId;
+      storedGatewayRef = found.gatewayRef;
+    }
+
+    // Use the stored Checkout Session ID (cs_…) for the status check.
+    // If the stored ref is null (payment not yet bound to a session) we cannot
+    // confirm the session state, so preserve openUid as a safe fallback.
+    if (!storedGatewayRef) {
+      return { handled: true, activated: false, paymentId };
+    }
+
+    // Verify current checkout status with the gateway before deciding to close/release.
+    // Uses the stored Checkout Session ID, not the incoming event.gatewayRef, to handle
+    // the case where event.gatewayRef is a PaymentIntent ID (pi_…) rather than cs_….
+    const checkout = await gateway.retrieveCheckoutStatus(storedGatewayRef);
+
+    // If the checkout session is paid (e.g. customer retried and paid), confirm it.
+    // Use storedGatewayRef (cs_…) – not the incoming event.gatewayRef which may be pi_….
+    if (checkout.state === 'paid') {
+      return this.confirmCheckout(gateway.name, storedGatewayRef, checkout, prisma, event.eventId);
+    }
+
+    // If the checkout session is still open, the customer can still retry.
+    // Do NOT mark as FAILED and do NOT release openUid.
+    if (checkout.state === 'open') {
+      return { handled: true, activated: false, paymentId };
+    }
+
+    // If checkout state is unknown, do not close or release openUid (safe fallback)
+    if (checkout.state === 'unknown') {
+      return { handled: true, activated: false, paymentId };
+    }
+
+    // Checkout is no longer open (expired, not_found, etc.) and cannot be retried.
+    // Use row lock and conditional update to prevent overwriting PAID under concurrency.
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT paymentid FROM payment WHERE paymentid = ${paymentId} FOR UPDATE`;
+      const payment = await tx.payment.findUnique({
+        where: { paymentId },
+      });
+
+      if (!payment) {
+        return { handled: false };
+      }
+
+      // If already processed (PAID, FAILED, EXPIRED, REFUNDED), do not overwrite
+      if (
+        payment.status !== PaymentStatus.PENDING &&
+        payment.status !== PaymentStatus.UNCONFIRMED
+      ) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      const newStatus = PaymentStatus.FAILED;
+
+      const applied = await tx.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: {
+          status: newStatus,
+          openUid: null,
+        },
+      });
+
+      if (applied.count === 0) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      // Ticket stays UNPAID (inactive) - do NOT activate
+      return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
+    });
+  }
+
+  /**
+   * [US6-3] Handle expired payment: update status to EXPIRED, keep ticket inactive
+   * -------------------------------------------------------------------------
+   * A checkout.session.expired event means the session has expired and can never be paid.
+   * openUid is released so the user can start a new purchase.
+   *
+   * All status updates use a row lock / conditional update on PENDING/UNCONFIRMED
+   * to ensure a concurrent success webhook is never overwritten with EXPIRED.
+   */
+  private static async handleExpiredPayment(
+    event: GatewayPaymentEvent,
+    gateway: PaymentGateway,
+    prisma: PrismaClient
+  ): Promise<ConfirmationResult> {
+    if (!event.gatewayRef || event.gatewayRef.length > 255) {
+      throw new PaymentConfirmationError('INVALID_GATEWAY_REFERENCE', 'Invalid checkout identity.');
+    }
+
+    let paymentId: number | undefined;
+    try {
+      if (event.reference) {
+        paymentId = paymentIdFrom(event.reference);
+      }
+    } catch {
+      // Fall back to looking up by gatewayRef
+    }
+
+    if (!paymentId) {
+      const found = await prisma.payment.findFirst({
+        where: { gatewayRef: event.gatewayRef },
+        select: { paymentId: true },
+      });
+      if (!found) {
+        return { handled: false };
+      }
+      paymentId = found.paymentId;
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT paymentid FROM payment WHERE paymentid = ${paymentId} FOR UPDATE`;
+      const payment = await tx.payment.findUnique({
+        where: { paymentId },
+      });
+
+      if (!payment) {
+        return { handled: false };
+      }
+
+      // Only update if still in an open state (PENDING or UNCONFIRMED)
+      if (
+        payment.status !== PaymentStatus.PENDING &&
+        payment.status !== PaymentStatus.UNCONFIRMED
+      ) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      const applied = await tx.payment.updateMany({
+        where: {
+          paymentId: payment.paymentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+        },
+        data: {
+          status: PaymentStatus.EXPIRED,
+          openUid: null,
+        },
+      });
+
+      if (applied.count === 0) {
+        return { handled: true, duplicate: true, activated: false, paymentId: payment.paymentId };
+      }
+
+      // Ticket stays UNPAID (inactive) - do NOT activate
+      return { handled: true, duplicate: false, activated: false, paymentId: payment.paymentId };
     });
   }
 

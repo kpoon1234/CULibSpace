@@ -11,8 +11,8 @@ import bookingRoutes from './routes/bookingRoutes.js';
 import systemConfigRoutes from './routes/systemConfigRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
-import issueRoutes from './routes/issueRoutes.js';
 import { createPaymentWebhookRouter } from './routes/paymentWebhookRoutes.js';
+import issueRoutes from './routes/issueRoutes.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
 import { BookingService } from './services/bookingService.js';
@@ -29,7 +29,8 @@ app.use(
     credentials: true,
   })
 );
-// Stripe signs the exact bytes: mount before the global JSON parser.
+
+// Stripe signs the exact bytes: mount webhook BEFORE the global JSON parser.
 app.use('/api/tickets', createPaymentWebhookRouter());
 
 app.use(express.json());

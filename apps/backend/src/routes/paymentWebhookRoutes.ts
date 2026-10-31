@@ -31,8 +31,6 @@ export function createPaymentWebhookRouter(
         res.status(200).json({ received: true, ...result });
       } catch (error) {
         if (error instanceof PaymentConfirmationError) {
-          // Signed but permanently mismatched data needs operator attention, not
-          // repeated activation attempts. Do not expose payment/customer details.
           console.warn('[PaymentWebhook]', { code: error.code, eventId });
           res
             .status(error.status >= 500 ? 503 : 200)
