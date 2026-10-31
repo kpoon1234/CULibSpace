@@ -230,7 +230,9 @@ export class StripePaymentGateway implements PaymentGateway {
     switch (event.type) {
       case 'checkout.session.completed':
       case 'checkout.session.async_payment_succeeded':
-        if (paymentState === 'paid' || paymentState === 'no_payment_required') {
+        // Only treat as paid when Stripe explicitly reports payment_status=paid.
+        // payment_status=unpaid means checkout completed but payment not yet confirmed.
+        if (paymentState === 'paid') {
           return {
             ...identity,
             type: 'payment.succeeded',
