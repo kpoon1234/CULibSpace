@@ -60,6 +60,7 @@ function fixture() {
     receipts: [] as { gateway: string; eventId: string; paymentId: number; gatewayRef: string }[],
     failReceipt: false,
     failPayment: false,
+    failRetrieve: false,
     retrievals: 0,
     locks: [] as string[],
   };
@@ -84,10 +85,34 @@ function fixture() {
     payment: {
       findUnique: async ({ where }: any) =>
         where.paymentId === state.payment.paymentId ? state.payment : null,
+      findFirst: async ({ where }: any) => {
+        if (where?.paymentId && where.paymentId === state.payment.paymentId) return state.payment;
+        if (where?.gatewayRef && where.gatewayRef === state.payment.gatewayRef) {
+          // Also check gateway filter if present
+          if (where.gateway && where.gateway !== state.payment.gateway) return null;
+          return state.payment;
+        }
+        if (where?.OR) {
+          for (const cond of where.OR) {
+            if (cond.paymentId && cond.paymentId === state.payment.paymentId) return state.payment;
+            if (cond.gatewayRef && cond.gatewayRef === state.payment.gatewayRef)
+              return state.payment;
+          }
+        }
+        return null;
+      },
       update: async ({ data }: any) => {
         if (state.failPayment) throw new Error('payment write failed');
         Object.assign(state.payment, data);
         return state.payment;
+      },
+      updateMany: async ({ where, data }: any) => {
+        if (state.failPayment) throw new Error('payment write failed');
+        if (where?.paymentId && where.paymentId !== state.payment.paymentId) return { count: 0 };
+        if (where?.status?.in && !where.status.in.includes(state.payment.status))
+          return { count: 0 };
+        Object.assign(state.payment, data);
+        return { count: 1 };
       },
     },
     ticket: {
@@ -133,12 +158,33 @@ function fixture() {
           },
           retrieve: async (_id, params) => {
             state.retrievals++;
+            if (state.failRetrieve) {
+              state.failRetrieve = false;
+              throw Object.assign(new Error('Stripe temporarily unavailable'), {
+                statusCode: 503,
+                type: 'StripeAPIError',
+              });
+            }
             assert.equal(params, undefined, 'confirmation does not need expanded charges');
+            // Simulate Stripe's behaviour: PaymentIntent IDs (pi_…) are not valid
+            // Checkout Session IDs and Stripe returns 404 for them.
+            if (typeof _id === 'string' && _id.startsWith('pi_')) {
+              throw Object.assign(new Error('No such checkout.session'), {
+                statusCode: 404,
+                code: 'resource_missing',
+              });
+            }
             return {
               ...(checkout.raw as Record<string, unknown>),
-              id: 'cs_test_1',
+              id: _id ?? 'cs_test_1',
               livemode: checkout.livemode,
-              status: 'complete',
+              status:
+                (checkout.raw as any)?.status ??
+                (checkout.state === 'expired'
+                  ? 'expired'
+                  : checkout.state === 'open'
+                    ? 'open'
+                    : 'complete'),
               payment_status: checkout.state === 'paid' ? 'paid' : 'unpaid',
               amount_total: checkout.amountSatang,
               currency: checkout.currency,
@@ -362,17 +408,165 @@ test('missing payment, unknown gateway state and live mode do not activate', asy
   );
 });
 
-test('failed/expired/unknown events are reserved/no-op, not receipted by the success task', async () => {
-  for (const type of ['payment.failed', 'payment.expired', 'payment.unknown'] as const) {
-    const f = fixture();
-    assert.equal(
-      (await PaymentConfirmationService.handleWebhook(event({ type }), f.gateway, f.db)).handled,
-      false
-    );
-    assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
-    assert.equal(f.state.receipts.length, 0);
-    assert.equal(f.state.retrievals, 0);
-  }
+test('failed event updates payment to FAILED and keeps ticket inactive', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+});
+
+test('expired event updates payment to EXPIRED and keeps ticket inactive', async () => {
+  const f = fixture();
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.EXPIRED);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+});
+
+test('payment attempt failure with open checkout does NOT release openUid or mark FAILED (card declined retryable)', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  // Payment status must NOT be FAILED; open slot must NOT be released!
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+
+  // Subsequent successful payment on retry activates the ticket
+  f.checkout.state = 'paid';
+  const successResult = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.succeeded' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(successResult.handled, true);
+  assert.equal(successResult.activated, true);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('failed event does not overwrite a payment that was concurrently marked PAID', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+
+  // Simulate payment marked PAID concurrently
+  f.state.payment.status = PaymentStatus.PAID;
+  f.state.payment.openUid = null;
+  f.state.ticket.status = TicketStatus.PAID;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('failed event conditional update does not overwrite PAID if status changed during execution', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+
+  const origUpdateMany = f.db.payment.updateMany;
+  f.db.payment.updateMany = (async (args: any) => {
+    // Concurrent thread commits PAID right before updateMany
+    f.state.payment.status = PaymentStatus.PAID;
+    return origUpdateMany(args);
+  }) as any;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('expired event does not overwrite a payment that was concurrently marked PAID', async () => {
+  const f = fixture();
+
+  // Simulate payment marked PAID concurrently
+  f.state.payment.status = PaymentStatus.PAID;
+  f.state.payment.openUid = null;
+  f.state.ticket.status = TicketStatus.PAID;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('expired event conditional update does not overwrite PAID if status changed during execution', async () => {
+  const f = fixture();
+
+  const origUpdateMany = f.db.payment.updateMany;
+  f.db.payment.updateMany = (async (args: any) => {
+    // Concurrent thread commits PAID right before updateMany
+    f.state.payment.status = PaymentStatus.PAID;
+    return origUpdateMany(args);
+  }) as any;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+});
+
+test('unknown events are not handled', async () => {
+  const f = fixture();
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.unknown' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(result.handled, false);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+  assert.equal(f.state.retrievals, 0);
 });
 
 test('write failures propagate without a successful receipt (mock orchestration only)', async () => {
@@ -507,4 +701,315 @@ test('Stripe SDK authentication messages containing secrets are not exposed to p
       !error.message.includes('sk_test_do_not_echo') &&
       /rejected/.test(error.message)
   );
+});
+
+// ---------------------------------------------------------------------------
+// Regression – payment_intent.payment_failed with open Checkout Session
+// ---------------------------------------------------------------------------
+// When Stripe fires payment_intent.payment_failed the adapter sets
+// event.gatewayRef = pi_… (the PaymentIntent ID, not the Checkout Session ID).
+// retrieveCheckoutStatus(pi_…) would normally return 'not_found' because
+// checkout.sessions.retrieve only accepts cs_… IDs.
+//
+// The service must:
+//   1. Look up the payment record to get the stored cs_… gatewayRef.
+//   2. Call retrieveCheckoutStatus with cs_… → returns 'open'.
+//   3. NOT mark the payment FAILED; NOT clear openUid.
+//   4. Allow a subsequent successful payment to activate the ticket.
+test('payment_intent.payment_failed with pi_… ID does not release openUid when checkout session is still open', async () => {
+  const f = fixture();
+  // Checkout session is still open (customer can retry with another card)
+  f.checkout.state = 'open';
+
+  // Simulate a payment_intent.payment_failed event: gatewayRef is the PaymentIntent ID.
+  // The stored payment.gatewayRef remains 'cs_test_1'.
+  // The mock retrieve will throw 404 for pi_… and return open session for cs_….
+  const piRef = 'pi_test_card_declined_1';
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed', gatewayRef: piRef, reference: '101' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  // Payment must remain PENDING; openUid must NOT be cleared
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+
+  // Verify that a subsequent successful payment activates the ticket normally
+  f.checkout.state = 'paid';
+  const successResult = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.succeeded', gatewayRef: 'cs_test_1', reference: '101' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(successResult.handled, true);
+  assert.equal(successResult.activated, true);
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('payment_intent.payment_failed with pi_… ID marks FAILED when checkout session is not_found (Stripe 404 for pi_… falls back to stored cs_… which is expired)', async () => {
+  const f = fixture();
+  // Checkout session is expired (terminal state)
+  f.checkout.state = 'expired';
+
+  const piRef = 'pi_test_card_declined_expired';
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.failed', gatewayRef: piRef, reference: '101' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  assert.equal(f.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+// ---------------------------------------------------------------------------
+// Regression – checkout.session.async_payment_failed (delayed payment failure)
+// ---------------------------------------------------------------------------
+// When a delayed payment method (e.g. bank transfer) fails asynchronously,
+// Stripe fires checkout.session.async_payment_failed. The session status is
+// 'complete' with payment_status = 'unpaid'. This is a terminal state: the
+// session is closed and can never be paid.
+//
+// Previously the Stripe adapter mapped complete+unpaid → state='unknown' and
+// the service returned early without releasing openUid, leaving the user stuck.
+//
+// complete+unpaid alone can still be processing. The adapter preserves that
+// state; only the matching terminal Checkout failure permits releasing openUid.
+test('checkout.session.async_payment_failed releases openUid and marks payment FAILED', async () => {
+  const f = fixture();
+  // Simulate the Stripe session being complete but payment failed (delayed payment)
+  // The session is complete/closed at the gateway (no retry possible).
+  // retrieveCheckoutStatus now returns state='open' for complete+unpaid,
+  // but handleFailedPayment checks the raw session and still marks FAILED.
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+
+  // The event arrives as 'checkout.session.async_payment_failed' (terminal Checkout failure)
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({
+      type: 'payment.failed',
+      raw: { type: 'checkout.session.async_payment_failed' } as unknown,
+      gatewayRef: 'cs_test_1',
+      reference: '101',
+    }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  assert.equal(result.activated, false);
+  // Payment must be marked FAILED and openUid cleared so user can buy again
+  assert.equal(f.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('checkout.session.async_payment_failed does not overwrite PAID payment (race protection)', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+
+  // Payment was already confirmed as PAID (concurrent success webhook won)
+  f.state.payment.status = PaymentStatus.PAID;
+  f.state.payment.openUid = null;
+  f.state.ticket.status = TicketStatus.PAID;
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({
+      type: 'payment.failed',
+      raw: { type: 'checkout.session.async_payment_failed' } as unknown,
+      gatewayRef: 'cs_test_1',
+      reference: '101',
+    }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, true);
+  // Duplicate – the conditional updateMany returns count=0 for PAID status
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('checkout.session.expired with mismatched gatewayRef does NOT expire payment', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+  f.checkout.raw = {};
+
+  // Event claims checkout session 'cs_foreign' expired, but payment is bound to 'cs_test_1'
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired', gatewayRef: 'cs_foreign', reference: '101' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.payment.gatewayRef, 'cs_test_1');
+});
+
+test('checkout.session.expired with mismatched gateway does NOT expire payment', async () => {
+  const f = fixture();
+  f.checkout.state = 'expired';
+  f.checkout.raw = {};
+
+  // Payment belongs to 'other_gateway', not 'stripe'
+  f.state.payment.gateway = 'other_gateway';
+
+  const result = await PaymentConfirmationService.handleWebhook(
+    event({ type: 'payment.expired', gatewayRef: 'cs_test_1', reference: '101' }),
+    f.gateway,
+    f.db
+  );
+
+  assert.equal(result.handled, false);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.payment.gateway, 'other_gateway');
+});
+
+async function signedFailure(
+  f: ReturnType<typeof fixture>,
+  type: 'payment_intent.payment_failed' | 'checkout.session.async_payment_failed',
+  checkoutRef = 'cs_test_1'
+) {
+  const isAttempt = type === 'payment_intent.payment_failed';
+  const payload = JSON.stringify({
+    id: isAttempt ? 'evt_delayed_attempt_failure' : 'evt_terminal_checkout_failure',
+    livemode: false,
+    type,
+    data: {
+      object: {
+        id: isAttempt ? 'pi_test_1' : checkoutRef,
+        object: isAttempt ? 'payment_intent' : 'checkout.session',
+        status: isAttempt ? 'requires_payment_method' : 'complete',
+        payment_status: 'unpaid',
+        amount_total: 5000,
+        currency: 'thb',
+        metadata: { reference: '101' },
+      },
+    },
+  });
+  return f.gateway.parseWebhookEvent(Buffer.from(payload), signature(payload));
+}
+
+test('delayed PaymentIntent failure preserves a retry that is now processing and can later succeed', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = {
+    status: 'complete',
+    payment_status: 'unpaid',
+    payment_intent: { id: 'pi_test_1', status: 'processing' },
+  };
+
+  const delayed = await signedFailure(f, 'payment_intent.payment_failed');
+  await PaymentConfirmationService.handleWebhook(delayed, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+  assert.equal(f.state.receipts.length, 0);
+
+  f.checkout.state = 'paid';
+  await PaymentConfirmationService.handleWebhook(
+    event({ eventId: 'evt_success_after_delayed_failure' }),
+    f.gateway,
+    f.db
+  );
+  assert.equal(f.state.payment.status, PaymentStatus.PAID);
+  assert.equal(f.state.ticket.status, TicketStatus.PAID);
+});
+
+test('signed terminal Checkout failure closes the matching completed unpaid session', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+
+  const terminal = await signedFailure(f, 'checkout.session.async_payment_failed');
+  await PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('terminal Checkout failure from another session cannot close a processing payment', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+
+  const foreign = await signedFailure(f, 'checkout.session.async_payment_failed', 'cs_foreign');
+  await PaymentConfirmationService.handleWebhook(foreign, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('single PaymentIntent decline on open session does not close processing payment', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'open', payment_status: 'unpaid' };
+
+  const attempt = await signedFailure(f, 'payment_intent.payment_failed', 'pi_test_1');
+  await PaymentConfirmationService.handleWebhook(attempt, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('transient gateway lookup failure on async_payment_failed returns 503, not success', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+  f.state.failRetrieve = true;
+
+  const terminal = await signedFailure(f, 'checkout.session.async_payment_failed');
+
+  // Lookup fails -> 503, payment untouched
+  await assert.rejects(
+    () => PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db),
+    (err: any) => {
+      assert.equal(err.code, 'PAYMENT_LOOKUP_UNAVAILABLE');
+      assert.equal(err.status, 503);
+      return true;
+    }
+  );
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+});
+
+test('async_payment_failed lookup failure retries after recovery and marks FAILED', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+  f.state.failRetrieve = true; // First lookup fails
+
+  const terminal = await signedFailure(f, 'checkout.session.async_payment_failed');
+
+  // First attempt: Stripe lookup fails -> 503, payment untouched
+  await assert.rejects(
+    () => PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      return true;
+    }
+  );
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+
+  // Stripe recovers, retry the same webhook event -> FAILED, openUid released
+  await PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f.state.payment.openUid, null);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
 });

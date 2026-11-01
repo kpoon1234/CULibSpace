@@ -77,8 +77,11 @@ export type GatewayPaymentEventType =
 export interface GatewayPaymentEvent {
   /** Stripe event identity, distinct from the checkout/session identity. */
   eventId?: string;
+  /** Whether this is a live-mode event (must be false in test mode) */
   livemode?: boolean;
   type: GatewayPaymentEventType;
+  /** True only when the failure ends the checkout, not an individual payment attempt. */
+  terminalFailure?: boolean;
   /** รหัสอ้างอิงฝั่ง gateway เพื่อจับคู่กับ payment */
   gatewayRef: string;
   /**
@@ -92,6 +95,11 @@ export interface GatewayPaymentEvent {
   currency?: string;
   /** สถานะการจ่ายเงินจริงจาก gateway (ไม่ใช่แค่ "session completed") */
   paymentState: GatewayPaymentState;
+  /**
+   * เวลาที่ชำระเงินสำเร็จจริง
+   * หมายเหตุ: ค่านี้ไม่ควรเป็นเวลาที่สร้าง checkout session
+   */
+  paidAt?: Date;
   /** payload ดิบ ไว้ debug / audit */
   raw: unknown;
 }

@@ -1409,6 +1409,109 @@ test('the Stripe adapter sends the same expiry on a retry after a timeout', asyn
   );
 });
 
+test('complete-but-unpaid checkout (payment still processing) is NOT closed; purchase recovery reuses the same payment and checkout', async () => {
+  process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
+
+  const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+
+  // Mock SDK: retrieve returns status=complete + payment_status=unpaid
+  // -> PaymentIntent ยังคงอยู่ระหว่างดำเนินการ (processing), ยังไม่มี terminal failure
+  const createCalls: any[] = [];
+  const retrieveCalls: any[] = [];
+  const client = {
+    checkout: {
+      sessions: {
+        async create(params: any, opts?: any) {
+          createCalls.push({ params, opts });
+          return {
+            id: 'cs_test_1',
+            url: 'https://checkout.stripe.com/c/pay/cs_test_1',
+            expires_at: params.expires_at,
+          };
+        },
+        async retrieve(id: string, params?: any) {
+          retrieveCalls.push({ id, params });
+          return {
+            id: 'cs_test_1',
+            status: 'complete',
+            payment_status: 'unpaid',
+            amount_total: PRICE_SATANG,
+            currency: 'thb',
+            metadata: { reference: '814' },
+            payment_intent: {
+              id: 'pi_test_1',
+              status: 'processing',
+            },
+          };
+        },
+      },
+    },
+    webhooks: {
+      constructEvent() {
+        throw new Error('not used in this test');
+      },
+    },
+  } as any;
+  const gateway = new StripePaymentGateway({ secretKey: 'sk_test_fake', client });
+
+  const { client: prisma, state } = mockPrisma();
+
+  // รายการเดิมที่ยัง PENDING และมี gatewayRef แล้ว (เปรียบเสมือนสร้างไว้ก่อนหน้า)
+  state.payments.push({
+    paymentId: 814,
+    uid: 7,
+    clientKey: 'processing-key',
+    idempotencyKey: 'user_7_processing-key',
+    ticketId: 514,
+    amountSatang: PRICE_SATANG,
+    currency: 'THB',
+    status: PaymentStatus.PENDING,
+    gateway: 'stripe',
+    gatewayRef: 'cs_test_1',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1',
+    checkoutPayload: JSON.stringify({
+      amountSatang: PRICE_SATANG,
+      currency: 'THB',
+      reference: '814',
+      description: 'CU LibSpace visitor ticket (7)',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      idempotencyKey: 'user_7_processing-key',
+      customerEmail: 'visitor@example.com',
+    }),
+    openUid: 7,
+    ticketValidityHours: VALIDITY_HOURS,
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    paidAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  state.tickets.push({
+    ticketId: 514,
+    uid: 7,
+    status: TicketStatus.UNPAID,
+    startDateTime: new Date(),
+    endDateTime: new Date(Date.now() + VALIDITY_HOURS * 60 * 60 * 1000),
+  });
+
+  // เรียก TicketService.purchase() จริงด้วย key คนละอัน -> ต้องกู้รายการเดิม
+  // ไม่สร้าง payment/checkout ใหม่ และต้องคง openUid ไว้ (ไม่ปล่อยให้ซื้อใหม่)
+  const result = await TicketService.purchase(
+    { uid: 7, idempotencyKey: 'fresh-key' },
+    gateway as any,
+    prisma
+  );
+
+  assert.equal(result.paymentId, 814, 'ต้องคืน payment เดิม ไม่สร้างใหม่');
+  assert.equal(result.replayed, true, 'ต้องเป็นการคืนรายการเดิม (replayed)');
+  assert.equal(state.payments.length, 1, 'ต้องไม่มี payment ใหม่ถูกสร้าง');
+  assert.equal(state.tickets.length, 1, 'ต้องไม่มี ticket ใหม่ถูกสร้าง');
+  assert.equal(state.payments[0].openUid, 7, 'ต้องยังคงจองช่อง openUid ไว้');
+  assert.equal(createCalls.length, 0, 'ต้องไม่มีการเรียก gateway createCheckoutSession ใหม่');
+  assert.equal(retrieveCalls.length, 1, 'ต้องถาม gateway สถานะ checkout ครั้งเดียว');
+
+  delete process.env.STRIPE_WEBHOOK_SECRET;
+});
+
 test('the Stripe adapter only clamps the expiry in prepareCheckoutSession', async () => {
   const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
   const sdk = mockStripeSdk();

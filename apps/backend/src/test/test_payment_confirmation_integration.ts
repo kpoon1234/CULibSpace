@@ -21,7 +21,11 @@ process.env.DATABASE_URL = testDatabaseUrl;
 const { PrismaClient, PaymentStatus, TicketStatus, UserType } = await import('@prisma/client');
 const { PaymentConfirmationService } = await import('../services/paymentConfirmationService.js');
 const { TicketService } = await import('../services/ticketService.js');
+const { StripePaymentGateway } = await import('../services/stripePaymentGateway.js');
+const { default: Stripe } = await import('stripe');
 const prisma = new PrismaClient();
+const webhookSecret = 'whsec_integration_fixture_only';
+const stripe = new Stripe('sk_test_integration_fixture_only');
 const run = randomUUID();
 const users: number[] = [];
 const testStartedAt = Date.now();
@@ -122,6 +126,64 @@ async function fixture() {
   };
 }
 
+async function stripeFixture() {
+  const f = await fixture();
+  await prisma.payment.update({
+    where: { paymentId: f.payment.paymentId },
+    data: { checkoutUrl: 'https://checkout.example.test/original' },
+  });
+  const checkout = {
+    id: f.payment.gatewayRef!,
+    object: 'checkout.session',
+    status: 'complete',
+    payment_status: 'unpaid',
+    livemode: false,
+    amount_total: 5000,
+    currency: 'thb',
+    metadata: { reference: String(f.payment.paymentId) },
+    payment_intent: { id: `pi_${f.payment.paymentId}`, status: 'processing' },
+  };
+  let checkoutCreates = 0;
+  const gateway = new StripePaymentGateway({
+    secretKey: 'sk_test_integration_fixture_only',
+    webhookSecret,
+    client: {
+      checkout: {
+        sessions: {
+          retrieve: async (id) => {
+            assert.equal(id, checkout.id, 'must retrieve the stored Checkout Session');
+            return checkout;
+          },
+          create: async (params) => {
+            checkoutCreates++;
+            return {
+              id: `cs_new_${randomUUID()}`,
+              url: 'https://checkout.example.test/new',
+              expires_at: params.expires_at,
+            };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: (body, signature, secret) =>
+          stripe.webhooks.constructEvent(body, signature, secret),
+      },
+    },
+  });
+  return { ...f, gateway, checkout, checkoutCreates: () => checkoutCreates };
+}
+
+async function stripeEvent(gateway: PaymentGateway, type: string, object: object) {
+  const payload = JSON.stringify({
+    id: `evt_${run}_${randomUUID()}`,
+    livemode: false,
+    type,
+    data: { object },
+  });
+  const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: webhookSecret });
+  return gateway.parseWebhookEvent(Buffer.from(payload), signature);
+}
+
 async function assertActivated(ticketId: number, paymentId: number) {
   const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
   const payment = await prisma.payment.findUniqueOrThrow({ where: { paymentId } });
@@ -154,6 +216,77 @@ try {
       })
     ).configId;
   }
+
+  const processing = await stripeFixture();
+  const delayedDecline = await stripeEvent(processing.gateway, 'payment_intent.payment_failed', {
+    id: processing.checkout.payment_intent.id,
+    object: 'payment_intent',
+    status: 'requires_payment_method',
+    metadata: processing.checkout.metadata,
+    amount: 5000,
+    currency: 'thb',
+  });
+  await PaymentConfirmationService.handleWebhook(delayedDecline, processing.gateway, prisma);
+  const processingReplay = await TicketService.purchase(
+    { uid: processing.owner.uid, idempotencyKey: randomUUID() },
+    processing.gateway,
+    prisma
+  );
+  assert.equal(processingReplay.paymentId, processing.payment.paymentId);
+  assert.equal(processingReplay.replayed, true);
+  assert.equal(processingReplay.status, PaymentStatus.PENDING);
+  assert.equal(processing.checkoutCreates(), 0);
+  assert.equal(await prisma.payment.count({ where: { uid: processing.owner.uid } }), 1);
+  assert.equal(await prisma.ticket.count({ where: { uid: processing.owner.uid } }), 1);
+  assert.equal(
+    (await prisma.payment.findUniqueOrThrow({ where: { paymentId: processingReplay.paymentId } }))
+      .openUid,
+    processing.owner.uid
+  );
+  processing.checkout.payment_status = 'paid';
+  processing.checkout.payment_intent.status = 'succeeded';
+  await PaymentConfirmationService.handleWebhook(
+    await stripeEvent(
+      processing.gateway,
+      'checkout.session.async_payment_succeeded',
+      processing.checkout
+    ),
+    processing.gateway,
+    prisma
+  );
+  await assertActivated(processing.ticket.ticketId, processing.payment.paymentId);
+  console.log(
+    'PASS: signed stale attempt failure preserves processing; purchase reuses the original checkout and later success activates once.'
+  );
+
+  const failed = await stripeFixture();
+  failed.checkout.payment_intent.status = 'requires_payment_method';
+  await PaymentConfirmationService.handleWebhook(
+    await stripeEvent(failed.gateway, 'checkout.session.async_payment_failed', failed.checkout),
+    failed.gateway,
+    prisma
+  );
+  const closed = await prisma.payment.findUniqueOrThrow({
+    where: { paymentId: failed.payment.paymentId },
+  });
+  assert.equal(closed.status, PaymentStatus.FAILED);
+  assert.equal(closed.openUid, null);
+  assert.equal(
+    (await prisma.ticket.findUniqueOrThrow({ where: { ticketId: failed.ticket.ticketId } })).status,
+    TicketStatus.UNPAID
+  );
+  const nextPurchase = await TicketService.purchase(
+    { uid: failed.owner.uid, idempotencyKey: randomUUID() },
+    failed.gateway,
+    prisma
+  );
+  assert.notEqual(nextPurchase.paymentId, failed.payment.paymentId);
+  assert.notEqual(nextPurchase.ticketId, failed.ticket.ticketId);
+  assert.equal(nextPurchase.status, PaymentStatus.PENDING);
+  assert.equal(failed.checkoutCreates(), 1);
+  console.log(
+    'PASS: signed terminal checkout failure closes the old payment; actual purchase creates a separate payment, ticket and checkout.'
+  );
 
   const duplicate = await fixture();
   const results = await Promise.all(
