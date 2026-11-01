@@ -266,6 +266,7 @@ export class StripePaymentGateway implements PaymentGateway {
         return {
           ...identity,
           type: 'payment.failed',
+          terminalFailure: event.type === 'checkout.session.async_payment_failed',
           eventId: identity.eventId,
           livemode: identity.livemode,
           gatewayRef,

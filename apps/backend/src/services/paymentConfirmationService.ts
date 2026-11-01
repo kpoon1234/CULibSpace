@@ -323,16 +323,15 @@ export class PaymentConfirmationService {
       return this.confirmCheckout(gateway.name, storedGatewayRef, checkout, prisma, event.eventId);
     }
 
-    // If the checkout session is still open, the customer can still retry.
-    // Do NOT mark as FAILED and do NOT release openUid.
-    // Exception: a session with status='complete' + payment_status='unpaid' is
-    // already closed at the gateway (no retry possible). If we received a
-    // payment.failed event (e.g. checkout.session.async_payment_failed), the
-    // payment definitively failed — mark FAILED and release openUid.
+    // Open also includes completed checkouts whose payment is still processing.
+    // An old declined-attempt event cannot close a retry now in progress. Only a
+    // terminal failure bound to this same checkout may release the purchase slot.
     if (checkout.state === 'open') {
       const raw = checkout.raw as { status?: string; payment_status?: string } | undefined;
       const isCompleteUnpaid = raw?.status === 'complete' && raw?.payment_status === 'unpaid';
-      if (!isCompleteUnpaid) {
+      const isTerminalCheckoutFailure =
+        event.terminalFailure === true && event.gatewayRef === storedGatewayRef;
+      if (!isCompleteUnpaid || !isTerminalCheckoutFailure) {
         return { handled: true, activated: false, paymentId };
       }
     }

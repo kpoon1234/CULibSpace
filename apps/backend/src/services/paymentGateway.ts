@@ -80,6 +80,8 @@ export interface GatewayPaymentEvent {
   /** Whether this is a live-mode event (must be false in test mode) */
   livemode?: boolean;
   type: GatewayPaymentEventType;
+  /** True only when the failure ends the checkout, not an individual payment attempt. */
+  terminalFailure?: boolean;
   /** รหัสอ้างอิงฝั่ง gateway เพื่อจับคู่กับ payment */
   gatewayRef: string;
   /**
