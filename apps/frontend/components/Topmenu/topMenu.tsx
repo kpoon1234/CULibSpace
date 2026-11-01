@@ -66,6 +66,14 @@ export default function TopMenu() {
           <div className="flex flex-1 items-center justify-end gap-2 sm:gap-4">
             {user ? (
               <div className="flex items-center gap-2 sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.push('/zones')}
+                  aria-label="Choose a table before reporting a facility issue"
+                  className="rounded-full border border-hairline bg-white px-4 py-1.5 text-xs font-medium text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                >
+                  Report Issue
+                </button>
                 <div className="relative">
                   <button
                     type="button"
