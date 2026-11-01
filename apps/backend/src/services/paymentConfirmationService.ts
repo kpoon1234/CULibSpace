@@ -324,21 +324,40 @@ export class PaymentConfirmationService {
     }
 
     // Open also includes completed checkouts whose payment is still processing.
-    // An old declined-attempt event cannot close a retry now in progress. Only a
-    // terminal failure bound to this same checkout may release the purchase slot.
+    // A completed session (status=complete, payment_status=unpaid) is closed at
+    // the gateway — no retry is possible on it. A checkout.session.async_payment_failed
+    // event against such a session is terminal: mark FAILED and release openUid.
+    // A payment_intent.payment_failed (single attempt decline) is not terminal on
+    // its own if the PaymentIntent is still processing — the customer may retry.
     if (checkout.state === 'open') {
       const raw = checkout.raw as { status?: string; payment_status?: string } | undefined;
       const isCompleteUnpaid = raw?.status === 'complete' && raw?.payment_status === 'unpaid';
-      const isTerminalCheckoutFailure =
-        event.terminalFailure === true && event.gatewayRef === storedGatewayRef;
-      if (!isCompleteUnpaid || !isTerminalCheckoutFailure) {
+      if (!isCompleteUnpaid) {
         return { handled: true, activated: false, paymentId };
+      }
+      const isPaymentIntentFailed =
+        (event.raw as { type?: string } | undefined)?.type === 'payment_intent.payment_failed';
+      if (isPaymentIntentFailed) {
+        const pi = checkout.raw as
+          | {
+              payment_intent?: { status?: string } | undefined;
+            }
+          | undefined;
+        if (pi?.payment_intent?.status === 'processing') {
+          return { handled: true, activated: false, paymentId };
+        }
       }
     }
 
-    // If checkout state is unknown, do not close or release openUid (safe fallback)
+    // If checkout state is unknown (transient gateway lookup failure), do not
+    // report success. Throw 503 so Stripe retries the webhook instead of
+    // leaving the payment stuck in PENDING with openUid still reserved.
     if (checkout.state === 'unknown') {
-      return { handled: true, activated: false, paymentId };
+      throw new PaymentConfirmationError(
+        'PAYMENT_LOOKUP_UNAVAILABLE',
+        'Could not verify checkout status with the gateway; retry later.',
+        503
+      );
     }
 
     // Checkout is no longer open (expired, not_found, etc.) and cannot be retried.

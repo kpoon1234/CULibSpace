@@ -60,6 +60,7 @@ function fixture() {
     receipts: [] as { gateway: string; eventId: string; paymentId: number; gatewayRef: string }[],
     failReceipt: false,
     failPayment: false,
+    failRetrieve: false,
     retrievals: 0,
     locks: [] as string[],
   };
@@ -157,6 +158,13 @@ function fixture() {
           },
           retrieve: async (_id, params) => {
             state.retrievals++;
+            if (state.failRetrieve) {
+              state.failRetrieve = false;
+              throw Object.assign(new Error('Stripe temporarily unavailable'), {
+                statusCode: 503,
+                type: 'StripeAPIError',
+              });
+            }
             assert.equal(params, undefined, 'confirmation does not need expanded charges');
             // Simulate Stripe's behaviour: PaymentIntent IDs (pi_…) are not valid
             // Checkout Session IDs and Stripe returns 404 for them.
@@ -937,12 +945,60 @@ test('signed terminal Checkout failure closes the matching completed unpaid sess
 
 test('terminal Checkout failure from another session cannot close a processing payment', async () => {
   const f = fixture();
+  // Session still open (not complete) — single attempt decline is not terminal
   f.checkout.state = 'open';
-  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+  f.checkout.raw = { status: 'open', payment_status: 'unpaid' };
 
-  const foreign = await signedFailure(f, 'checkout.session.async_payment_failed', 'cs_foreign');
-  await PaymentConfirmationService.handleWebhook(foreign, f.gateway, f.db);
+  const attempt = await signedFailure(f, 'payment_intent.payment_failed', 'pi_test_1');
+  await PaymentConfirmationService.handleWebhook(attempt, f.gateway, f.db);
   assert.equal(f.state.payment.status, PaymentStatus.PENDING);
   assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('transient gateway lookup failure on async_payment_failed returns 503, not success', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+  f.state.failRetrieve = true;
+
+  const terminal = await signedFailure(f, 'checkout.session.async_payment_failed');
+
+  // Lookup fails -> 503, payment untouched
+  await assert.rejects(
+    () => PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db),
+    (err: any) => {
+      assert.equal(err.code, 'PAYMENT_LOOKUP_UNAVAILABLE');
+      assert.equal(err.status, 503);
+      return true;
+    }
+  );
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+});
+
+test('async_payment_failed lookup failure retries after recovery and marks FAILED', async () => {
+  const f = fixture();
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+  f.state.failRetrieve = true; // First lookup fails
+
+  const terminal = await signedFailure(f, 'checkout.session.async_payment_failed');
+
+  // First attempt: Stripe lookup fails -> 503, payment untouched
+  await assert.rejects(
+    () => PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db),
+    (err: any) => {
+      assert.equal(err.status, 503);
+      return true;
+    }
+  );
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+
+  // Stripe recovers, retry the same webhook event -> FAILED, openUid released
+  await PaymentConfirmationService.handleWebhook(terminal, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.FAILED);
+  assert.equal(f.state.payment.openUid, null);
   assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
 });
