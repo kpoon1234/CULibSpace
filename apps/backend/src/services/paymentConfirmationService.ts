@@ -325,27 +325,23 @@ export class PaymentConfirmationService {
 
     // Open also includes completed checkouts whose payment is still processing.
     // A completed session (status=complete, payment_status=unpaid) is closed at
-    // the gateway — no retry is possible on it. A checkout.session.async_payment_failed
-    // event against such a session is terminal: mark FAILED and release openUid.
-    // A payment_intent.payment_failed (single attempt decline) is not terminal on
-    // its own if the PaymentIntent is still processing — the customer may retry.
+    // the gateway — no retry is possible on it. Only a checkout.session.async_payment_failed
+    // event bound to this same Checkout Session is terminal: mark FAILED and release openUid.
+    // A payment_intent.payment_failed (single attempt decline) is never terminal on its own
+    // — the customer may retry on the same session. Note: adapter does not expand payment_intent,
+    // so checkout.raw.payment_intent is an ID string, not an object with .status.
     if (checkout.state === 'open') {
       const raw = checkout.raw as { status?: string; payment_status?: string } | undefined;
       const isCompleteUnpaid = raw?.status === 'complete' && raw?.payment_status === 'unpaid';
       if (!isCompleteUnpaid) {
         return { handled: true, activated: false, paymentId };
       }
-      const isPaymentIntentFailed =
-        (event.raw as { type?: string } | undefined)?.type === 'payment_intent.payment_failed';
-      if (isPaymentIntentFailed) {
-        const pi = checkout.raw as
-          | {
-              payment_intent?: { status?: string } | undefined;
-            }
-          | undefined;
-        if (pi?.payment_intent?.status === 'processing') {
-          return { handled: true, activated: false, paymentId };
-        }
+      const isAsyncCheckoutFailure =
+        (event.raw as { type?: string } | undefined)?.type ===
+        'checkout.session.async_payment_failed';
+      const matchesStoredCheckout = event.gatewayRef === storedGatewayRef;
+      if (!(isAsyncCheckoutFailure && matchesStoredCheckout)) {
+        return { handled: true, activated: false, paymentId };
       }
     }
 

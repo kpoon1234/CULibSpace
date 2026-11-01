@@ -794,11 +794,11 @@ test('checkout.session.async_payment_failed releases openUid and marks payment F
   f.checkout.state = 'open';
   f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
 
-  // The event arrives as 'payment.failed' (adapter mapping for async_payment_failed)
+  // The event arrives as 'checkout.session.async_payment_failed' (terminal Checkout failure)
   const result = await PaymentConfirmationService.handleWebhook(
     event({
       type: 'payment.failed',
-      terminalFailure: true,
+      raw: { type: 'checkout.session.async_payment_failed' } as unknown,
       gatewayRef: 'cs_test_1',
       reference: '101',
     }),
@@ -827,7 +827,7 @@ test('checkout.session.async_payment_failed does not overwrite PAID payment (rac
   const result = await PaymentConfirmationService.handleWebhook(
     event({
       type: 'payment.failed',
-      terminalFailure: true,
+      raw: { type: 'checkout.session.async_payment_failed' } as unknown,
       gatewayRef: 'cs_test_1',
       reference: '101',
     }),
@@ -945,7 +945,18 @@ test('signed terminal Checkout failure closes the matching completed unpaid sess
 
 test('terminal Checkout failure from another session cannot close a processing payment', async () => {
   const f = fixture();
-  // Session still open (not complete) — single attempt decline is not terminal
+  f.checkout.state = 'open';
+  f.checkout.raw = { status: 'complete', payment_status: 'unpaid' };
+
+  const foreign = await signedFailure(f, 'checkout.session.async_payment_failed', 'cs_foreign');
+  await PaymentConfirmationService.handleWebhook(foreign, f.gateway, f.db);
+  assert.equal(f.state.payment.status, PaymentStatus.PENDING);
+  assert.equal(f.state.payment.openUid, 7);
+  assert.equal(f.state.ticket.status, TicketStatus.UNPAID);
+});
+
+test('single PaymentIntent decline on open session does not close processing payment', async () => {
+  const f = fixture();
   f.checkout.state = 'open';
   f.checkout.raw = { status: 'open', payment_status: 'unpaid' };
 
