@@ -13,10 +13,11 @@ export interface IssueReportLocation {
 
 interface IssueReportModalProps {
   location: IssueReportLocation;
+  source: 'api' | 'mock';
   onClose: () => void;
 }
 
-export default function IssueReportModal({ location, onClose }: IssueReportModalProps) {
+export default function IssueReportModal({ location, source, onClose }: IssueReportModalProps) {
   const [details, setDetails] = useState('');
   const [reportedAt] = useState(() => new Date().toISOString());
   const [submitting, setSubmitting] = useState(false);
@@ -48,6 +49,8 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (source === 'mock') return;
+
     const issueInformation = details.trim();
     const error = validateDetails(issueInformation);
     if (error) {
@@ -58,10 +61,13 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
 
     setSubmitting(true);
 
-    const response = await createIssueReport({
-      tableId: location.tableId,
-      issueInformation,
-    });
+    const response = await createIssueReport(
+      {
+        tableId: location.tableId,
+        issueInformation,
+      },
+      source
+    );
 
     setResult(response);
     setSubmitting(false);
@@ -83,6 +89,12 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
             Describe the problem so the library team can follow up.
           </p>
         </div>
+
+        {source === 'mock' && (
+          <p role="status" className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+            Sample data is for preview only. Issue reports cannot be submitted from this floor plan.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -157,7 +169,7 @@ export default function IssueReportModal({ location, onClose }: IssueReportModal
 
             <button
               type="submit"
-              disabled={validateDetails(details) !== null || submitting}
+              disabled={source === 'mock' || validateDetails(details) !== null || submitting}
               className="rounded-full bg-chula-pink px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-chula-pink-hover focus:outline-none focus:ring-2 focus:ring-chula-pink focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? 'Submitting…' : 'Submit report'}

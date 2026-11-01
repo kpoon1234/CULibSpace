@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import TopMenuItem from './topMenuItem';
-import IssueReportModal from '../IssueReport/IssueReportModal';
 import { API_URL, clearAuth, getAuthSnapshot, subscribeToAuth, type AuthUser } from '@/lib/auth';
 import { useProfileModal } from '@/lib/profileModalContext';
 
@@ -14,7 +13,6 @@ export default function TopMenu() {
   const pathname = usePathname();
   const { openProfile, openBookingHistory } = useProfileModal();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
   const storedUser = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, () => null);
   const user = useMemo(() => {
     if (!storedUser) return null;
@@ -70,9 +68,9 @@ export default function TopMenu() {
               <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   type="button"
-                  onClick={() => setReportOpen(true)}
-                  aria-label="Report a facility issue"
-                  className="rounded-full border border-hairline bg-white px-4 py-1.5 text-xs font-medium text-gray-900 shadow-sm hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white transition-colors cursor-pointer"
+                  onClick={() => router.push('/zones')}
+                  aria-label="Choose a table before reporting a facility issue"
+                  className="rounded-full border border-hairline bg-white px-4 py-1.5 text-xs font-medium text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-primary focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                 >
                   Report Issue
                 </button>
@@ -210,18 +208,6 @@ export default function TopMenu() {
           </div>
         </nav>
       </header>
-
-      {reportOpen && (
-        <IssueReportModal
-          location={{
-            tableId: 0,
-            tableCode: 'General',
-            zoneId: 0,
-            zoneLabel: 'General',
-          }}
-          onClose={() => setReportOpen(false)}
-        />
-      )}
     </>
   );
 }

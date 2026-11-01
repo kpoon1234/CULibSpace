@@ -9,8 +9,16 @@ export type CreateIssueReportResult =
   { ok: true; issueId: number; time: string } | { ok: false; error: string };
 
 export async function createIssueReport(
-  input: CreateIssueReportInput
+  input: CreateIssueReportInput,
+  source: 'api' | 'mock'
 ): Promise<CreateIssueReportResult> {
+  if (source === 'mock') {
+    return {
+      ok: false,
+      error: 'Issue reports are unavailable while using sample floor plan data.',
+    };
+  }
+
   const token = getAuthToken();
 
   if (!token) {

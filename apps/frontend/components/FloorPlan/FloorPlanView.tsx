@@ -206,6 +206,7 @@ export default function FloorPlanView({
             zoneId: reportingTable.zoneId,
             zoneLabel: activeZone.label,
           }}
+          source={plan.source}
           onClose={() => setReportingTable(null)}
         />
       )}
