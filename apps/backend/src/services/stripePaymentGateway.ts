@@ -374,9 +374,18 @@ export class StripePaymentGateway implements PaymentGateway {
       code?: string;
       message?: string;
       statusCode?: number;
+      decline_code?: string;
     };
 
     const message = stripeError?.message || 'Unknown payment gateway error';
+
+    // Log the real Stripe error server-side for debugging (never expose to client).
+    console.error('[StripePaymentGateway] Checkout rejected by Stripe:', {
+      type: stripeError?.type,
+      code: stripeError?.code,
+      decline_code: stripeError?.decline_code,
+      statusCode: stripeError?.statusCode,
+    });
 
     if (stripeError?.type === 'StripeConnectionError' || stripeError?.type === 'StripeAPIError') {
       return new PaymentGatewayError('GATEWAY_UNAVAILABLE', 'Stripe is temporarily unavailable.', {

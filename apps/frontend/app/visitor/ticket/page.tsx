@@ -79,6 +79,39 @@ export default function VisitorTicketPage() {
     user = null;
   }
 
+  // Auto-reconcile a previous purchase attempt when returning from Stripe
+  // (e.g. after the webhook confirmed payment). This avoids leaving the ticket
+  // stuck at "Confirming payment" until the user manually retries.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function autoReconcile() {
+      if (!getAuthToken()) return;
+
+      const storageKey = `${PURCHASE_KEY_PREFIX}${user?.uid ?? 0}`;
+      let storedKey: string | null = null;
+      try {
+        storedKey = sessionStorage.getItem(storageKey);
+      } catch {
+        // sessionStorage unavailable — skip auto-reconcile
+      }
+
+      if (!storedKey || !isValidIdempotencyKey(storedKey)) return;
+      if (cancelled) return;
+
+      idempotencyKey.current = { uid: user?.uid ?? 0, value: storedKey };
+      await startPurchase();
+    }
+
+    if (user?.role === 'OUTSIDER' && typeof user.uid === 'number') {
+      autoReconcile();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role, user?.uid, getAuthToken()]);
+
   function getPurchaseKey(uid: number): string {
     if (idempotencyKey.current?.uid === uid) {
       return idempotencyKey.current.value;
@@ -378,7 +411,11 @@ export default function VisitorTicketPage() {
           {notice && (
             <p
               role="status"
-              className="mt-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+              className={`mt-5 rounded-md border px-4 py-3 text-sm ${
+                notice.includes('active') || notice.includes('Payment confirmed')
+                  ? 'border-green-200 bg-green-50 text-green-800'
+                  : 'border-amber-200 bg-amber-50 text-amber-900'
+              }`}
             >
               {notice}
             </p>
