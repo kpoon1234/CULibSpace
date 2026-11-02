@@ -80,8 +80,8 @@ export default function VisitorTicketPage() {
   }
 
   // Auto-reconcile a previous purchase attempt when returning from Stripe
-  // (e.g. after the webhook confirmed payment). This avoids leaving the ticket
-  // stuck at "Confirming payment" until the user manually retries.
+  // (e.g. after the webhook confirmed payment). This only checks/recover the
+  // existing order — it never creates a new order or auto-redirects to checkout.
   useEffect(() => {
     // sessionStorage/localStorage are not available during SSR — bail out on the server.
     if (typeof window === 'undefined' || typeof sessionStorage === 'undefined') return;
@@ -89,7 +89,7 @@ export default function VisitorTicketPage() {
 
     let cancelled = false;
 
-    async function autoReconcile() {
+    async function reconcileExistingPurchase() {
       const storageKey = `${PURCHASE_KEY_PREFIX}${user?.uid ?? 0}`;
       let storedKey: string | null = null;
       try {
@@ -101,12 +101,95 @@ export default function VisitorTicketPage() {
       if (!storedKey || !isValidIdempotencyKey(storedKey)) return;
       if (cancelled) return;
 
-      idempotencyKey.current = { uid: user?.uid ?? 0, value: storedKey };
-      await startPurchase();
+      try {
+        const result = await purchaseVisitorTicket(storedKey);
+
+        if (!cancelled && isCurrentRequestForReconcile()) {
+          if (!result.ok) {
+            if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
+              setPaymentPending(true);
+              setNotice(
+                'Your purchase is still being processed. Retry to recover the same payment request.'
+              );
+            } else if (result.code === 'PAYMENT_NOT_FOUND') {
+              // No recoverable order — clear any stale stored key so the user can start fresh.
+              rotatePurchaseKey(user?.uid ?? 0);
+            } else {
+              setPaymentPending(false);
+            }
+            return;
+          }
+
+          setPurchase(result.data);
+
+          const { paymentStatus, ticketStatus } = result.data;
+
+          if (paymentStatus === 'PAID') {
+            setPaymentConfirmed(true);
+
+            if (ticketStatus !== 'PAID') {
+              setTicketActive(false);
+              setTicketExpired(false);
+              setNotice('Payment confirmed. Your ticket is waiting for activation.');
+              return;
+            }
+
+            const startMs = Date.parse(result.data.ticketStartDateTime);
+            const endMs = Date.parse(result.data.ticketEndDateTime);
+            const now = Date.now();
+
+            if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+              setTicketActive(false);
+              setTicketExpired(false);
+              setNotice('Payment confirmed, but the ticket validity period could not be verified.');
+              return;
+            }
+
+            if (now >= endMs) {
+              setTicketActive(false);
+              setTicketExpired(true);
+              setNotice('This visitor ticket has expired. You can purchase a new ticket.');
+              return;
+            }
+
+            if (now < startMs) {
+              setTicketActive(false);
+              setTicketExpired(false);
+              setNotice(
+                `Payment confirmed. Your ticket becomes active at ${new Date(startMs).toLocaleString()}.`
+              );
+              return;
+            }
+
+            setTicketActive(true);
+            setTicketExpired(false);
+            setNotice('Payment confirmed. Your visitor ticket is active.');
+            return;
+          }
+
+          if (paymentStatus === 'FAILED' || paymentStatus === 'EXPIRED') {
+            setNotice('The previous payment attempt ended. You can start a new purchase.');
+            return;
+          }
+
+          setPaymentPending(true);
+          setNotice(
+            'Your purchase is still being processed. Retry to recover the same payment request.'
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPaymentPending(false);
+        }
+      }
+    }
+
+    function isCurrentRequestForReconcile() {
+      return !cancelled;
     }
 
     if (user?.role === 'OUTSIDER' && typeof user.uid === 'number') {
-      autoReconcile();
+      reconcileExistingPurchase();
     }
 
     return () => {

@@ -46,15 +46,59 @@ export default function TicketPaymentReturnPage() {
 
         if (cancelled) return;
 
-        if (result.ok && result.data.paymentStatus === 'PAID') {
+        if (!result.ok) {
+          if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
+            setStatus('pending');
+          } else {
+            setStatus('failed');
+          }
+          return;
+        }
+
+        setPurchaseData(result.data);
+
+        const { paymentStatus, ticketStatus } = result.data;
+
+        if (paymentStatus === 'PAID') {
+          if (ticketStatus !== 'PAID') {
+            setStatus('pending');
+            return;
+          }
+
+          const startMs = Date.parse(result.data.ticketStartDateTime);
+          const endMs = Date.parse(result.data.ticketEndDateTime);
+          const now = Date.now();
+
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+            setStatus('pending');
+            return;
+          }
+
+          if (now >= endMs) {
+            setStatus('pending');
+            return;
+          }
+
+          if (now < startMs) {
+            setStatus('pending');
+            return;
+          }
+
           setStatus('paid');
-        } else if (!result.ok && result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
-          setStatus('pending');
         } else {
-          setStatus('failed');
+          setStatus('pending');
         }
       } catch {
         if (!cancelled) setStatus('failed');
+      }
+    }
+
+    function setPurchaseData(data: any) {
+      // Stored for potential use by the ticket page after redirect.
+      try {
+        sessionStorage.setItem('culibspace:last-purchase-result', JSON.stringify(data));
+      } catch {
+        /* sessionStorage unavailable */
       }
     }
 
@@ -119,7 +163,8 @@ export default function TicketPaymentReturnPage() {
         <p className="text-sm font-semibold text-rose-600">PAYMENT UPDATE</p>
         <h1 className="mt-2 text-3xl font-bold text-gray-900">Payment is still being processed</h1>
         <p className="mt-4 leading-7 text-gray-600">
-          Your payment hasn't been confirmed yet. Redirecting to your ticket page so you can retry.
+          Your payment hasn&apos;t been confirmed yet. Redirecting to your ticket page so you can
+          retry.
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-3">
           <Link
@@ -145,7 +190,8 @@ export default function TicketPaymentReturnPage() {
       <p className="text-sm font-semibold text-rose-600">PAYMENT UPDATE</p>
       <h1 className="mt-2 text-3xl font-bold text-gray-900">Payment confirmation unavailable</h1>
       <p className="mt-4 leading-7 text-gray-600">
-        We couldn't confirm your payment right now. Please go to the ticket page to check or retry.
+        We couldn&apos;t confirm your payment right now. Please go to the ticket page to check or
+        retry.
       </p>
       <div className="mt-7 flex flex-wrap justify-center gap-3">
         <Link
