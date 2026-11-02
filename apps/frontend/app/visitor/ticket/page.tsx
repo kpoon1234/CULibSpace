@@ -83,11 +83,13 @@ export default function VisitorTicketPage() {
   // (e.g. after the webhook confirmed payment). This avoids leaving the ticket
   // stuck at "Confirming payment" until the user manually retries.
   useEffect(() => {
+    // sessionStorage/localStorage are not available during SSR — bail out on the server.
+    if (typeof window === 'undefined' || typeof sessionStorage === 'undefined') return;
+    if (!getAuthToken()) return;
+
     let cancelled = false;
 
     async function autoReconcile() {
-      if (!getAuthToken()) return;
-
       const storageKey = `${PURCHASE_KEY_PREFIX}${user?.uid ?? 0}`;
       let storedKey: string | null = null;
       try {
@@ -110,7 +112,7 @@ export default function VisitorTicketPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.role, user?.uid, getAuthToken()]);
+  }, [user?.role, user?.uid]);
 
   function getPurchaseKey(uid: number): string {
     if (idempotencyKey.current?.uid === uid) {
