@@ -69,3 +69,13 @@ export function useBookingLimits(): BookingLimits {
   const { data } = useSWR('booking-limits', () => fetchBookingLimits());
   return data ?? DEFAULT_BOOKING_LIMITS;
 }
+
+/**
+ * The furthest day the booking date picker offers. Same rolling rule as the
+ * backend's ScheduleService: a start more than `maxAdvanceBookingDays` × 24h
+ * after now is refused, so the last bookable day is the one `now` + that span
+ * falls on.
+ */
+export function lastBookableDate(nowMs: number, maxAdvanceBookingDays: number): Date {
+  return new Date(nowMs + maxAdvanceBookingDays * 86_400_000);
+}
