@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getAuthToken, getStoredUser } from '@/lib/auth';
@@ -11,6 +11,8 @@ import {
 } from '@/lib/tickets';
 
 const PURCHASE_KEY_PREFIX = 'culibspace:ticket-purchase:';
+const POLL_INTERVAL_MS = 3000;
+const MAX_WAIT_MS = 60_000;
 
 type PageStatus =
   | 'checking'
@@ -20,25 +22,35 @@ type PageStatus =
   | 'pending'
   | 'failed'
   | 'refunded'
-  | 'unavailable';
+  | 'unavailable'
+  | 'timeout';
 
 export default function TicketPaymentReturnPage() {
   const router = useRouter();
   const [status, setStatus] = useState<PageStatus>('checking');
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const checkEpochRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let startTime: number | null = null;
+    let checkEpoch = 0;
 
     async function checkPayment() {
+      const epoch = ++checkEpoch;
+      checkEpochRef.current = epoch;
+
       const token = getAuthToken();
       if (!token) {
-        setStatus('failed');
+        if (!cancelled) setStatus('failed');
         return;
       }
 
       const user = getStoredUser();
       if (!user?.uid || user.role !== 'OUTSIDER') {
-        setStatus('failed');
+        if (!cancelled) setStatus('failed');
         return;
       }
 
@@ -51,25 +63,26 @@ export default function TicketPaymentReturnPage() {
       }
 
       if (!storedKey || !isValidIdempotencyKey(storedKey)) {
-        setStatus('failed');
+        if (!cancelled) setStatus('failed');
         return;
       }
 
       try {
         const result = await reconcileVisitorTicket(storedKey);
 
-        if (cancelled) return;
+        // Discard stale responses from older polling rounds.
+        if (cancelled || epoch !== checkEpochRef.current) return;
 
         if (!result.ok) {
           if (result.code === 'PAYMENT_NOT_FOUND') {
-            setStatus('failed');
+            if (!cancelled) setStatus('failed');
             return;
           }
           if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
-            setStatus('pending');
+            if (!cancelled) setStatus('pending');
             return;
           }
-          setStatus('failed');
+          if (!cancelled) setStatus('failed');
           return;
         }
 
@@ -84,28 +97,43 @@ export default function TicketPaymentReturnPage() {
         const isExpired = hasValidDates && now >= endMs;
         const isNotYet = hasValidDates && now < startMs;
 
+        const isFinal =
+          paymentStatus === 'FAILED' ||
+          paymentStatus === 'EXPIRED' ||
+          paymentStatus === 'REFUNDED' ||
+          (paymentStatus === 'PAID' &&
+            ticketStatus === 'PAID' &&
+            hasValidDates &&
+            !isExpired &&
+            !isNotYet);
+
         if (paymentStatus === 'PAID') {
           if (ticketStatus === 'PAID') {
             if (isExpired) {
-              setStatus('paid-expired');
+              if (!cancelled) setStatus('paid-expired');
             } else if (isNotYet) {
-              setStatus('paid-not-yet');
+              if (!cancelled) setStatus('paid-not-yet');
             } else if (!hasValidDates) {
-              setStatus('unavailable');
+              if (!cancelled) setStatus('unavailable');
             } else {
-              setStatus('paid-active');
+              if (!cancelled) setStatus('paid-active');
             }
           } else {
-            setStatus('pending');
+            if (!cancelled) setStatus('pending');
           }
         } else if (paymentStatus === 'FAILED') {
-          setStatus('failed');
+          if (!cancelled) setStatus('failed');
         } else if (paymentStatus === 'EXPIRED') {
-          setStatus('failed');
+          if (!cancelled) setStatus('failed');
         } else if (paymentStatus === 'REFUNDED') {
-          setStatus('refunded');
+          if (!cancelled) setStatus('refunded');
         } else {
-          setStatus('pending');
+          if (!cancelled) setStatus('pending');
+        }
+
+        if (isFinal && pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
         }
       } catch {
         if (!cancelled) setStatus('failed');
@@ -113,9 +141,41 @@ export default function TicketPaymentReturnPage() {
     }
 
     checkPayment();
+    startTime = Date.now();
+    startTimeRef.current = startTime;
+
+    pollTimer = setInterval(() => {
+      // Stop polling if max wait exceeded.
+      if (startTime && Date.now() - startTime >= MAX_WAIT_MS) {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = null;
+        if (!cancelled) setStatus('timeout');
+        return;
+      }
+
+      // Stop polling if already at a final status.
+      if (
+        status === 'paid-active' ||
+        status === 'paid-not-yet' ||
+        status === 'paid-expired' ||
+        status === 'failed' ||
+        status === 'refunded' ||
+        status === 'unavailable' ||
+        status === 'timeout'
+      ) {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = null;
+        return;
+      }
+
+      checkPayment();
+    }, POLL_INTERVAL_MS);
+
+    pollTimerRef.current = pollTimer;
 
     return () => {
       cancelled = true;
+      if (pollTimer) clearInterval(pollTimer);
     };
   }, []);
 
@@ -133,12 +193,13 @@ export default function TicketPaymentReturnPage() {
   const renderMessage = () => {
     switch (status) {
       case 'checking':
+      case 'pending':
         return (
           <>
             <p className="text-sm font-semibold text-rose-600">PAYMENT UPDATE</p>
-            <h1 className="mt-2 text-3xl font-bold text-gray-900">We are checking your payment</h1>
+            <h1 className="mt-2 text-3xl font-bold text-gray-900">กำลังรอยืนยันการชำระเงิน</h1>
             <p className="mt-4 leading-7 text-gray-600">
-              Stripe returned you to CULibSpace. Please wait while we confirm your payment.
+              ยังไม่ได้รับการยืนยันการชำระเงินจากระบบ กรุณารอสักครู่ขณะเราตรวจสอบสถานะอัตโนมัติ
             </p>
           </>
         );
@@ -174,14 +235,14 @@ export default function TicketPaymentReturnPage() {
             </p>
           </>
         );
-      case 'pending':
+      case 'timeout':
         return (
           <>
             <p className="text-sm font-semibold text-rose-600">PAYMENT UPDATE</p>
-            <h1 className="mt-2 text-3xl font-bold text-gray-900">กำลังรอยืนยันการชำระเงิน</h1>
+            <h1 className="mt-2 text-3xl font-bold text-gray-900">ยังรอยืนยันการชำระเงิน</h1>
             <p className="mt-4 leading-7 text-gray-600">
-              ยังไม่ได้รับการยืนยันการชำระเงินจากระบบ
-              กรุณารอสักครู่หรือกลับไปยังหน้าตั๋วเพื่อตรวจสอบอีกครั้ง
+              ระบบยังไม่สามารถยืนยันสถานะการชำระเงินได้ภายในเวลาที่กำหนด
+              กรุณาลองตรวจสอบอีกครั้งหรือดูตั๋วของคุณ
             </p>
           </>
         );
@@ -241,6 +302,7 @@ export default function TicketPaymentReturnPage() {
             {common}
           </>
         );
+      case 'timeout':
       case 'pending':
       case 'failed':
       case 'refunded':
@@ -251,7 +313,7 @@ export default function TicketPaymentReturnPage() {
               href="/visitor/ticket"
               className="inline-flex rounded-md bg-cta-primary px-5 py-3 text-sm font-semibold text-white hover:bg-cta-primary-hover"
             >
-              Go to ticket page
+              ดูตั๋วของฉัน
             </Link>
             {common}
           </>
