@@ -426,3 +426,53 @@ for (const method of ['lockTable', 'create', 'validate'] as const) {
     assert.equal(res.body.code, 'INVALID_TIME_WINDOW');
   });
 }
+
+test('browsing the plan on a closed day still returns the tables, flagged closed', async () => {
+  const originalValidate = ScheduleService.validateTargetTimeWindow;
+  const originalLayout = LayoutService.getLayoutWithStatus;
+  const f = fixture([schedule({ priority: 3, isClosed: true, name: 'Holiday' })]);
+  try {
+    ScheduleService.validateTargetTimeWindow = (start, end, explicit) =>
+      originalValidate(start, end, explicit, f.client, { now: new Date(start.getTime() - 60_000) });
+    LayoutService.getLayoutWithStatus = async () => [{ zoneId: 1, tables: [] }] as any;
+
+    // No time window: the plan itself is still shown.
+    const browse = response();
+    await LayoutController.getLayout({ query: {} } as any, browse as any);
+    assert.equal(browse.statusCode, 200);
+    assert.equal(browse.body.data.length, 1);
+    assert.equal(browse.body.meta.libraryClosed, true);
+    assert.match(browse.body.meta.closedReason, /Library is closed on .*: Holiday/);
+
+    // An explicit window on a closed day is still refused, as bookings are.
+    const explicit = response();
+    await LayoutController.getLayout(
+      { query: { date: '2026-11-02', timeSlot: '10:00-11:00' } } as any,
+      explicit as any
+    );
+    assert.equal(explicit.statusCode, 400);
+    assert.equal(explicit.body.code, 'LIBRARY_CLOSED');
+  } finally {
+    ScheduleService.validateTargetTimeWindow = originalValidate;
+    LayoutService.getLayoutWithStatus = originalLayout;
+  }
+});
+
+test('an open day reports libraryClosed false', async () => {
+  const originalValidate = ScheduleService.validateTargetTimeWindow;
+  const originalLayout = LayoutService.getLayoutWithStatus;
+  const f = fixture([schedule({ is24Hours: true })]);
+  try {
+    ScheduleService.validateTargetTimeWindow = (start, end, explicit) =>
+      originalValidate(start, end, explicit, f.client, { now: new Date(start.getTime() - 60_000) });
+    LayoutService.getLayoutWithStatus = async () => [];
+    const res = response();
+    await LayoutController.getLayout({ query: {} } as any, res as any);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.meta.libraryClosed, false);
+    assert.equal(res.body.meta.closedReason, undefined);
+  } finally {
+    ScheduleService.validateTargetTimeWindow = originalValidate;
+    LayoutService.getLayoutWithStatus = originalLayout;
+  }
+});
