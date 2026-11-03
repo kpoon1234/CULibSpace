@@ -139,23 +139,25 @@ export class TicketController {
       const uid = authReq.user?.uid;
 
       if (!uid) {
-        res
-          .status(401)
-          .json({
-            success: false,
-            code: 'UNAUTHORIZED',
-            error: 'Unauthorized: User session required',
-          });
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: User session required',
+        });
         return;
       }
 
       const body = (req.body ?? {}) as { idempotencyKey?: unknown };
       const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
 
-      if (idempotencyKey.error) {
+      if (idempotencyKey.error || idempotencyKey.value === undefined) {
         res
           .status(400)
-          .json({ success: false, code: 'INVALID_IDEMPOTENCY_KEY', error: idempotencyKey.error });
+          .json({
+            success: false,
+            code: 'INVALID_IDEMPOTENCY_KEY',
+            error: idempotencyKey.error ?? 'Missing idempotency key',
+          });
         return;
       }
 
