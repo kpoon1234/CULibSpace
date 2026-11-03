@@ -407,3 +407,82 @@ export async function purchaseVisitorTicket(idempotencyKey: string): Promise<Tic
     };
   }
 }
+
+/**
+ * อ่านสถานะรายการซื้อเดิมจาก backend (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
+ * ใช้สำหรับ auto-reconcile เมื่อผู้ใช้กลับมาที่หน้าซื้อตั๋ว
+ * หากไม่พบรายการเดิมจะคืน { ok: false, status: 404, code: 'PAYMENT_NOT_FOUND' }
+ */
+export async function reconcileVisitorTicket(
+  idempotencyKey: string
+): Promise<TicketPurchaseResult> {
+  const token = getAuthToken();
+  if (!token) {
+    return {
+      ok: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'Log in with your visitor account to purchase a ticket.',
+      retryable: false,
+    };
+  }
+
+  if (!isValidIdempotencyKey(idempotencyKey)) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'INVALID_IDEMPOTENCY_KEY',
+      message: 'Invalid purchase key.',
+      retryable: false,
+    };
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/tickets/reconcile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ idempotencyKey }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const body = (await response.json().catch(() => null)) as {
+      success?: boolean;
+      data?: unknown;
+      code?: string;
+      error?: string;
+      retryable?: boolean;
+    } | null;
+
+    if (response.ok && body?.success && body?.data) {
+      const data = parseTicketPurchaseData(body.data);
+      if (data) return { ok: true, data };
+
+      return {
+        ok: false,
+        status: response.status,
+        code: 'INVALID_RESPONSE',
+        message: 'The ticket service returned an unexpected response.',
+        retryable: true,
+      };
+    }
+
+    return {
+      ok: false,
+      status: response.status,
+      code: body?.code,
+      message: body?.error ?? `Unable to reconcile ticket (HTTP ${response.status}).`,
+      retryable: body?.retryable === true,
+    };
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      code: 'NETWORK_ERROR',
+      message: 'Unable to connect to the ticket service. Please try again.',
+      retryable: true,
+    };
+  }
+}

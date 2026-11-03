@@ -125,6 +125,69 @@ export class TicketController {
       handleError(res, error, 'Error purchasing ticket');
     }
   }
+
+  /**
+   * POST /api/tickets/reconcile
+   * อ่านสถานะรายการซื้อเดิม (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
+   * ถ้ายังรอยืนยัน จะตรวจสอบกับ Stripe และยืนยันการชำระเงินผ่าน
+   * PaymentConfirmationService.confirmCheckout() ภายใน transaction
+   * Body: { "idempotencyKey": "client-generated-uuid" }
+   */
+  static async reconcile(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const uid = authReq.user?.uid;
+
+      if (!uid) {
+        res.status(401).json({
+          success: false,
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: User session required',
+        });
+        return;
+      }
+
+      const body = (req.body ?? {}) as { idempotencyKey?: unknown };
+      const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
+
+      if (idempotencyKey.error || idempotencyKey.value === undefined) {
+        res
+          .status(400)
+          .json({
+            success: false,
+            code: 'INVALID_IDEMPOTENCY_KEY',
+            error: idempotencyKey.error ?? 'Missing idempotency key',
+          });
+        return;
+      }
+
+      const gateway = getPaymentGateway();
+
+      const result = await TicketService.reconcilePurchase(
+        { uid, idempotencyKey: idempotencyKey.value },
+        gateway
+      );
+
+      res.status(200).json({
+        success: true,
+        data: {
+          ticketId: result.ticketId,
+          paymentId: result.paymentId,
+          checkoutUrl: result.checkoutUrl,
+          amountSatang: result.amountSatang,
+          currency: result.currency,
+          paymentStatus: result.status,
+          ticketStatus: result.ticketStatus,
+          expiresAt: result.expiresAt,
+          ticketStartDateTime: result.ticketStartDateTime,
+          ticketEndDateTime: result.ticketEndDateTime,
+          replayed: result.replayed,
+        },
+      });
+    } catch (error: any) {
+      handleError(res, error, 'Error reconciling ticket');
+    }
+  }
   /**
    * GET /api/tickets/my-tickets
    * [US6-2] ดึงรายละเอียดตั๋วและประวัติการชำระเงินของผู้เข้าชมภายนอก
