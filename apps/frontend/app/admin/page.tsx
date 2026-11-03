@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useAdminGuard } from '@/lib/useAdminGuard';
 import {
+  CalendarIcon,
   ChevronRightIcon,
   HistoryIcon,
   UsersIcon,
@@ -65,6 +66,20 @@ export default function AdminDashboardPage() {
             <span className="block text-sm font-medium text-gray-900">Audit History</span>
             <span className="block text-xs text-gray-500">
               Review every behaviour-score change and who made it
+            </span>
+          </span>
+          <ChevronRightIcon width={16} height={16} className="flex-none text-gray-400" />
+        </Link>
+
+        <Link
+          href="/admin/settings"
+          className="mt-3 flex items-center gap-3 rounded-md border border-gray-300 px-4 py-3 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+        >
+          <CalendarIcon className="flex-none text-gray-500" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-gray-900">System Settings</span>
+            <span className="block text-xs text-gray-500">
+              Opening hours, exceptions and booking limits
             </span>
           </span>
           <ChevronRightIcon width={16} height={16} className="flex-none text-gray-400" />
