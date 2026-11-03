@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getAuthToken, getStoredUser } from '@/lib/auth';
@@ -28,29 +28,34 @@ type PageStatus =
 export default function TicketPaymentReturnPage() {
   const router = useRouter();
   const [status, setStatus] = useState<PageStatus>('checking');
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number | null>(null);
-  const checkEpochRef = useRef(0);
 
   useEffect(() => {
-    let cancelled = false;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let startTime: number | null = null;
-    let checkEpoch = 0;
+    let stopped = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    // The deadline also covers an in-flight request. Late responses must not
+    // overwrite timeout, a final result, or a newer mount's state.
+    const deadlineTimer = setTimeout(() => finish('timeout'), MAX_WAIT_MS);
+
+    function finish(nextStatus: PageStatus) {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(deadlineTimer);
+      if (pollTimer !== null) clearTimeout(pollTimer);
+      setStatus(nextStatus);
+    }
 
     async function checkPayment() {
-      const epoch = ++checkEpoch;
-      checkEpochRef.current = epoch;
+      if (stopped) return;
 
       const token = getAuthToken();
       if (!token) {
-        if (!cancelled) setStatus('failed');
+        finish('failed');
         return;
       }
 
       const user = getStoredUser();
       if (!user?.uid || user.role !== 'OUTSIDER') {
-        if (!cancelled) setStatus('failed');
+        finish('failed');
         return;
       }
 
@@ -63,119 +68,71 @@ export default function TicketPaymentReturnPage() {
       }
 
       if (!storedKey || !isValidIdempotencyKey(storedKey)) {
-        if (!cancelled) setStatus('failed');
+        finish('failed');
         return;
       }
 
       try {
         const result = await reconcileVisitorTicket(storedKey);
 
-        // Discard stale responses from older polling rounds.
-        if (cancelled || epoch !== checkEpochRef.current) return;
+        if (stopped) return;
 
+        let nextStatus: PageStatus;
         if (!result.ok) {
-          if (result.code === 'PAYMENT_NOT_FOUND') {
-            if (!cancelled) setStatus('failed');
-            return;
+          nextStatus = result.code === 'PAYMENT_AWAITING_CONFIRMATION' ? 'pending' : 'failed';
+        } else {
+          const data: TicketPurchaseData = result.data;
+          const { paymentStatus, ticketStatus } = data;
+          const startMs = Date.parse(data.ticketStartDateTime);
+          const endMs = Date.parse(data.ticketEndDateTime);
+          const now = Date.now();
+          const hasValidDates =
+            Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+
+          if (paymentStatus === 'PAID') {
+            if (ticketStatus !== 'PAID') {
+              nextStatus = 'pending';
+            } else if (!hasValidDates) {
+              nextStatus = 'unavailable';
+            } else if (now >= endMs) {
+              nextStatus = 'paid-expired';
+            } else if (now < startMs) {
+              nextStatus = 'paid-not-yet';
+            } else {
+              nextStatus = 'paid-active';
+            }
+          } else if (paymentStatus === 'FAILED' || paymentStatus === 'EXPIRED') {
+            nextStatus = 'failed';
+          } else if (paymentStatus === 'REFUNDED') {
+            nextStatus = 'refunded';
+          } else {
+            nextStatus = 'pending';
           }
-          if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
-            if (!cancelled) setStatus('pending');
-            return;
-          }
-          if (!cancelled) setStatus('failed');
+        }
+
+        if (nextStatus !== 'pending') {
+          finish(nextStatus);
           return;
         }
 
-        const data: TicketPurchaseData = result.data;
-
-        const { paymentStatus, ticketStatus } = data;
-
-        const startMs = Date.parse(data.ticketStartDateTime);
-        const endMs = Date.parse(data.ticketEndDateTime);
-        const now = Date.now();
-        const hasValidDates = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
-        const isExpired = hasValidDates && now >= endMs;
-        const isNotYet = hasValidDates && now < startMs;
-
-        const isFinal =
-          paymentStatus === 'FAILED' ||
-          paymentStatus === 'EXPIRED' ||
-          paymentStatus === 'REFUNDED' ||
-          (paymentStatus === 'PAID' &&
-            ticketStatus === 'PAID' &&
-            hasValidDates &&
-            !isExpired &&
-            !isNotYet);
-
-        if (paymentStatus === 'PAID') {
-          if (ticketStatus === 'PAID') {
-            if (isExpired) {
-              if (!cancelled) setStatus('paid-expired');
-            } else if (isNotYet) {
-              if (!cancelled) setStatus('paid-not-yet');
-            } else if (!hasValidDates) {
-              if (!cancelled) setStatus('unavailable');
-            } else {
-              if (!cancelled) setStatus('paid-active');
-            }
-          } else {
-            if (!cancelled) setStatus('pending');
-          }
-        } else if (paymentStatus === 'FAILED') {
-          if (!cancelled) setStatus('failed');
-        } else if (paymentStatus === 'EXPIRED') {
-          if (!cancelled) setStatus('failed');
-        } else if (paymentStatus === 'REFUNDED') {
-          if (!cancelled) setStatus('refunded');
-        } else {
-          if (!cancelled) setStatus('pending');
-        }
-
-        if (isFinal && pollTimer) {
-          clearInterval(pollTimer);
+        setStatus(nextStatus);
+        // Wait for this request to settle before scheduling another one. A slow
+        // response is still authoritative, not made stale by a fixed interval.
+        pollTimer = setTimeout(() => {
           pollTimer = null;
-        }
+          void checkPayment();
+        }, POLL_INTERVAL_MS);
       } catch {
-        if (!cancelled) setStatus('failed');
+        finish('failed');
       }
     }
 
-    checkPayment();
-    startTime = Date.now();
-    startTimeRef.current = startTime;
-
-    pollTimer = setInterval(() => {
-      // Stop polling if max wait exceeded.
-      if (startTime && Date.now() - startTime >= MAX_WAIT_MS) {
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = null;
-        if (!cancelled) setStatus('timeout');
-        return;
-      }
-
-      // Stop polling if already at a final status.
-      if (
-        status === 'paid-active' ||
-        status === 'paid-not-yet' ||
-        status === 'paid-expired' ||
-        status === 'failed' ||
-        status === 'refunded' ||
-        status === 'unavailable' ||
-        status === 'timeout'
-      ) {
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = null;
-        return;
-      }
-
-      checkPayment();
-    }, POLL_INTERVAL_MS);
-
-    pollTimerRef.current = pollTimer;
+    void checkPayment();
 
     return () => {
-      cancelled = true;
-      if (pollTimer) clearInterval(pollTimer);
+      stopped = true;
+      clearTimeout(deadlineTimer);
+      if (pollTimer !== null) clearTimeout(pollTimer);
     };
   }, []);
 
@@ -310,7 +267,7 @@ export default function TicketPaymentReturnPage() {
         return (
           <>
             <Link
-              href="/visitor/ticket"
+              href="/visitor/tickets"
               className="inline-flex rounded-md bg-cta-primary px-5 py-3 text-sm font-semibold text-white hover:bg-cta-primary-hover"
             >
               ดูตั๋วของฉัน
