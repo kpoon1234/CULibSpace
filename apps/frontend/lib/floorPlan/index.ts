@@ -14,8 +14,18 @@ export {
 } from './client';
 export {
   useFloorPlan,
+  useReopenDay,
   STATUS_POLL_MS,
   type UseFloorPlanResult,
   type UseFloorPlanOptions,
 } from './useFloorPlan';
+export {
+  LayoutRequestError,
+  isLibraryClosedError,
+  closedDateKey,
+  bangkokDateKey,
+  formatDayKey,
+  findReopenDay,
+  addDays,
+} from './closure';
 export { MOCK_FLOORS, mockFloorLayout, mockSeatStatus } from './mockData';

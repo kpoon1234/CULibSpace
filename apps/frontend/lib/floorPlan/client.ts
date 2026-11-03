@@ -1,5 +1,6 @@
 import { API_URL } from '@/lib/auth';
 import { synthesizeLayout } from './autoLayout';
+import { LayoutRequestError } from './closure';
 import { tablePassesFilter } from './filterOptions';
 import { mockFloorLayout, mockSeatStatus } from './mockData';
 import type {
@@ -42,6 +43,8 @@ export interface Sourced<T> {
 export interface LayoutResult {
   geometry: FloorLayoutResponse;
   status: SeatStatusZone[];
+  /** The library is closed today (meta.libraryClosed): every table is shown as Closed. */
+  libraryClosed: boolean;
 }
 
 // GET /api/tables/layout params, per LayoutController: zoneType, plugCap,
@@ -83,6 +86,20 @@ function normalizeRawZones(zones: RawLayoutZone[]): RawLayoutZone[] {
   }));
 }
 
+/** A closed day has no live status: show every table as Closed, with no holds or bookings. */
+function markAllClosed(feed: SeatStatusZone[]): SeatStatusZone[] {
+  return feed.map((zone) => ({
+    ...zone,
+    tables: zone.tables.map((table) => ({
+      ...table,
+      status: 'Closed' as const,
+      isLocked: false,
+      lockedByUid: null,
+      bookedIntervals: [],
+    })),
+  }));
+}
+
 /** Split a raw /api/tables/layout payload into a status feed for buildFloorPlan(). */
 function toStatusFeed(zones: RawLayoutZone[]): SeatStatusZone[] {
   return zones.map((z) => ({
@@ -103,7 +120,11 @@ function toStatusFeed(zones: RawLayoutZone[]): SeatStatusZone[] {
 }
 
 function mockResult(floorId: number): LayoutResult {
-  return { geometry: mockFloorLayout(floorId), status: mockSeatStatus(floorId) };
+  return {
+    geometry: mockFloorLayout(floorId),
+    status: mockSeatStatus(floorId),
+    libraryClosed: false,
+  };
 }
 
 /**
@@ -125,7 +146,16 @@ export async function fetchLayout(
     signal,
     headers: { Accept: 'application/json' },
   });
-  if (!res.ok) throw new Error(`layout ${res.status}`);
+  if (!res.ok) {
+    // Keep the backend's code (e.g. LIBRARY_CLOSED) so the UI can explain it.
+    let failure: { error?: string; code?: string } = {};
+    try {
+      failure = (await res.json()) as typeof failure;
+    } catch {
+      // Not JSON (proxy error page etc.): fall back to the status alone.
+    }
+    throw new LayoutRequestError(failure.error || `layout ${res.status}`, res.status, failure.code);
+  }
 
   const body = (await res.json()) as LayoutEnvelope | RawLayoutZone[] | { data: RawLayoutZone[] };
   if (!Array.isArray(body) && 'success' in body && body.success === false) {
@@ -138,9 +168,17 @@ export async function fetchLayout(
     throw new Error('layout: empty or malformed payload');
   }
   const zones = normalizeRawZones(raw);
+  // Browsing (no time window) on a closed day still returns the tables, flagged here.
+  const libraryClosed =
+    !Array.isArray(body) &&
+    (body as { meta?: { libraryClosed?: boolean } }).meta?.libraryClosed === true;
 
   return {
-    data: { geometry: synthesizeLayout(zones), status: toStatusFeed(zones) },
+    data: {
+      geometry: synthesizeLayout(zones),
+      status: libraryClosed ? markAllClosed(toStatusFeed(zones)) : toStatusFeed(zones),
+      libraryClosed,
+    },
     source: 'api',
   };
 }

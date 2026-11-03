@@ -13,6 +13,9 @@ interface TableDetailPanelProps {
   onReserve?: (table: FloorPlanTable) => void;
   /** Fires when the (stub) report action is used — wire to FR-7 later. */
   onReportIssue?: (table: FloorPlanTable) => void;
+  /** The library is closed today: show that instead of the table status, but
+   *  keep Reserve available for booking a later day. */
+  libraryClosedToday?: boolean;
 }
 
 function Row({ icon, children }: { icon: ReactNode; children: ReactNode }) {
@@ -32,6 +35,7 @@ export default function TableDetailPanel({
   onClose,
   onReserve,
   onReportIssue,
+  libraryClosedToday = false,
 }: TableDetailPanelProps) {
   if (!table) {
     return (
@@ -46,7 +50,8 @@ export default function TableDetailPanel({
     table.isLocked && currentUser?.uid != null && table.lockedByUid === currentUser.uid
   );
   const style = STATUS_STYLE[table.status];
-  const canReserve = (table.status === 'Available' && !table.isLocked) || isHeldByMe;
+  const canReserve =
+    libraryClosedToday || (table.status === 'Available' && !table.isLocked) || isHeldByMe;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-paper p-5 shadow-sm">
@@ -73,7 +78,9 @@ export default function TableDetailPanel({
           className="inline-block h-3 w-3 flex-none rounded-full"
           style={{ backgroundColor: style.fill, border: `1.5px solid ${style.stroke}` }}
         />
-        <span className="text-sm font-medium text-gray-900">{style.text}</span>
+        <span className="text-sm font-medium text-gray-900">
+          {libraryClosedToday ? 'The library is closed today' : style.text}
+        </span>
         {table.isLocked && table.status === 'Reserved' && (
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -84,9 +91,11 @@ export default function TableDetailPanel({
           </span>
         )}
       </div>
-      <p className="mt-1 text-sm text-gray-600">
-        {statusVerb(table.status, table.isLocked, isHeldByMe)}
-      </p>
+      {!libraryClosedToday && (
+        <p className="mt-1 text-sm text-gray-600">
+          {statusVerb(table.status, table.isLocked, isHeldByMe)}
+        </p>
+      )}
 
       <ul className="mt-4 space-y-2 border-t border-gray-100 pt-4">
         <Row icon={<SeatIcon />}>{seatsLabel(table.seats)}</Row>

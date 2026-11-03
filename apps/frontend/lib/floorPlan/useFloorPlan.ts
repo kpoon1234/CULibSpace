@@ -3,6 +3,8 @@
 import { useMemo } from 'react';
 import useSWR from 'swr';
 import { buildFloorPlan, fetchLayout } from './client';
+import { findReopenDay, isClientLayoutError } from './closure';
+import { useBookingLimits } from '@/lib/systemConfig';
 import { filterAmenityQuery, filterTimeRange } from './filterOptions';
 import type { FloorPlan, FloorPlanFilter, LayoutQuery } from './types';
 import { EMPTY_FILTER } from './types';
@@ -39,6 +41,8 @@ export interface UseFloorPlanResult {
   error: unknown;
   /** True while a background refresh is in flight. */
   isRefreshing: boolean;
+  /** The library is closed today; tables are shown as Closed. */
+  libraryClosed: boolean;
   /** 'mock' when the feed fell back to bundled sample data. */
   source: 'api' | 'mock' | undefined;
   /** Force an immediate refresh. */
@@ -62,6 +66,12 @@ export function useFloorPlan(
     revalidateOnFocus: true,
     dedupingInterval: 5_000,
     keepPreviousData: true,
+    // A 4xx (library closed, bad window) won't change on a quick retry; the poll
+    // still re-checks it, so a reopened library shows up on its own.
+    onErrorRetry: (error, _key, _config, revalidate, { retryCount }) => {
+      if (isClientLayoutError(error) || retryCount >= 5) return;
+      setTimeout(() => void revalidate({ retryCount }), 5_000 * 2 ** retryCount);
+    },
   });
 
   const plan = useMemo<FloorPlan | undefined>(() => {
@@ -81,7 +91,24 @@ export function useFloorPlan(
     isStale: Boolean(res.error) && Boolean(res.data),
     error: res.error,
     isRefreshing: res.isValidating,
+    libraryClosed: res.data?.data.libraryClosed ?? false,
     source: plan?.source,
     refresh: () => void res.mutate(),
   };
+}
+
+/**
+ * The day the library reopens after a closure on `closedKey`: a "YYYY-MM-DD"
+ * key, null when it is closed as far ahead as bookings reach, undefined while
+ * checking. Pass null to skip.
+ */
+export function useReopenDay(closedKey: string | null): string | null | undefined {
+  const { maxAdvanceBookingDays } = useBookingLimits();
+  const { data } = useSWR(
+    closedKey ? ['reopenDay', closedKey, maxAdvanceBookingDays] : null,
+    ([, key, days]) =>
+      findReopenDay(key as string, days as number, (window) => fetchLayout(window)),
+    { revalidateOnFocus: false, shouldRetryOnError: false }
+  );
+  return data;
 }

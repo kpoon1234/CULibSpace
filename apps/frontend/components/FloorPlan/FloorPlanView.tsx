@@ -3,10 +3,17 @@
 import { useMemo, useState } from 'react';
 import {
   EMPTY_FILTER,
+  addDays,
   activeFilterCount,
   availabilityLine,
+  bangkokDateKey,
+  closedDateKey,
+  formatDayKey,
+  hasValidTimeRange,
+  isLibraryClosedError,
   pickZone,
   tablePassesFilter,
+  useReopenDay,
   useFloorPlan,
   type FloorPlanFilter,
   type FloorPlanTable,
@@ -18,7 +25,7 @@ import FloorPlanLegend from './FloorPlanLegend';
 import TableDetailPanel from './TableDetailPanel';
 import FloorPlanFilters from './FloorPlanFilters';
 import FloorNav from './FloorNav';
-import { FloorPlanError, FloorPlanSkeleton } from './FloorPlanStates';
+import { FloorPlanClosed, FloorPlanError, FloorPlanSkeleton } from './FloorPlanStates';
 import ReservationModal from '../Reservation/ReservationModal';
 import IssueReportModal from '../IssueReport/IssueReportModal';
 
@@ -32,6 +39,12 @@ interface FloorPlanViewProps {
 }
 
 const PANEL_ID = 'floor-plan-panel';
+
+/** Second line of the closed notice: the reopening day when it is within booking reach. */
+function reopenLine(reopenDay: string | null | undefined): string {
+  if (reopenDay === undefined) return 'Checking when it reopens…';
+  return reopenDay ? `Reopens ${formatDayKey(reopenDay, true)}.` : 'It will reopen soon.';
+}
 
 export default function FloorPlanView({
   initialFloorId,
@@ -47,10 +60,14 @@ export default function FloorPlanView({
   const [reservingTable, setReservingTable] = useState<FloorPlanTable | null>(null);
   const [reportingTable, setReportingTable] = useState<FloorPlanTable | null>(null);
 
-  const { plan, isLoading, isError, isStale, isRefreshing, source, refresh } = useFloorPlan(
-    floorId,
-    { filter }
-  );
+  const { plan, isLoading, isError, isStale, isRefreshing, libraryClosed, source, refresh, error } =
+    useFloorPlan(floorId, { filter });
+
+  // Closed today: the plan is still shown (tables as Closed) so tables can be
+  // reserved for a later day or reported; the banner says when it reopens.
+  const todayKey = bangkokDateKey();
+  const timeFiltered = hasValidTimeRange(filter);
+  const reopenDay = useReopenDay(libraryClosed ? todayKey : null);
 
   // The requested zone may not exist on every floor; fall back to the first.
   const activeZone = useMemo(() => {
@@ -59,6 +76,20 @@ export default function FloorPlanView({
   }, [plan, requestedZone]);
 
   if (isLoading) return <FloorPlanSkeleton />;
+  // A chosen date/time on a closed day is refused outright; offer to clear it.
+  if (isError && isLibraryClosedError(error)) {
+    return (
+      <FloorPlanClosed
+        closedKey={timeFiltered ? closedDateKey(error, todayKey) : todayKey}
+        todayKey={todayKey}
+        onClearTime={
+          timeFiltered
+            ? () => setFilter((f) => ({ ...f, startDateTime: null, endDateTime: null }))
+            : undefined
+        }
+      />
+    );
+  }
   if (isError || !plan || !activeZone) return <FloorPlanError onRetry={refresh} />;
 
   const zoneOptions: ZoneTabOption[] = plan.zones.map((zone) => ({
@@ -72,8 +103,11 @@ export default function FloorPlanView({
       ? (activeZone.tables.find((table) => table.tableId === selectedTableId) ?? null)
       : null;
 
-  // Falls back to "now" when no booking window is set in the filter.
-  const reservationDate = new Date();
+  // Falls back to "now" when no booking window is set in the filter; while closed,
+  // to the day it reopens (or tomorrow if that is beyond booking reach).
+  const reservationDate = libraryClosed
+    ? new Date(`${reopenDay ?? addDays(todayKey, 1)}T00:00:00+07:00`)
+    : new Date();
 
   function handleReportIssue(table: FloorPlanTable) {
     setReportingTable(table);
@@ -104,6 +138,13 @@ export default function FloorPlanView({
           }}
         />
       </div>
+
+      {libraryClosed && (
+        <div role="status" className="rounded-md border border-gray-200 bg-paper px-4 py-3 text-sm">
+          <p className="font-semibold text-gray-900">The library is closed today</p>
+          <p className="mt-0.5 text-gray-600">{reopenLine(reopenDay)}</p>
+        </div>
+      )}
 
       {/* Show a notice if refreshing failed but the previous plan is still visible. */}
       {isStale && (
@@ -157,6 +198,7 @@ export default function FloorPlanView({
           onClose={() => setSelectedTableId(null)}
           onReserve={setReservingTable}
           onReportIssue={handleReportIssue}
+          libraryClosedToday={libraryClosed}
         />
       </div>
 
