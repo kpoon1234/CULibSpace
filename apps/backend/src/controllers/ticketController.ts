@@ -125,6 +125,65 @@ export class TicketController {
       handleError(res, error, 'Error purchasing ticket');
     }
   }
+
+  /**
+   * GET /api/tickets/reconcile
+   * อ่านสถานะรายการซื้อเดิมที่ยังคงอยู่ในระบบ (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
+   * Query param: idempotencyKey
+   */
+  static async reconcile(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const uid = authReq.user?.uid;
+
+      if (!uid) {
+        res
+          .status(401)
+          .json({
+            success: false,
+            code: 'UNAUTHORIZED',
+            error: 'Unauthorized: User session required',
+          });
+        return;
+      }
+
+      const idempotencyKey = req.query.idempotencyKey as string;
+
+      if (!idempotencyKey || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+        res
+          .status(400)
+          .json({
+            success: false,
+            code: 'INVALID_IDEMPOTENCY_KEY',
+            error: 'Invalid idempotency key',
+          });
+        return;
+      }
+
+      const gateway = getPaymentGateway();
+
+      const result = await TicketService.reconcilePurchase({ uid, idempotencyKey }, gateway);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          ticketId: result.ticketId,
+          paymentId: result.paymentId,
+          checkoutUrl: result.checkoutUrl,
+          amountSatang: result.amountSatang,
+          currency: result.currency,
+          paymentStatus: result.status,
+          ticketStatus: result.ticketStatus,
+          expiresAt: result.expiresAt,
+          ticketStartDateTime: result.ticketStartDateTime,
+          ticketEndDateTime: result.ticketEndDateTime,
+          replayed: result.replayed,
+        },
+      });
+    } catch (error: any) {
+      handleError(res, error, 'Error reconciling ticket');
+    }
+  }
   /**
    * GET /api/tickets/my-tickets
    * [US6-2] ดึงรายละเอียดตั๋วและประวัติการชำระเงินของผู้เข้าชมภายนอก

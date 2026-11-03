@@ -282,6 +282,53 @@ export class TicketService {
     };
   }
 
+  // ====================================================================
+  // [US6-1] อ่านสถานะรายการซื้อเดิม (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
+  // ====================================================================
+  static async reconcilePurchase(
+    input: { uid: number; idempotencyKey: string },
+    gateway: PaymentGateway,
+    prisma: any = defaultPrisma
+  ): Promise<TicketPurchaseResult> {
+    const uid = input.uid;
+
+    // ---------- 1. มองหารายการเดิมจาก idempotency key ----------
+    const byClientKey = await prisma.payment.findFirst({
+      where: { uid, clientKey: input.idempotencyKey },
+    });
+
+    if (!byClientKey) {
+      throw {
+        status: 404,
+        code: 'PAYMENT_NOT_FOUND',
+        message: `No existing purchase found for idempotency key ${input.idempotencyKey}`,
+      } as TicketPurchaseError;
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketId: byClientKey.ticketId },
+    });
+
+    const base = {
+      ticketId: byClientKey.ticketId,
+      paymentId: byClientKey.paymentId,
+      amountSatang: byClientKey.amountSatang,
+      currency: byClientKey.currency,
+      status: byClientKey.status,
+      ticketStatus: ticket?.status ?? TicketStatus.UNPAID,
+      expiresAt: new Date(byClientKey.expiresAt).toISOString(),
+      ticketStartDateTime: ticket ? new Date(ticket.startDateTime).toISOString() : '',
+      ticketEndDateTime: ticket ? new Date(ticket.endDateTime).toISOString() : '',
+      replayed: true,
+    };
+
+    if (byClientKey.status === PaymentStatus.PENDING && byClientKey.checkoutUrl) {
+      return { ...base, checkoutUrl: byClientKey.checkoutUrl };
+    }
+
+    return { ...base, checkoutUrl: byClientKey.checkoutUrl ?? null };
+  }
+
   // ------------------------------------------------------------------
   // ภายใน
   // ------------------------------------------------------------------

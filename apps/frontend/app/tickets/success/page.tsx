@@ -4,7 +4,11 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getAuthToken, getStoredUser } from '@/lib/auth';
-import { isValidIdempotencyKey, purchaseVisitorTicket } from '@/lib/tickets';
+import {
+  isValidIdempotencyKey,
+  reconcileVisitorTicket,
+  type TicketPurchaseData,
+} from '@/lib/tickets';
 
 const PURCHASE_KEY_PREFIX = 'culibspace:ticket-purchase:';
 
@@ -42,22 +46,26 @@ export default function TicketPaymentReturnPage() {
       }
 
       try {
-        const result = await purchaseVisitorTicket(storedKey);
+        const result = await reconcileVisitorTicket(storedKey);
 
         if (cancelled) return;
 
         if (!result.ok) {
+          if (result.code === 'PAYMENT_NOT_FOUND') {
+            setStatus('failed');
+            return;
+          }
           if (result.code === 'PAYMENT_AWAITING_CONFIRMATION') {
             setStatus('pending');
-          } else {
-            setStatus('failed');
+            return;
           }
+          setStatus('failed');
           return;
         }
 
-        setPurchaseData(result.data);
+        const data: TicketPurchaseData = result.data;
 
-        const { paymentStatus, ticketStatus } = result.data;
+        const { paymentStatus, ticketStatus } = data;
 
         if (paymentStatus === 'PAID') {
           if (ticketStatus !== 'PAID') {
@@ -65,8 +73,8 @@ export default function TicketPaymentReturnPage() {
             return;
           }
 
-          const startMs = Date.parse(result.data.ticketStartDateTime);
-          const endMs = Date.parse(result.data.ticketEndDateTime);
+          const startMs = Date.parse(data.ticketStartDateTime);
+          const endMs = Date.parse(data.ticketEndDateTime);
           const now = Date.now();
 
           if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
@@ -90,15 +98,6 @@ export default function TicketPaymentReturnPage() {
         }
       } catch {
         if (!cancelled) setStatus('failed');
-      }
-    }
-
-    function setPurchaseData(data: any) {
-      // Stored for potential use by the ticket page after redirect.
-      try {
-        sessionStorage.setItem('culibspace:last-purchase-result', JSON.stringify(data));
-      } catch {
-        /* sessionStorage unavailable */
       }
     }
 
