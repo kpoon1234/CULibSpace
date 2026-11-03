@@ -127,9 +127,11 @@ export class TicketController {
   }
 
   /**
-   * GET /api/tickets/reconcile
-   * อ่านสถานะรายการซื้อเดิมที่ยังคงอยู่ในระบบ (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
-   * Query param: idempotencyKey
+   * POST /api/tickets/reconcile
+   * อ่านสถานะรายการซื้อเดิม (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
+   * ถ้ายังรอยืนยัน จะตรวจสอบกับ Stripe และยืนยันการชำระเงินผ่าน
+   * PaymentConfirmationService.confirmCheckout() ภายใน transaction
+   * Body: { "idempotencyKey": "client-generated-uuid" }
    */
   static async reconcile(req: Request, res: Response): Promise<void> {
     try {
@@ -147,22 +149,22 @@ export class TicketController {
         return;
       }
 
-      const idempotencyKey = req.query.idempotencyKey as string;
+      const body = (req.body ?? {}) as { idempotencyKey?: unknown };
+      const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
 
-      if (!idempotencyKey || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+      if (idempotencyKey.error) {
         res
           .status(400)
-          .json({
-            success: false,
-            code: 'INVALID_IDEMPOTENCY_KEY',
-            error: 'Invalid idempotency key',
-          });
+          .json({ success: false, code: 'INVALID_IDEMPOTENCY_KEY', error: idempotencyKey.error });
         return;
       }
 
       const gateway = getPaymentGateway();
 
-      const result = await TicketService.reconcilePurchase({ uid, idempotencyKey }, gateway);
+      const result = await TicketService.reconcilePurchase(
+        { uid, idempotencyKey: idempotencyKey.value },
+        gateway
+      );
 
       res.status(200).json({
         success: true,

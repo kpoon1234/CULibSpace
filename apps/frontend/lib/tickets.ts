@@ -438,17 +438,15 @@ export async function reconcileVisitorTicket(
   }
 
   try {
-    const response = await fetch(
-      `${API_URL}/api/tickets/reconcile?idempotencyKey=${encodeURIComponent(idempotencyKey)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        signal: AbortSignal.timeout(15_000),
-      }
-    );
+    const response = await fetch(`${API_URL}/api/tickets/reconcile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ idempotencyKey }),
+      signal: AbortSignal.timeout(15_000),
+    });
 
     const body = (await response.json().catch(() => null)) as {
       success?: boolean;

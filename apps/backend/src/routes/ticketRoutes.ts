@@ -9,7 +9,7 @@ const router = Router();
 // US6-3's webhook is mounted separately before express.json() in server.ts;
 // do not duplicate it behind this JSON-parsed router.
 router.post('/purchase', authenticateToken, requireRoles('OUTSIDER'), TicketController.purchase);
-router.get('/reconcile', authenticateToken, requireRoles('OUTSIDER'), TicketController.reconcile);
+router.post('/reconcile', authenticateToken, requireRoles('OUTSIDER'), TicketController.reconcile);
 router.get(
   '/my-tickets',
   authenticateToken,

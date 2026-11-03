@@ -284,6 +284,8 @@ export class TicketService {
 
   // ====================================================================
   // [US6-1] อ่านสถานะรายการซื้อเดิม (อ่านอย่างเดียว ไม่สร้างรายการใหม่)
+  // ถ้ารายการยังรอยืนยัน จะตรวจสอบกับ Stripe และยืนยันการชำระเงินผ่าน
+  // PaymentConfirmationService.confirmCheckout() ภายใน transaction
   // ====================================================================
   static async reconcilePurchase(
     input: { uid: number; idempotencyKey: string },
@@ -322,10 +324,85 @@ export class TicketService {
       replayed: true,
     };
 
-    if (byClientKey.status === PaymentStatus.PENDING && byClientKey.checkoutUrl) {
-      return { ...base, checkoutUrl: byClientKey.checkoutUrl };
+    // ---------- 2. ถ้ารายการยังรอยืนยัน (PENDING / UNCONFIRMED) ----------
+    //     ต้องตรวจสอบกับ Stripe ก่อนว่าจ่ายจริงหรือไม่
+    if (
+      byClientKey.status === PaymentStatus.PENDING ||
+      byClientKey.status === PaymentStatus.UNCONFIRMED
+    ) {
+      if (!byClientKey.gatewayRef) {
+        // ไม่มี gateway reference → ไม่สามารถตรวจสอบกับ Stripe ได้
+        // คืนสถานะไม่ทราบผล ห้ามสร้างรายการใหม่หรือเปิดใช้ตั๋ว
+        return { ...base, checkoutUrl: byClientKey.checkoutUrl ?? null };
+      }
+
+      const checkout = await gateway.retrieveCheckoutStatus(byClientKey.gatewayRef);
+
+      if (checkout.state === 'paid') {
+        // จ่ายแล้วที่ Stripe → ยืนยันผ่าน confirmCheckout() ภายใน transaction
+        await PaymentConfirmationService.confirmCheckout(
+          gateway.name,
+          byClientKey.gatewayRef,
+          checkout,
+          prisma
+        );
+        const updated = await prisma.payment.findUnique({
+          where: { paymentId: byClientKey.paymentId },
+        });
+        const updatedTicket = await prisma.ticket.findUnique({
+          where: { ticketId: byClientKey.ticketId },
+        });
+        return {
+          ticketId: byClientKey.ticketId,
+          paymentId: byClientKey.paymentId,
+          checkoutUrl: updated?.checkoutUrl ?? null,
+          amountSatang: updated?.amountSatang ?? byClientKey.amountSatang,
+          currency: updated?.currency ?? byClientKey.currency,
+          status: updated?.status ?? byClientKey.status,
+          ticketStatus: updatedTicket?.status ?? ticket?.status ?? TicketStatus.UNPAID,
+          expiresAt: new Date(updated?.expiresAt ?? byClientKey.expiresAt).toISOString(),
+          ticketStartDateTime: updatedTicket
+            ? new Date(updatedTicket.startDateTime).toISOString()
+            : base.ticketStartDateTime,
+          ticketEndDateTime: updatedTicket
+            ? new Date(updatedTicket.endDateTime).toISOString()
+            : base.ticketEndDateTime,
+          replayed: true,
+        };
+      }
+
+      if (checkout.state === 'expired' || checkout.state === 'not_found') {
+        // gateway ยืนยันว่าใช้ไม่ได้แล้ว → ปิดรายการ ปล่อยให้ซื้อใหม่ได้
+        await prisma.payment.updateMany({
+          where: {
+            paymentId: byClientKey.paymentId,
+            status: { in: [PaymentStatus.PENDING, PaymentStatus.UNCONFIRMED] },
+          },
+          data: { status: PaymentStatus.EXPIRED, openUid: null },
+        });
+        return {
+          ...base,
+          status: PaymentStatus.EXPIRED,
+          checkoutUrl: byClientKey.checkoutUrl ?? null,
+        };
+      }
+
+      if (checkout.state === 'open') {
+        // checkout ยังเปิดอยู่ที่ gateway → เก็บช่องไว้ คืนสถานะเดิม
+        return { ...base, checkoutUrl: byClientKey.checkoutUrl ?? null };
+      }
+
+      // unknown → ตรวจสอบไม่ได้ (เช่น Stripe ติดต่อไม่ได้) คืน 503
+      throw {
+        status: 503,
+        code: 'PAYMENT_LOOKUP_UNAVAILABLE',
+        message:
+          'Could not verify checkout status with the gateway; retry later. (No charge was made.)',
+        retryable: true,
+      } as TicketPurchaseError;
     }
 
+    // ---------- 3. รายการปิดแล้ว (Paid / Failed / Expired / Refunded) ----------
     return { ...base, checkoutUrl: byClientKey.checkoutUrl ?? null };
   }
 
