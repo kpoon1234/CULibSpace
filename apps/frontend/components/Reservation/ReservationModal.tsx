@@ -9,7 +9,7 @@ import {
   timeToMinutes,
   type FloorPlanFilter,
 } from '@/lib/floorPlan'; // Assuming this is an array of time strings, e.g., ['08:00', '09:00', ...]
-import { useBookingLimits } from '@/lib/systemConfig';
+import { lastBookableDate, useBookingLimits } from '@/lib/systemConfig';
 import { openReservationSession } from '@/lib/bookings';
 import type { ReservationSession } from '@/lib/reservationSession';
 
@@ -28,11 +28,6 @@ interface ReservationModalProps {
 }
 
 type Step = 'form' | 'success' | 'fail' | 'uncertain';
-
-// Mirrors SystemConfig.maxAdvanceBookingDays' default (7). The backend is the
-// real source of truth and will reject anything further out regardless — this
-// just keeps the date picker from offering choices that would always fail.
-const MAX_ADVANCE_DAYS = 7;
 
 function combineDateAndTime(date: Date, hhmm: string): Date {
   const [hours, minutes] = hhmm.split(':').map(Number);
@@ -67,7 +62,7 @@ export default function ReservationModal({
   filter,
   onConfirm,
 }: ReservationModalProps) {
-  const { maxBookingWindowMinutes } = useBookingLimits();
+  const { maxBookingWindowMinutes, maxAdvanceBookingDays } = useBookingLimits();
 
   // Seeded once from whatever booking window is active in the Table Filter
   // when the modal opens — still freely editable from there.
@@ -93,7 +88,10 @@ export default function ReservationModal({
   // Lazy initializer: React guarantees this runs once at mount, so it's the
   // sanctioned place for a one-time impure Date.now() read (calling it inline
   // during render trips react-hooks/purity).
-  const [maxDate] = useState(() => new Date(Date.now() + MAX_ADVANCE_DAYS * 86_400_000));
+  const [openedAt] = useState(() => Date.now());
+  // Follows the admin's saved "book ahead" limit (SystemConfig.maxAdvanceBookingDays);
+  // the backend still rejects anything further out regardless.
+  const maxDate = lastBookableDate(openedAt, maxAdvanceBookingDays);
 
   const sessionRef = useRef<ReservationSession | null>(null);
 
