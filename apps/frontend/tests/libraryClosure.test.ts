@@ -9,7 +9,8 @@ import {
   formatDayKey,
   isLibraryClosedError,
 } from '../lib/floorPlan';
-import { isClientLayoutError } from '../lib/floorPlan/closure';
+import { isClientLayoutError, layoutRetryDelay } from '../lib/floorPlan/closure';
+import { STATUS_POLL_MS, layoutLoadState } from '../lib/floorPlan/useFloorPlan';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -151,4 +152,104 @@ test('dates are shown as Bangkok calendar days', () => {
     closedDateKey(new LayoutRequestError('no date here', 400, 'LIBRARY_CLOSED'), '2026-11-03'),
     '2026-11-03'
   );
+});
+
+const closedError = () =>
+  new LayoutRequestError('Library is closed on 2026-11-06: Holiday', 400, 'LIBRARY_CLOSED');
+
+test('picking a closed day after a plan loaded shows the closure, not a stale plan', () => {
+  // keepPreviousData: the previous window's plan is still in `data`.
+  const previous = { data: { libraryClosed: false } };
+  const state = layoutLoadState(previous, closedError());
+  assert.ok(state.closedError);
+  assert.equal(closedDateKey(state.closedError, 'fallback'), '2026-11-06');
+  assert.equal(state.isStale, false);
+
+  // A failed refresh of an open day is still reported as stale.
+  const failed = layoutLoadState(previous, new LayoutRequestError('layout 502', 502));
+  assert.equal(failed.closedError, null);
+  assert.equal(failed.isStale, true);
+});
+
+test('a closed day is re-checked on the poll cadence; other errors keep their policy', () => {
+  assert.equal(layoutRetryDelay(closedError(), 0, STATUS_POLL_MS), STATUS_POLL_MS);
+  // No give-up count and no backoff: it keeps checking until it reopens.
+  assert.equal(layoutRetryDelay(closedError(), 12, STATUS_POLL_MS), STATUS_POLL_MS);
+  // Polling turned off means no re-checks either.
+  assert.equal(layoutRetryDelay(closedError(), 0, 0), null);
+  assert.equal(
+    layoutRetryDelay(
+      new LayoutRequestError('too far', 400, 'BOOKING_TOO_FAR_IN_ADVANCE'),
+      0,
+      STATUS_POLL_MS
+    ),
+    null
+  );
+  assert.equal(
+    layoutRetryDelay(new LayoutRequestError('layout 502', 502), 1, STATUS_POLL_MS),
+    10_000
+  );
+  assert.equal(
+    layoutRetryDelay(new LayoutRequestError('layout 502', 502), 5, STATUS_POLL_MS),
+    null
+  );
+});
+
+test('a day an admin reopens shows up on its own after one poll interval', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  let open = false;
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    return open
+      ? jsonResponse({ success: true, data: ZONES, meta: { libraryClosed: false } })
+      : jsonResponse(
+          {
+            success: false,
+            code: 'LIBRARY_CLOSED',
+            error: 'Library is closed on 2026-11-06: Holiday',
+          },
+          400
+        );
+  });
+  const window = {
+    startDateTime: '2026-11-06T03:00:00.000Z',
+    endDateTime: '2026-11-06T04:00:00.000Z',
+  };
+
+  // SWR's error loop: on failure it asks onErrorRetry, which schedules the next fetch.
+  let state = layoutLoadState(undefined, undefined);
+  const revalidate = async (retryCount: number): Promise<void> => {
+    try {
+      const result = await fetchLayout(window);
+      state = layoutLoadState(result, undefined);
+    } catch (error) {
+      state = layoutLoadState(undefined, error);
+      const delay = layoutRetryDelay(error, retryCount, STATUS_POLL_MS);
+      if (delay !== null) setTimeout(() => void revalidate(retryCount + 1), delay);
+    }
+  };
+  const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  try {
+    await revalidate(0);
+    assert.ok(state.closedError);
+    assert.equal(calls, 1);
+
+    // Not hammered: nothing fires before the interval.
+    mock.timers.tick(STATUS_POLL_MS - 1);
+    await settle();
+    assert.equal(calls, 1);
+
+    open = true;
+    mock.timers.tick(1);
+    for (let i = 0; i < 5; i++) await settle();
+    assert.equal(calls, 2);
+    assert.equal(state.closedError, null);
+    assert.equal(state.isError, false);
+    assert.equal(state.isLoading, false);
+  } finally {
+    mock.timers.reset();
+    mock.restoreAll();
+  }
 });

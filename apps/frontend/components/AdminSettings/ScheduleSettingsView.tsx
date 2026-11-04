@@ -254,6 +254,8 @@ export function ScheduleSettingsView() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // A save is in flight: switching forms now would let its result close the new one.
+  const [saving, setSaving] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -305,15 +307,22 @@ export function ScheduleSettingsView() {
   }
 
   async function handleSubmit(payload: SchedulePayload) {
-    // Errors propagate to the form, which shows them and stays open.
-    if (editor?.mode === 'edit') {
-      await updateSchedule(editor.schedule.scheduleId, payload);
-      setNotice(`Saved changes to “${payload.name}”.`);
-    } else {
-      await createSchedule(payload);
-      setNotice(`Added “${payload.name}”.`);
+    const submitted = editor;
+    setSaving(true);
+    try {
+      // Errors propagate to the form, which shows them and stays open.
+      if (submitted?.mode === 'edit') {
+        await updateSchedule(submitted.schedule.scheduleId, payload);
+        setNotice(`Saved changes to “${payload.name}”.`);
+      } else {
+        await createSchedule(payload);
+        setNotice(`Added “${payload.name}”.`);
+      }
+    } finally {
+      setSaving(false);
     }
-    setEditor(null);
+    // Close only the form that was saved, never one opened since.
+    setEditor((current) => (current === submitted ? null : current));
     await load();
   }
 
@@ -337,7 +346,7 @@ export function ScheduleSettingsView() {
       schedule={schedule}
       confirming={confirmingId === schedule.scheduleId}
       deleting={deletingId === schedule.scheduleId}
-      busy={deletingId !== null}
+      busy={deletingId !== null || saving}
       onEdit={() => openEditor({ mode: 'edit', schedule })}
       onAskDelete={() => {
         setConfirmingId(schedule.scheduleId);
@@ -396,7 +405,7 @@ export function ScheduleSettingsView() {
           <button
             type="button"
             onClick={() => openEditor({ mode: 'create', group })}
-            disabled={editor?.mode === 'create' && editor.group === group}
+            disabled={saving || (editor?.mode === 'create' && editor.group === group)}
             className={SECONDARY_BUTTON}
           >
             {isRegular ? 'Add regular schedule' : 'Add exception'}

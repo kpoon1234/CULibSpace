@@ -10,7 +10,6 @@ import {
   closedDateKey,
   formatDayKey,
   hasValidTimeRange,
-  isLibraryClosedError,
   pickZone,
   tablePassesFilter,
   useReopenDay,
@@ -60,8 +59,17 @@ export default function FloorPlanView({
   const [reservingTable, setReservingTable] = useState<FloorPlanTable | null>(null);
   const [reportingTable, setReportingTable] = useState<FloorPlanTable | null>(null);
 
-  const { plan, isLoading, isError, isStale, isRefreshing, libraryClosed, source, refresh, error } =
-    useFloorPlan(floorId, { filter });
+  const {
+    plan,
+    isLoading,
+    isError,
+    isStale,
+    isRefreshing,
+    libraryClosed,
+    source,
+    refresh,
+    closedError,
+  } = useFloorPlan(floorId, { filter });
 
   // Closed today: the plan is still shown (tables as Closed) so tables can be
   // reserved for a later day or reported; the banner says when it reopens.
@@ -77,10 +85,11 @@ export default function FloorPlanView({
 
   if (isLoading) return <FloorPlanSkeleton />;
   // A chosen date/time on a closed day is refused outright; offer to clear it.
-  if (isError && isLibraryClosedError(error)) {
+  // Checked before the plan: keepPreviousData still holds the previous window's.
+  if (closedError) {
     return (
       <FloorPlanClosed
-        closedKey={timeFiltered ? closedDateKey(error, todayKey) : todayKey}
+        closedKey={timeFiltered ? closedDateKey(closedError, todayKey) : todayKey}
         todayKey={todayKey}
         onClearTime={
           timeFiltered

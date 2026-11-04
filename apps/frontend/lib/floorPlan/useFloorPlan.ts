@@ -3,7 +3,8 @@
 import { useMemo } from 'react';
 import useSWR from 'swr';
 import { buildFloorPlan, fetchLayout } from './client';
-import { findReopenDay, isClientLayoutError } from './closure';
+import { findReopenDay, isLibraryClosedError, layoutRetryDelay } from './closure';
+import type { LayoutRequestError } from './closure';
 import { useBookingLimits } from '@/lib/systemConfig';
 import { filterAmenityQuery, filterTimeRange } from './filterOptions';
 import type { FloorPlan, FloorPlanFilter, LayoutQuery } from './types';
@@ -39,6 +40,11 @@ export interface UseFloorPlanResult {
    */
   isStale: boolean;
   error: unknown;
+  /**
+   * The chosen window falls on a closed day (LIBRARY_CLOSED). Set even while
+   * `keepPreviousData` still holds the last plan, and never counted as stale.
+   */
+  closedError: LayoutRequestError | null;
   /** True while a background refresh is in flight. */
   isRefreshing: boolean;
   /** The library is closed today; tables are shown as Closed. */
@@ -47,6 +53,20 @@ export interface UseFloorPlanResult {
   source: 'api' | 'mock' | undefined;
   /** Force an immediate refresh. */
   refresh: () => void;
+}
+
+/** Load flags for a layout response; `data` may be the previous key's (keepPreviousData). */
+export function layoutLoadState(
+  data: unknown,
+  error: unknown
+): Pick<UseFloorPlanResult, 'isLoading' | 'isError' | 'isStale' | 'closedError'> {
+  const closedError = isLibraryClosedError(error) ? error : null;
+  return {
+    isLoading: !data && !error,
+    isError: Boolean(error) && !data,
+    isStale: Boolean(error) && Boolean(data) && !closedError,
+    closedError,
+  };
 }
 
 export function useFloorPlan(
@@ -66,11 +86,9 @@ export function useFloorPlan(
     revalidateOnFocus: true,
     dedupingInterval: 5_000,
     keepPreviousData: true,
-    // A 4xx (library closed, bad window) won't change on a quick retry; the poll
-    // still re-checks it, so a reopened library shows up on its own.
     onErrorRetry: (error, _key, _config, revalidate, { retryCount }) => {
-      if (isClientLayoutError(error) || retryCount >= 5) return;
-      setTimeout(() => void revalidate({ retryCount }), 5_000 * 2 ** retryCount);
+      const delay = layoutRetryDelay(error, retryCount, pollMs);
+      if (delay !== null) setTimeout(() => void revalidate({ retryCount }), delay);
     },
   });
 
@@ -86,9 +104,7 @@ export function useFloorPlan(
 
   return {
     plan,
-    isLoading: !res.data && !res.error,
-    isError: Boolean(res.error) && !res.data,
-    isStale: Boolean(res.error) && Boolean(res.data),
+    ...layoutLoadState(res.data, res.error),
     error: res.error,
     isRefreshing: res.isValidating,
     libraryClosed: res.data?.data.libraryClosed ?? false,

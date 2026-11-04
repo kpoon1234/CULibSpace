@@ -36,6 +36,22 @@ export function isClientLayoutError(error: unknown): boolean {
   return isLayoutRequestError(error) && error.status >= 400 && error.status < 500;
 }
 
+/**
+ * How long to wait before retrying a failed layout fetch, or null to stop.
+ * SWR skips its refreshInterval poll while the cache holds an error, so a closed
+ * day is re-checked here on the poll cadence: a reopened library shows up on its
+ * own. Other 4xx won't change on a retry; server/network errors back off.
+ */
+export function layoutRetryDelay(
+  error: unknown,
+  retryCount: number,
+  pollMs: number
+): number | null {
+  if (isLibraryClosedError(error)) return pollMs > 0 ? pollMs : null;
+  if (isClientLayoutError(error) || retryCount >= 5) return null;
+  return 5_000 * 2 ** retryCount;
+}
+
 /** Today's calendar date in Asia/Bangkok, the timezone the library schedule uses. */
 export function bangkokDateKey(now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
