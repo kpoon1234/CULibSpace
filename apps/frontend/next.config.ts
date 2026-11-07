@@ -2,7 +2,6 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: [
-    'hatchet-crisped-recycled.ngrok-free.dev',
     '*.ngrok-free.dev',
     '*.ngrok-free.app',
     '*.ngrok.app',

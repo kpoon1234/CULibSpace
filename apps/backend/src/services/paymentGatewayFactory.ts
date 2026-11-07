@@ -1,5 +1,6 @@
 import { PaymentGateway, PaymentGatewayError } from './paymentGateway.js';
 import { StripePaymentGateway } from './stripePaymentGateway.js';
+import { config } from '../config.js';
 
 /**
  * [US6-1] Factory สำหรับเลือก Payment Gateway
@@ -21,7 +22,7 @@ export function getPaymentGateway(): PaymentGateway {
   const requested = (process.env.PAYMENT_GATEWAY ?? 'stripe').toLowerCase();
 
   if (requested === 'stripe') {
-    const secretKey = process.env.STRIPE_SECRET_KEY;
+    const secretKey = config.stripe.secretKey;
 
     if (!secretKey) {
       throw new PaymentGatewayError(
@@ -40,8 +41,8 @@ export function getPaymentGateway(): PaymentGateway {
 
     return new StripePaymentGateway({
       secretKey,
-      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-      timeoutMs: Number(process.env.PAYMENT_GATEWAY_TIMEOUT_MS ?? 10_000),
+      webhookSecret: config.stripe.webhookSecret,
+      timeoutMs: config.stripe.timeoutMs,
     });
   }
 

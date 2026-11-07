@@ -4,6 +4,7 @@ import cors from 'cors';
 import session from 'express-session';
 import passport from './passport.js';
 import { PrismaClient } from '@prisma/client';
+import { config } from './config.js';
 import authRoutes from './routes/authRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import layoutRoutes from './routes/layoutRoutes.js';
@@ -19,10 +20,8 @@ import { BookingService } from './services/bookingService.js';
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = process.env.PORT || 8080;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
-// Trust reverse proxies (Next.js, Cloudflare, LocalTunnel) for proto & host headers
+// Trust reverse proxies (Next.js, Cloudflare, ngrok, LocalTunnel) for proto & host headers
 app.set('trust proxy', true);
 
 // Global Middlewares
@@ -47,11 +46,11 @@ app.use((req, _res, next) => {
 });
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || 'fallback-session-secret',
+    secret: config.session.secret,
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: config.isProduction,
       httpOnly: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
@@ -75,8 +74,8 @@ app.get('/api/hello', (req, res) => {
   res.json({ message: 'Hello! Communication between Next.js and Express is working!' });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Backend running on ${BASE_URL}`);
+app.listen(config.port, () => {
+  console.log(`🚀 Backend running on ${config.baseUrl}`);
 
   // 2. สั่งเริ่มการทำงานของ Lock Expiration Worker
   LockService.startExpirationWorker();

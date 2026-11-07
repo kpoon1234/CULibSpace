@@ -2,13 +2,13 @@ import 'dotenv/config';
 import passport from 'passport';
 import { Strategy as GoogleStrategy, Profile, VerifyCallback } from 'passport-google-oauth20';
 import { PrismaClient } from '@prisma/client';
+import { config } from './config.js';
 import { AuthService } from './services/authService.js';
 import { classifyEmail } from './utils/roleMapper.js';
 
 const prisma = new PrismaClient();
 
-const googleClientId = process.env.GOOGLE_CLIENT_ID;
-const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+const { clientId: googleClientId, clientSecret: googleClientSecret } = config.google;
 
 if (!googleClientId || !googleClientSecret) {
   console.warn(
@@ -22,9 +22,7 @@ if (googleClientId && googleClientSecret) {
       {
         clientID: googleClientId,
         clientSecret: googleClientSecret,
-        callbackURL:
-          process.env.GOOGLE_CALLBACK_URL ||
-          'https://hatchet-crisped-recycled.ngrok-free.dev/api/auth/google/callback',
+        callbackURL: config.google.callbackUrl,
         proxy: true,
       },
       async (

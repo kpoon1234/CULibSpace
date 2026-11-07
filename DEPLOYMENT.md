@@ -51,11 +51,16 @@ To let your teacher or teammates test from any device with persistent Google OAu
 
 ```bash
 # Start ngrok tunnel pointing to Frontend port 3000
-ngrok http --domain=hatchet-crisped-recycled.ngrok-free.dev 3000
+ngrok http --domain=<your-static-domain>.ngrok-free.dev 3000
+# Example: ngrok http --domain=hatchet-crisped-recycled.ngrok-free.dev 3000
 ```
 
-Your persistent public URL:
-👉 **`https://hatchet-crisped-recycled.ngrok-free.dev`**
+Set `CLIENT_URL` in `apps/backend/.env`:
+```env
+CLIENT_URL="https://<your-static-domain>.ngrok-free.dev"
+```
+
+All callback and checkout redirect URLs are automatically derived from `CLIENT_URL`.
 ```
 
 ### 3. Share the URL

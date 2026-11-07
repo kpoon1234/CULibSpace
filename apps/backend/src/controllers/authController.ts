@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { signJwt } from '../utils/jwt.js';
+import { config } from '../config.js';
 
 const prisma = new PrismaClient();
 const MAX_PRISMA_INT = 2_147_483_647;
@@ -205,7 +206,7 @@ export class AuthController {
       return `${proto}://${host}`;
     }
 
-    return process.env.CLIENT_URL || 'https://hatchet-crisped-recycled.ngrok-free.dev';
+    return config.clientUrl;
   }
 
   /**

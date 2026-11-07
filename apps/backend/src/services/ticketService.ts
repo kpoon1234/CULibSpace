@@ -1,5 +1,6 @@
 import { PrismaClient, PaymentStatus, TicketStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { config as appConfig } from '../config.js';
 import {
   PaymentConfirmationError,
   PaymentConfirmationService,
@@ -153,14 +154,8 @@ export class TicketService {
       expiresAt,
       idempotencyKey,
       customerEmail: (await this.getUserEmail(uid, prisma)) ?? undefined,
-      successUrl:
-        process.env.TICKET_CHECKOUT_SUCCESS_URL ||
-        process.env.NEXT_PUBLIC_CHECKOUT_SUCCESS_URL ||
-        'https://hatchet-crisped-recycled.ngrok-free.dev/tickets/success',
-      cancelUrl:
-        process.env.TICKET_CHECKOUT_CANCEL_URL ||
-        process.env.NEXT_PUBLIC_CHECKOUT_CANCEL_URL ||
-        'https://hatchet-crisped-recycled.ngrok-free.dev/visitor/ticket',
+      successUrl: appConfig.stripe.successUrl,
+      cancelUrl: appConfig.stripe.cancelUrl,
       // reference จะเติมหลังสร้าง payment เสร็จ (ต้องเป็น paymentId จริง)
       reference: '',
     });
