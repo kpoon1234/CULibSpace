@@ -153,8 +153,14 @@ export class TicketService {
       expiresAt,
       idempotencyKey,
       customerEmail: (await this.getUserEmail(uid, prisma)) ?? undefined,
-      successUrl: process.env.TICKET_CHECKOUT_SUCCESS_URL,
-      cancelUrl: process.env.TICKET_CHECKOUT_CANCEL_URL,
+      successUrl:
+        process.env.TICKET_CHECKOUT_SUCCESS_URL ||
+        process.env.NEXT_PUBLIC_CHECKOUT_SUCCESS_URL ||
+        'https://hatchet-crisped-recycled.ngrok-free.dev/tickets/success',
+      cancelUrl:
+        process.env.TICKET_CHECKOUT_CANCEL_URL ||
+        process.env.NEXT_PUBLIC_CHECKOUT_CANCEL_URL ||
+        'https://hatchet-crisped-recycled.ngrok-free.dev/visitor/ticket',
       // reference จะเติมหลังสร้าง payment เสร็จ (ต้องเป็น paymentId จริง)
       reference: '',
     });
