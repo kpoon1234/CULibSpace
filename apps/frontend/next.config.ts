@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     '*.localtunnel.me',
     '*.loca.lt',
     '*.ngrok-free.app',
+    '*.ngrok-free.dev',
     '*.ngrok.app',
     '*.ngrok.io',
   ],
