@@ -22,10 +22,16 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 8080;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
+// Trust reverse proxies (Next.js, Cloudflare, LocalTunnel) for proto & host headers
+app.set('trust proxy', true);
+
 // Global Middlewares
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      // Allow all origins dynamically with credentials (localhost, tunnels, etc.)
+      callback(null, true);
+    },
     credentials: true,
   })
 );

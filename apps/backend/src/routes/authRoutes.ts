@@ -13,13 +13,14 @@ router.get('/google', passport.authenticate('google', { scope: ['profile', 'emai
 router.get('/google/callback', (req, res, next) => {
   passport.authenticate('google', (err: any, user: any, info: any) => {
     console.log('[google/callback] err=', err, 'user=', user, 'info=', info);
+    const clientUrl = AuthController.getClientBaseUrl(req);
     if (err || !user) {
-      return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:3000'}/login`);
+      return res.redirect(`${clientUrl}/login`);
     }
     req.logIn(user, (loginErr) => {
       if (loginErr) {
         console.log('[google/callback] req.logIn error=', loginErr);
-        return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:3000'}/login`);
+        return res.redirect(`${clientUrl}/login`);
       }
       return AuthController.googleCallback(req, res);
     });

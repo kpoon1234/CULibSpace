@@ -22,9 +22,8 @@ if (googleClientId && googleClientSecret) {
       {
         clientID: googleClientId,
         clientSecret: googleClientSecret,
-        callbackURL:
-          process.env.GOOGLE_CALLBACK_URL ||
-          `http://localhost:${process.env.PORT || 8080}/api/auth/google/callback`,
+        callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
+        proxy: true,
       },
       async (
         _accessToken: string,

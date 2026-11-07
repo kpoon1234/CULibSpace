@@ -193,13 +193,29 @@ export class AuthController {
   }
 
   /**
+   * Helper to dynamically detect the client base URL (supports localhost, tunnels, custom domains)
+   */
+  static getClientBaseUrl(req: Request): string {
+    const forwardedHost = req.headers['x-forwarded-host'] as string | undefined;
+    const host = forwardedHost || req.headers.host;
+
+    if (host) {
+      const forwardedProto = req.headers['x-forwarded-proto'] as string | undefined;
+      const proto = forwardedProto || req.protocol || 'http';
+      return `${proto}://${host}`;
+    }
+
+    return process.env.CLIENT_URL || 'http://localhost:3000';
+  }
+
+  /**
    * GET /auth/google/callback
    */
   static googleCallback(req: Request, res: Response): void {
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const clientUrl = AuthController.getClientBaseUrl(req);
     const user = req.user as any;
     const token = user?.token;
-    console.log('[googleCallback] req.user =', user);
+    console.log('[googleCallback] clientUrl =', clientUrl, 'user =', user);
 
     if (token) {
       res.redirect(`${clientUrl}/auth/callback?token=${encodeURIComponent(token)}`);
