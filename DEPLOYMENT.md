@@ -45,19 +45,17 @@ npm run dev
 
 ---
 
-## 🌐 Step 2: Expose the App via Free HTTPS Tunnel
+## 🌐 Step 2: Expose the App via ngrok (Static Domain)
 
-To let your teacher or teammates test from their phone, tablet, or home computer, use **Cloudflare Tunnel** (`cloudflared`). It provides a free, instant HTTPS URL with zero signup or credit card required.
+To let your teacher or teammates test from any device with persistent Google OAuth support, use **ngrok** with your permanent static domain:
 
-### 1. Install `cloudflared` (Mac)
 ```bash
-brew install cloudflared
+# Start ngrok tunnel pointing to Frontend port 3000
+ngrok http --domain=hatchet-crisped-recycled.ngrok-free.dev 3000
 ```
-*(Alternative without brew: `npx localtunnel --port 3000`)*
 
-### 2. Start the Tunnel
-```bash
-cloudflared tunnel --url http://localhost:3000
+Your persistent public URL:
+👉 **`https://hatchet-crisped-recycled.ngrok-free.dev`**
 ```
 
 ### 3. Share the URL

@@ -31,7 +31,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/culibspace?schema=public
       PORT: 8080
-      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
+      CLIENT_URL: ${CLIENT_URL:-https://hatchet-crisped-recycled.ngrok-free.dev}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-https://hatchet-crisped-recycled.ngrok-free.dev/api/auth/google/callback}
       NODE_ENV: development
     ports:
       - "8080:8080"

@@ -205,7 +205,7 @@ export class AuthController {
       return `${proto}://${host}`;
     }
 
-    return process.env.CLIENT_URL || 'http://localhost:3000';
+    return process.env.CLIENT_URL || 'https://hatchet-crisped-recycled.ngrok-free.dev';
   }
 
   /**

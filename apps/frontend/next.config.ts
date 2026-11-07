@@ -2,13 +2,14 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: [
+    'hatchet-crisped-recycled.ngrok-free.dev',
+    '*.ngrok-free.dev',
+    '*.ngrok-free.app',
+    '*.ngrok.app',
+    '*.ngrok.io',
     '*.trycloudflare.com',
     '*.localtunnel.me',
     '*.loca.lt',
-    '*.ngrok-free.app',
-    '*.ngrok-free.dev',
-    '*.ngrok.app',
-    '*.ngrok.io',
   ],
   async rewrites() {
     return [
