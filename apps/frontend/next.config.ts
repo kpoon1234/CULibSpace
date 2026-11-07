@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['*.trycloudflare.com', '*.localtunnel.me'],
   async rewrites() {
     return [
       {
