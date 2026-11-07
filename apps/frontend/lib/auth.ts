@@ -1,6 +1,19 @@
-// Falls back to the local backend so a missing .env.local degrades to a working dev URL
-// instead of silently producing "undefined/api/auth/...".
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+function resolveApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    // If accessed via a remote domain or tunnel (e.g. *.trycloudflare.com, *.localtunnel.me),
+    // use a relative path so requests proxy through Next.js without mixed-content or unreachable localhost issues.
+    const isLocalhost =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    if (!isLocalhost) {
+      return '';
+    }
+  }
+
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+}
+
+export const API_URL = resolveApiUrl();
 
 export const AUTH_TOKEN_KEY = 'culibspace_token';
 export const AUTH_USER_KEY = 'culibspace_user';
