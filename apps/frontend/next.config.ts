@@ -1,7 +1,14 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ['*.trycloudflare.com', '*.localtunnel.me', '*.loca.lt'],
+  allowedDevOrigins: [
+    '*.trycloudflare.com',
+    '*.localtunnel.me',
+    '*.loca.lt',
+    '*.ngrok-free.app',
+    '*.ngrok.app',
+    '*.ngrok.io',
+  ],
   async rewrites() {
     return [
       {
