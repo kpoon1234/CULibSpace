@@ -316,8 +316,9 @@ function LoginPageContent() {
               <section>
                 <h3 className="text-sm font-semibold text-gray-800">2. User Eligibility</h3>
                 <p>
-                  This service is intended for Chulalongkorn University faculty and students with a
-                  valid user account only.
+                  This service is available to Chulalongkorn University students, faculty, and staff
+                  with a valid university account, as well as external visitors who register and
+                  purchase a valid day-pass ticket.
                 </p>
               </section>
               <section>
@@ -390,7 +391,9 @@ function LoginPageContent() {
                 <h3 className="text-sm font-semibold text-gray-800">1. Data We Collect</h3>
                 <p>
                   We collect personal data you provide when you register or sign in via Google,
-                  including your name, surname, email address, and profile picture.
+                  including your name, surname, email address, profile picture, and phone number.
+                  External visitors are additionally required to provide a Thai citizen ID or
+                  passport number for identity verification.
                 </p>
               </section>
               <section>
@@ -399,8 +402,8 @@ function LoginPageContent() {
                 </h3>
                 <p>
                   To verify your identity, manage seat and table reservations in the library, send
-                  booking notifications, and improve your experience using the CULibSpace
-                  application.
+                  booking notifications, process day-pass ticket payments for external visitors, and
+                  improve your experience using the CULibSpace application.
                 </p>
               </section>
               <section>
