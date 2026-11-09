@@ -1,73 +1,12 @@
 import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import session from 'express-session';
-import passport from './passport.js';
-import { PrismaClient } from '@prisma/client';
-import authRoutes from './routes/authRoutes.js';
-import profileRoutes from './routes/profileRoutes.js';
-import layoutRoutes from './routes/layoutRoutes.js';
-import bookingRoutes from './routes/bookingRoutes.js';
-import systemConfigRoutes from './routes/systemConfigRoutes.js';
-import adminRoutes from './routes/adminRoutes.js';
-import ticketRoutes from './routes/ticketRoutes.js';
-import { createPaymentWebhookRouter } from './routes/paymentWebhookRoutes.js';
-import issueRoutes from './routes/issueRoutes.js';
+import { createApp } from './app.js';
 import { LockService } from './services/lockService.js';
 import { NoShowService } from './services/noShowService.js';
 import { BookingService } from './services/bookingService.js';
 
-const app = express();
-const prisma = new PrismaClient();
+const app = createApp();
 const PORT = process.env.PORT || 8080;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-
-// Global Middlewares
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    credentials: true,
-  })
-);
-
-// Stripe signs the exact bytes: mount webhook BEFORE the global JSON parser.
-app.use('/api/tickets', createPaymentWebhookRouter());
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use((req, _res, next) => {
-  console.log(`[req] ${req.method} ${req.originalUrl}`);
-  next();
-});
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || 'fallback-session-secret',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    },
-  })
-);
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Mount Routers
-app.use('/api/auth', authRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/tables/layout', layoutRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/system-config', systemConfigRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/tickets', ticketRoutes);
-app.use('/api/issues', issueRoutes);
-
-// Health check / diagnostic endpoint
-app.get('/api/hello', (req, res) => {
-  res.json({ message: 'Hello! Communication between Next.js and Express is working!' });
-});
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on ${BASE_URL}`);
