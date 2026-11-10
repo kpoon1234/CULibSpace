@@ -47,6 +47,7 @@ if (googleClientId && googleClientSecret) {
             email,
             firstname: givenName,
             lastname: familyName,
+            consentedAt: new Date(),
           });
 
           // Pass user object along with the generated JWT token

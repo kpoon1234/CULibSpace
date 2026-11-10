@@ -10,6 +10,7 @@ export interface AuthenticateUserInput {
   lastname: string;
   phone?: string;
   studentId?: string;
+  consentedAt?: Date;
 }
 
 export interface CompleteProfileInput {
@@ -43,6 +44,7 @@ export class AuthService {
       // First-time user creation: phone is optional until onboarding completion
       const phone = input.phone?.trim() || null;
       const isProfileComplete = Boolean(phone);
+      const consentedAt = input.consentedAt || new Date();
 
       if (classification.isUniversityMember) {
         studentId = input.studentId || classification.studentId;
@@ -53,6 +55,7 @@ export class AuthService {
             lastname: input.lastname,
             phone,
             isProfileComplete,
+            consentedAt,
             userType: classification.userType,
             universityUser: studentId
               ? {
@@ -75,6 +78,7 @@ export class AuthService {
             lastname: input.lastname,
             phone,
             isProfileComplete,
+            consentedAt,
             userType: UserType.THAI,
           },
           include: {
@@ -83,7 +87,16 @@ export class AuthService {
         });
       }
     } else {
-      // Existing user
+      // Existing user: update consent timestamp if provided
+      if (input.consentedAt) {
+        user = await prisma.user.update({
+          where: { uid: user.uid },
+          data: { consentedAt: input.consentedAt },
+          include: {
+            universityUser: true,
+          },
+        });
+      }
       if (user.userType === UserType.UNIVERSITY) {
         studentId = user.universityUser?.studentId;
       }
@@ -113,6 +126,7 @@ export class AuthService {
         imageUrl: user.imageUrl,
         isProfileComplete: user.isProfileComplete,
         behaviourScore: Number(user.behaviourScore),
+        consentedAt: user.consentedAt,
         role: classification.role,
         userType: user.userType,
         studentId: studentId || user.universityUser?.studentId,
@@ -168,6 +182,7 @@ export class AuthService {
       imageUrl: user.imageUrl,
       isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
+      consentedAt: user.consentedAt,
       role: payload.role,
       userType: user.userType,
       studentId: user.universityUser?.studentId,

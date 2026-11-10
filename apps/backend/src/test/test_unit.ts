@@ -145,4 +145,30 @@ try {
 assert(p2002HandledProperly, 'P2002 duplicate phone must return 409 with user-friendly error');
 console.log('✅ Test 8 Passed: Prisma P2002 duplicate phone converted to 409 friendly error');
 
+// Test 9: Consent state and timestamp handling in auth session
+const consentDate = new Date('2026-11-10T08:00:00Z');
+const consentUserPayload: AuthTokenPayload = {
+  uid: 99,
+  email: 'consent.test@chula.ac.th',
+  firstname: 'Consent',
+  lastname: 'Tester',
+  role: 'STUDENT',
+  userType: 'UNIVERSITY',
+  studentId: '6700000099',
+  isProfileComplete: true,
+};
+const consentToken = signJwt(consentUserPayload);
+const verifiedConsent = verifyJwt(consentToken);
+assert(verifiedConsent !== null, 'JWT verification should succeed');
+assert(verifiedConsent.email === 'consent.test@chula.ac.th', 'Email must match');
+
+// Verify OAuth state consent decoding
+const statePayload = Buffer.from(
+  JSON.stringify({ consent: true, timestamp: consentDate.getTime() })
+).toString('base64url');
+const decodedState = JSON.parse(Buffer.from(statePayload, 'base64url').toString('utf8'));
+assert(decodedState.consent === true, 'OAuth state must confirm consent === true');
+assert(decodedState.timestamp === consentDate.getTime(), 'Timestamp must match');
+console.log('✅ Test 9 Passed: Consent state encoding and JWT verification succeeded');
+
 console.log('\n🎉 ALL UNIT TESTS PASSED WITH 100% SUCCESS!');

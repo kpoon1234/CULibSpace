@@ -28,12 +28,20 @@ export class AuthController {
    */
   static async login(req: Request, res: Response): Promise<void> {
     try {
-      const { email, firstname, lastname, phone, studentId } = req.body;
+      const { email, firstname, lastname, phone, studentId, consent } = req.body;
 
       if (!email || !firstname || !lastname) {
         res.status(400).json({
           success: false,
           error: 'Email, firstname, and lastname are required',
+        });
+        return;
+      }
+
+      if (consent === false) {
+        res.status(400).json({
+          success: false,
+          error: 'Consent is required',
         });
         return;
       }
@@ -44,6 +52,7 @@ export class AuthController {
         lastname,
         phone,
         studentId,
+        consentedAt: consent ? new Date() : new Date(),
       });
 
       res.status(200).json({

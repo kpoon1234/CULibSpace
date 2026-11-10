@@ -11,7 +11,7 @@ import {
   clearAuth,
   verifyStoredSession,
 } from '@/lib/auth';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
 
 type Role = 'user' | 'admin';
@@ -26,6 +26,28 @@ export default function LogIn() {
 
 function LoginPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [role, setRole] = useState<Role>('user');
+  const [emailError, setEmailError] = useState(false);
+  const [emailErrorMessage, setEmailErrorMessage] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
+  const [passwordErrorMessage, setPasswordErrorMessage] = useState('');
+  const [open, setOpen] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [pdpa, setPdpa] = useState(false);
+  const [consentError, setConsentError] = useState('');
+  const [showTerms, setShowTerms] = useState(false);
+  const [showPdpa, setShowPdpa] = useState(false);
+
+  useEffect(() => {
+    const errorParam = searchParams.get('error');
+    if (errorParam === 'consent_required') {
+      setConsentError(
+        'Please review and accept the Terms of Service and PDPA policy before signing in.'
+      );
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const token = getAuthToken();
@@ -53,17 +75,6 @@ function LoginPageContent() {
       cancelled = true;
     };
   }, [router]);
-
-  const [role, setRole] = useState<Role>('user');
-  const [emailError, setEmailError] = useState(false);
-  const [emailErrorMessage, setEmailErrorMessage] = useState('');
-  const [passwordError, setPasswordError] = useState(false);
-  const [passwordErrorMessage, setPasswordErrorMessage] = useState('');
-  const [open, setOpen] = useState(false);
-  const [consent, setConsent] = useState(false);
-  const [pdpa, setPdpa] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
-  const [showPdpa, setShowPdpa] = useState(false);
 
   const handleClickOpen = () => setOpen(true);
   const handleClose = () => setOpen(false);
@@ -217,24 +228,28 @@ function LoginPageContent() {
           </form>
         ) : (
           <>
-            <div className="panel-muted rounded-md p-3 flex flex-col gap-2">
+            <div className="panel-muted rounded-md border border-gray-200 bg-gray-50 p-3 flex flex-col gap-2">
               <p className="text-xs text-gray-600 leading-relaxed">
                 Before signing in with Google, please review and accept:
               </p>
+              {consentError && <p className="text-xs font-medium text-red-600">{consentError}</p>}
               <div className="flex items-start gap-2 text-xs text-gray-600 leading-relaxed">
                 <input
                   type="checkbox"
                   id="consent-terms"
                   checked={consent}
-                  onChange={() => setConsent(!consent)}
-                  className="mt-0.5 shrink-0"
+                  onChange={() => {
+                    setConsent(!consent);
+                    setConsentError('');
+                  }}
+                  className="mt-0.5 shrink-0 cursor-pointer"
                 />
                 <label htmlFor="consent-terms" className="cursor-pointer">
                   I consent to the{' '}
                   <button
                     type="button"
                     onClick={() => setShowTerms(true)}
-                    className="text-claret-600 hover:underline font-medium p-0"
+                    className="text-claret-600 hover:text-claret-700 underline font-medium p-0 cursor-pointer inline"
                   >
                     Terms of Service
                   </button>
@@ -245,15 +260,18 @@ function LoginPageContent() {
                   type="checkbox"
                   id="consent-pdpa"
                   checked={pdpa}
-                  onChange={() => setPdpa(!pdpa)}
-                  className="mt-0.5 shrink-0"
+                  onChange={() => {
+                    setPdpa(!pdpa);
+                    setConsentError('');
+                  }}
+                  className="mt-0.5 shrink-0 cursor-pointer"
                 />
                 <label htmlFor="consent-pdpa" className="cursor-pointer">
                   I agree to the{' '}
                   <button
                     type="button"
                     onClick={() => setShowPdpa(true)}
-                    className="text-claret-600 hover:underline font-medium p-0"
+                    className="text-claret-600 hover:text-claret-700 underline font-medium p-0 cursor-pointer inline"
                   >
                     Personal Data Protection Act (PDPA)
                   </button>
@@ -266,14 +284,15 @@ function LoginPageContent() {
               onClick={(event) => {
                 if (!consent || !pdpa) {
                   event.preventDefault();
+                  setConsentError('Please review and check both boxes before signing in.');
                   return;
                 }
-                window.location.href = `${API_URL}/api/auth/google`;
+                window.location.href = `${API_URL}/api/auth/google?consent=true`;
               }}
               disabled={!consent || !pdpa}
               className={`flex w-full items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                 consent && pdpa
-                  ? 'border-gray-300 text-gray-800 hover:bg-gray-50'
+                  ? 'border-gray-300 text-gray-800 hover:bg-gray-50 cursor-pointer'
                   : 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
               }`}
             >
@@ -356,8 +375,14 @@ function LoginPageContent() {
               <section>
                 <h3 className="text-sm font-semibold text-gray-800">7. Contact</h3>
                 <p>
-                  If you have any questions about these terms, please contact us at
-                  contact@culibspace.example or Chulalongkorn University Central Library.
+                  If you have any questions about these terms, please contact us at{' '}
+                  <a
+                    href="mailto:chulalibrary@car.chula.ac.th"
+                    className="text-claret-600 underline font-medium hover:text-claret-700"
+                  >
+                    chulalibrary@car.chula.ac.th
+                  </a>{' '}
+                  or Chulalongkorn University Central Library (Office of Academic Resources).
                 </p>
               </section>
             </div>
@@ -420,8 +445,23 @@ function LoginPageContent() {
                   4. Disclosure and Transfer of Data
                 </h3>
                 <p>
-                  We will not disclose your personal data to third parties without your consent or
-                  as required by law.
+                  We only disclose your personal data to essential service providers necessary for
+                  operating CULibSpace:
+                </p>
+                <ul className="list-disc list-inside mt-1 space-y-1">
+                  <li>
+                    <strong>Google LLC:</strong> for user authentication (Google OAuth 2.0 Single
+                    Sign-On) and identity verification.
+                  </li>
+                  <li>
+                    <strong>Stripe, Inc.:</strong> for secure payment processing of visitor day-pass
+                    tickets.
+                  </li>
+                </ul>
+                <p className="mt-2">
+                  We do not sell, rent, or transfer your personal data to any other third parties,
+                  except as required by applicable law or official regulations of Chulalongkorn
+                  University.
                 </p>
               </section>
               <section>
@@ -438,8 +478,21 @@ function LoginPageContent() {
                 </h3>
                 <p>
                   If you have any questions or wish to exercise your rights as a data subject,
-                  please contact us at contact@culibspace.example or Chulalongkorn University
-                  Central Library.
+                  please contact our Data Protection Officer (DPO) at{' '}
+                  <a
+                    href="mailto:dpo@chula.ac.th"
+                    className="text-claret-600 underline font-medium hover:text-claret-700"
+                  >
+                    dpo@chula.ac.th
+                  </a>{' '}
+                  or Central Library at{' '}
+                  <a
+                    href="mailto:chulalibrary@car.chula.ac.th"
+                    className="text-claret-600 underline font-medium hover:text-claret-700"
+                  >
+                    chulalibrary@car.chula.ac.th
+                  </a>
+                  .
                 </p>
               </section>
             </div>
