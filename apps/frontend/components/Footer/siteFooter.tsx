@@ -13,7 +13,7 @@ const navLinks = [
 // University address, phone, or email here until the library supplies approved contact data.
 const contact = {
   address: '000 Example Road, Example District, Bangkok 10000',
-  email: 'chulalibrary@car.chula.ac.th',
+  email: 'contact@culibspace.example',
   phone: '+66 (0)2 000 0000',
 };
 

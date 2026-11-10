@@ -93,6 +93,7 @@ model User {
   imageUrl          String?         @db.VarChar(255) @map("image_url") @default("https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y")
   userType          UserType        @map("user_type")
   consentedAt       DateTime?       @map("consented_at")
+  consentVersion    String?         @db.VarChar(20) @map("consent_version")
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
 

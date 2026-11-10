@@ -21,6 +21,8 @@ export type AuthUser = {
   citizenId?: string;
   passportId?: string;
   imageUrl?: string | null;
+  consentedAt?: string | Date | null;
+  consentVersion?: string | null;
 };
 
 export function saveAuth(token: string, user: AuthUser): void {

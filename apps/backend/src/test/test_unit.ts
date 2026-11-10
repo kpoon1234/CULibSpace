@@ -3,6 +3,8 @@ import { classifyEmail } from '../utils/roleMapper.js';
 import { signJwt, verifyJwt, AuthTokenPayload } from '../utils/jwt.js';
 import { BookingService } from '../services/bookingService.js';
 import { ScheduleService } from '../services/scheduleService.js';
+import { AuthService } from '../services/authService.js';
+import { AuthController } from '../controllers/authController.js';
 
 console.log('🧪 Starting Role Mapping & JWT Unit Tests...\n');
 
@@ -170,5 +172,241 @@ const decodedState = JSON.parse(Buffer.from(statePayload, 'base64url').toString(
 assert(decodedState.consent === true, 'OAuth state must confirm consent === true');
 assert(decodedState.timestamp === consentDate.getTime(), 'Timestamp must match');
 console.log('✅ Test 9 Passed: Consent state encoding and JWT verification succeeded');
+
+// Test 10: AuthService.authenticateUser saves consentedAt ONLY when consent === true (Must Fix 1 & 2)
+let createdUserData: any = null;
+const mockPrismaNewUser = {
+  user: {
+    findUnique: async () => null,
+    create: async ({ data }: any) => {
+      createdUserData = data;
+      return {
+        uid: 101,
+        ...data,
+        behaviourScore: 100,
+        imageUrl: null,
+      };
+    },
+  },
+};
+
+// 10a: First-time user with consent: true
+const resWithConsent = await AuthService.authenticateUser(
+  {
+    email: 'new.consented@student.chula.ac.th',
+    firstname: 'Consented',
+    lastname: 'User',
+    consent: true,
+  },
+  mockPrismaNewUser as any
+);
+assert(
+  createdUserData.consentedAt instanceof Date,
+  'consentedAt must be Date when consent === true'
+);
+assert.equal(createdUserData.consentVersion, '2026-11', 'consentVersion defaults to 2026-11');
+assert(resWithConsent.user.consentedAt instanceof Date);
+
+// 10b: First-time user without consent (consent === undefined)
+createdUserData = null;
+const resNoConsent = await AuthService.authenticateUser(
+  {
+    email: 'new.unconsented@student.chula.ac.th',
+    firstname: 'Unconsented',
+    lastname: 'User',
+  },
+  mockPrismaNewUser as any
+);
+assert.equal(createdUserData.consentedAt, null, 'consentedAt must be null when consent not given');
+assert.equal(
+  createdUserData.consentVersion,
+  null,
+  'consentVersion must be null when consent not given'
+);
+assert.equal(resNoConsent.user.consentedAt, null);
+
+// 10c: Existing user never has consentedAt overwritten (preserves first consent timestamp)
+const originalConsentedAt = new Date('2026-01-15T10:00:00Z');
+let updatedUserData: any = null;
+const mockPrismaExistingUser = {
+  user: {
+    findUnique: async () => ({
+      uid: 202,
+      email: 'existing@student.chula.ac.th',
+      firstname: 'Existing',
+      lastname: 'User',
+      consentedAt: originalConsentedAt,
+      consentVersion: '2026-01',
+      behaviourScore: 100,
+      userType: 'UNIVERSITY',
+      isProfileComplete: true,
+    }),
+    update: async ({ data }: any) => {
+      updatedUserData = data;
+      return {
+        uid: 202,
+        email: 'existing@student.chula.ac.th',
+        firstname: 'Existing',
+        lastname: 'User',
+        consentedAt: originalConsentedAt,
+        consentVersion: data.consentVersion || '2026-01',
+        behaviourScore: 100,
+        userType: 'UNIVERSITY',
+        isProfileComplete: true,
+      };
+    },
+  },
+};
+
+const resExisting = await AuthService.authenticateUser(
+  {
+    email: 'existing@student.chula.ac.th',
+    firstname: 'Existing',
+    lastname: 'User',
+    consent: true,
+    consentVersion: '2026-11',
+  },
+  mockPrismaExistingUser as any
+);
+assert.equal(
+  resExisting.user.consentedAt,
+  originalConsentedAt,
+  'Original consentedAt must be preserved'
+);
+assert.equal(updatedUserData.consentVersion, '2026-11', 'consentVersion must be updated');
+console.log('✅ Test 10 Passed: AuthService.authenticateUser consent handling verified');
+
+// Test 11: AuthService.recordConsent updates consent and policy version
+let recordConsentUpdated: any = null;
+const mockPrismaForRecord = {
+  user: {
+    findUnique: async () => ({
+      uid: 303,
+      consentedAt: null,
+      consentVersion: null,
+    }),
+    update: async ({ data }: any) => {
+      recordConsentUpdated = data;
+      return {
+        uid: 303,
+        consentedAt: data.consentedAt,
+        consentVersion: data.consentVersion,
+      };
+    },
+  },
+};
+const recorded = await AuthService.recordConsent(303, '2026-11', mockPrismaForRecord as any);
+assert(recorded.consentedAt instanceof Date, 'recordConsent must set consentedAt Date');
+assert.equal(recorded.consentVersion, '2026-11');
+assert(recordConsentUpdated.consentedAt instanceof Date);
+console.log('✅ Test 11 Passed: AuthService.recordConsent verified');
+
+// Test 12: AuthController.login and AuthController.recordConsent with and without consent (Should Fix 8)
+const originalAuthenticateUser = AuthService.authenticateUser;
+const originalRecordConsent = AuthService.recordConsent;
+try {
+  let passedAuthInput: any = null;
+  AuthService.authenticateUser = async (input: any) => {
+    passedAuthInput = input;
+    return {
+      token: 'jwt.token.mock',
+      user: {
+        uid: 505,
+        email: input.email,
+        firstname: input.firstname,
+        lastname: input.lastname,
+        consentedAt: input.consent === true ? new Date() : null,
+        consentVersion: input.consent === true ? input.consentVersion || '2026-11' : null,
+        role: 'STUDENT',
+        userType: 'UNIVERSITY',
+        isProfileComplete: true,
+      },
+    } as any;
+  };
+
+  const createMockRes = () => {
+    const res: any = {
+      statusCode: 200,
+      body: null,
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      json(data: any) {
+        this.body = data;
+        return this;
+      },
+    };
+    return res;
+  };
+
+  // 12a: AuthController.login with consent: true
+  const resWithConsent = createMockRes();
+  await AuthController.login(
+    {
+      body: {
+        email: 'controller.consent@chula.ac.th',
+        firstname: 'First',
+        lastname: 'Last',
+        consent: true,
+      },
+    } as any,
+    resWithConsent
+  );
+  assert.equal(resWithConsent.statusCode, 200);
+  assert.equal(passedAuthInput.consent, true);
+  assert(resWithConsent.body.user.consentedAt instanceof Date);
+
+  // 12b: AuthController.login without consent
+  const resWithoutConsent = createMockRes();
+  await AuthController.login(
+    {
+      body: {
+        email: 'controller.noconsent@chula.ac.th',
+        firstname: 'First',
+        lastname: 'Last',
+      },
+    } as any,
+    resWithoutConsent
+  );
+  assert.equal(resWithoutConsent.statusCode, 200);
+  assert.equal(passedAuthInput.consent, false);
+  assert.equal(resWithoutConsent.body.user.consentedAt, null);
+
+  // 12c: AuthController.recordConsent with consent: true
+  AuthService.recordConsent = async () =>
+    ({
+      consentedAt: new Date(),
+      consentVersion: '2026-11',
+    }) as any;
+  const resConsentRecord = createMockRes();
+  await AuthController.recordConsent(
+    {
+      user: { uid: 505 },
+      body: { consent: true, consentVersion: '2026-11' },
+    } as any,
+    resConsentRecord
+  );
+  assert.equal(resConsentRecord.statusCode, 200);
+  assert.equal(resConsentRecord.body.success, true);
+
+  // 12d: AuthController.recordConsent with consent: false rejects with 400
+  const resConsentBad = createMockRes();
+  await AuthController.recordConsent(
+    {
+      user: { uid: 505 },
+      body: { consent: false },
+    } as any,
+    resConsentBad
+  );
+  assert.equal(resConsentBad.statusCode, 400);
+  assert.equal(resConsentBad.body.error, 'Consent confirmation is required');
+} finally {
+  AuthService.authenticateUser = originalAuthenticateUser;
+  AuthService.recordConsent = originalRecordConsent;
+}
+console.log(
+  '✅ Test 12 Passed: AuthController login & consent endpoints with/without consent verified'
+);
 
 console.log('\n🎉 ALL UNIT TESTS PASSED WITH 100% SUCCESS!');

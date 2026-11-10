@@ -47,7 +47,6 @@ if (googleClientId && googleClientSecret) {
             email,
             firstname: givenName,
             lastname: familyName,
-            consentedAt: new Date(),
           });
 
           // Pass user object along with the generated JWT token
@@ -90,6 +89,8 @@ passport.deserializeUser(async (uid: number, done) => {
       phone: user.phone,
       isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
+      consentedAt: user.consentedAt,
+      consentVersion: user.consentVersion,
       role: classification.role,
       userType: user.userType,
       studentId: user.universityUser?.studentId,
