@@ -6,27 +6,46 @@
  *   npm run test:e2e:cleanup              # delete
  *   npm run test:e2e:cleanup -- --dry-run # only show what would be deleted
  *
- * Safety: only runs against a database on localhost, and never deletes an issue
- * that is still open or closing a table (finish it in the admin page first).
+ * Which database: E2E_DATABASE_URL (e.g. a deployed staging DB, set in e2e/.env),
+ * otherwise DATABASE_URL from apps/backend/.env (your local DB).
+ *
+ * Safety: only runs against localhost, or a host listed in E2E_CLEANUP_ALLOWED_HOSTS
+ * (comma-separated, exact host names). Never deletes an issue that is still open
+ * or closing a table (finish it in the admin page first).
  */
 import fs from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 
-const ENV_FILE = 'apps/backend/.env';
+const E2E_ENV_FILE = 'e2e/.env';
+const BACKEND_ENV_FILE = 'apps/backend/.env';
 const PREFIX = 'E2E ';
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
-if (!process.env.DATABASE_URL && fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
-const databaseUrl = process.env.DATABASE_URL;
+if (fs.existsSync(E2E_ENV_FILE)) process.loadEnvFile(E2E_ENV_FILE);
+if (!process.env.E2E_DATABASE_URL && !process.env.DATABASE_URL && fs.existsSync(BACKEND_ENV_FILE)) {
+  process.loadEnvFile(BACKEND_ENV_FILE);
+}
+const databaseUrl = process.env.E2E_DATABASE_URL || process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.error(`DATABASE_URL is not set (looked in ${ENV_FILE}).`);
+  console.error(`No database URL: set E2E_DATABASE_URL in ${E2E_ENV_FILE}, or DATABASE_URL.`);
   process.exit(1);
 }
 
 const host = new URL(databaseUrl).hostname;
-if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
-  console.error(`Refusing to clean "${host}": this script only runs against a local database.`);
+const allowedHosts = [
+  ...LOCAL_HOSTS,
+  ...(process.env.E2E_CLEANUP_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean),
+];
+if (!allowedHosts.includes(host)) {
+  console.error(
+    `Refusing to clean "${host}". Add it to E2E_CLEANUP_ALLOWED_HOSTS only if it is a test/staging database.`
+  );
   process.exit(1);
 }
+console.log(`Database host: ${host}`);
 
 const dryRun = process.argv.includes('--dry-run');
 const prisma = new PrismaClient({ datasourceUrl: databaseUrl });

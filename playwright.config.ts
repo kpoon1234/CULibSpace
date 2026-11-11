@@ -7,8 +7,12 @@ if (fs.existsSync('e2e/.env')) process.loadEnvFile('e2e/.env');
 const FRONTEND_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
 const API_URL = process.env.E2E_API_URL || 'http://localhost:8080';
 
+const isLocal = (url: string) =>
+  ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname);
+
 /**
- * Black-box E2E tests against the running app (frontend + backend + your local DB).
+ * Black-box E2E tests against the running app: the local dev servers by default,
+ * or a deployed environment when E2E_BASE_URL / E2E_API_URL point to it.
  * Tests change shared data (issues, schedules, settings), so they run one at a time.
  * See https://playwright.dev/docs/test-configuration
  */
@@ -36,19 +40,28 @@ export default defineConfig({
       dependencies: ['setup'],
     },
   ],
-  // Starts the dev servers if they are not already running (reuses them if they are).
+  // Local URLs: starts the dev servers if they are not already running (reuses them
+  // if they are). A deployed URL is already running, so nothing is started.
   webServer: [
-    {
-      command: 'npm run dev:backend',
-      url: `${API_URL}/api/hello`,
-      reuseExistingServer: true,
-      timeout: 120_000,
-    },
-    {
-      command: 'npm run dev:frontend',
-      url: FRONTEND_URL,
-      reuseExistingServer: true,
-      timeout: 180_000,
-    },
+    ...(isLocal(API_URL)
+      ? [
+          {
+            command: 'npm run dev:backend',
+            url: `${API_URL}/api/hello`,
+            reuseExistingServer: true,
+            timeout: 120_000,
+          },
+        ]
+      : []),
+    ...(isLocal(FRONTEND_URL)
+      ? [
+          {
+            command: 'npm run dev:frontend',
+            url: FRONTEND_URL,
+            reuseExistingServer: true,
+            timeout: 180_000,
+          },
+        ]
+      : []),
   ],
 });

@@ -19,6 +19,19 @@ skips any test issue that is not Completed or still closes a table.
 If your local accounts differ from `apps/backend/prisma/seed.ts`, copy
 `e2e/.env.example` to `e2e/.env` and change the values.
 
+## Run against a deployed environment
+
+Use a **staging/demo** deployment with its own database, never production: the
+tests change booking rules and close tables for a moment.
+
+1. In `e2e/.env` (git-ignored), set `E2E_BASE_URL` and `E2E_API_URL` to the deployed
+   frontend and backend, and `E2E_ADMIN_PASSWORD` to that environment's admin password.
+   With non-localhost URLs, the local dev servers are not started.
+2. The user session needs the dev login (`POST /api/auth/login`) on that backend.
+   It must stay **off in production**.
+3. Run `npm run test:e2e`. To clean test issues there, set `E2E_DATABASE_URL` and add
+   its host to `E2E_CLEANUP_ALLOWED_HOSTS`, then run `npm run test:e2e:cleanup`.
+
 ## Sessions
 
 `auth.setup.ts` signs in once and saves the sessions. In a test file, pick one:
