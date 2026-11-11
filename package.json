@@ -1,5 +1,6 @@
 {
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",
     "prettier": "^3.9.6"
@@ -9,6 +10,8 @@
     "dev": "npm run dev --workspace=apps/backend & npm run dev --workspace=apps/frontend",
     "dev:backend": "npm run dev --workspace=apps/backend",
     "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "test:e2e": "playwright test",
+    "test:e2e:report": "playwright show-report",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:fresh": "docker compose up -d && npm run db:fresh --workspace=apps/backend"

@@ -36,3 +36,11 @@ docs/
 .impeccable/live/*.png
 # impeccable-ignore-end
 .kilo/kilo.jsonc
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+/e2e/.env
