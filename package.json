@@ -36,5 +36,8 @@
     "body-parser": "2.4.0",
     "qs": "6.16.2",
     "deepmerge-ts": "^8.0.2"
+  },
+  "scarfSettings": {
+    "enabled": false
   }
 }
