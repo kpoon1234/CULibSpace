@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AuthService } from '../services/authService.js';
+import { AuthService, CURRENT_CONSENT_VERSION } from '../services/authService.js';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
@@ -28,12 +28,23 @@ export class AuthController {
    */
   static async login(req: Request, res: Response): Promise<void> {
     try {
-      const { email, firstname, lastname, phone, studentId } = req.body;
+      const { email, firstname, lastname, phone, studentId, consent, consentVersion } = req.body;
 
       if (!email || !firstname || !lastname) {
         res.status(400).json({
           success: false,
           error: 'Email, firstname, and lastname are required',
+        });
+        return;
+      }
+
+      if (
+        consentVersion !== undefined &&
+        (typeof consentVersion !== 'string' || consentVersion.trim() !== CURRENT_CONSENT_VERSION)
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`,
         });
         return;
       }
@@ -44,11 +55,64 @@ export class AuthController {
         lastname,
         phone,
         studentId,
+        consent: consent === true,
+        consentVersion: typeof consentVersion === 'string' ? consentVersion : undefined,
       });
 
       res.status(200).json({
         success: true,
         message: 'Authentication and role mapping successful',
+        ...result,
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({
+        success: false,
+        error: err.message || 'Internal server error',
+      });
+    }
+  }
+
+  /**
+   * POST /api/auth/consent
+   * Saves authenticated user's consent to Terms & PDPA (Must Fix 3)
+   */
+  static async recordConsent(req: Request, res: Response): Promise<void> {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const uid = authReq.user?.uid;
+      if (!uid) {
+        res.status(401).json({
+          success: false,
+          error: 'Unauthorized: User session required',
+        });
+        return;
+      }
+
+      const { consent, consentVersion } = req.body;
+      if (consent !== true) {
+        res.status(400).json({
+          success: false,
+          error: 'Consent confirmation is required',
+        });
+        return;
+      }
+
+      if (
+        consentVersion !== undefined &&
+        (typeof consentVersion !== 'string' || consentVersion.trim() !== CURRENT_CONSENT_VERSION)
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`,
+        });
+        return;
+      }
+
+      const result = await AuthService.recordConsent(uid, consentVersion);
+      res.status(200).json({
+        success: true,
+        message: 'Consent recorded successfully',
         ...result,
       });
     } catch (err: any) {
