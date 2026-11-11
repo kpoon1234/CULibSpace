@@ -35,6 +35,7 @@ services:
       CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
       NODE_ENV: ${NODE_ENV:-development}
       FORCE_SEED: ${FORCE_SEED:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
     ports:
       - "8080:8080"
     command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && npx tsx src/server.ts"

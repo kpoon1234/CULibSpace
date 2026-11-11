@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
-import express from 'express';
+import { createApp } from '../app.js';
 import Stripe from 'stripe';
 import { PaymentStatus, TicketStatus, type PrismaClient } from '@prisma/client';
 import {
@@ -11,7 +11,6 @@ import {
 } from '../services/paymentConfirmationService.js';
 import { StripePaymentGateway } from '../services/stripePaymentGateway.js';
 import { getPaymentGateway } from '../services/paymentGatewayFactory.js';
-import { createPaymentWebhookRouter } from '../routes/paymentWebhookRoutes.js';
 import type { GatewayPaymentEvent, GatewayCheckoutStatus } from '../services/paymentGateway.js';
 
 const confirmedAt = new Date('2026-10-23T10:00:00Z');
@@ -587,12 +586,11 @@ function signature(payload: string) {
 
 test('real HTTP route verifies exact signed bytes before JSON parsing, without user JWT', async () => {
   const f = fixture();
-  const app = express();
-  app.use(
-    '/api/tickets',
-    createPaymentWebhookRouter(() => f.gateway, f.db)
-  );
-  app.use(express.json());
+  const app = createApp({
+    environment: { NODE_ENV: 'test', SESSION_SECRET: 'webhook-http-tests-only' },
+    paymentGatewayFactory: () => f.gateway,
+    paymentPrisma: f.db,
+  });
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/tickets/payment/webhook`;
