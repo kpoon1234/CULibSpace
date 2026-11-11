@@ -14,6 +14,8 @@ import ticketRoutes from './routes/ticketRoutes.js';
 import issueRoutes from './routes/issueRoutes.js';
 import { createPaymentWebhookRouter } from './routes/paymentWebhookRoutes.js';
 import type { PaymentGateway } from './services/paymentGateway.js';
+import swaggerUi from 'swagger-ui-express';
+import { buildOpenApiSpec } from './openapi/openapi.js';
 
 interface AppOptions {
   environment?: NodeJS.ProcessEnv;
@@ -77,6 +79,20 @@ export function createApp(options: AppOptions = {}) {
   app.get('/api/hello', (_req, res) => {
     res.json({ message: 'Hello! Communication between Next.js and Express is working!' });
   });
+
+  // API documentation (OpenAPI 3.0): UI at /api-docs, raw spec at /api-docs.json
+  const openApiSpec = buildOpenApiSpec(environment);
+  app.get('/api-docs.json', (_req, res) => {
+    res.json(openApiSpec);
+  });
+  app.use(
+    '/api-docs',
+    swaggerUi.serve,
+    swaggerUi.setup(openApiSpec, {
+      customSiteTitle: 'CU LibSpace API Docs',
+      swaggerOptions: { persistAuthorization: true },
+    })
+  );
 
   return app;
 }
