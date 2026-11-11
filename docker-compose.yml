@@ -105,4 +105,6 @@ services:
     mem_limit: 512m
 
 volumes:
+  # Explicit volume name ensures data is preserved regardless of root folder name
   postgres_data:
+    name: culibspace_postgres_data

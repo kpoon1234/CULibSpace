@@ -106,7 +106,7 @@ In **APIs & Services -> Credentials -> OAuth 2.0 Client IDs**:
 npm run docker:up
 
 # 2. First-time setup only: seed demo data
-# WARNING: prisma/seed.ts runs deleteMany() on all tables before seeding!
+# (Equipped with safeguard: automatically skips if data already exists to protect live records; use FORCE_SEED=true to reset)
 npm run docker:seed
 
 # 3. Inspect logs
