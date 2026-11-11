@@ -79,6 +79,46 @@ Send this link to your teacher!
 
 ---
 
+## 🏠 Step 3: Deploying on a Home Cloud Server / Custom Domain
+
+If you or your friend are hosting the project on a home server (homelab, VPS, mini PC) with a custom domain or subdomain (e.g., `https://culib.yourdomain.com`):
+
+### 1. Configure the Environment
+Copy `.env.example` to `.env` in the repository root:
+```bash
+cp .env.example .env
+```
+Edit `.env` and set your public domain:
+```env
+CLIENT_URL="https://culib.yourdomain.com"
+```
+*(All OAuth redirects, Next.js proxying, and Stripe checkout return URLs will automatically derive from this domain)*
+
+### 2. Reverse Proxy Setup (Port Forwarding / Nginx / Cloudflare Tunnel / Caddy)
+Point your domain's reverse proxy directly to **Frontend port 3000**:
+* **Frontend port:** `3000` (handles SSR and proxies `/api/*` requests to Backend on port 8080 internally)
+* **SSL / TLS:** Terminated at your reverse proxy (e.g. Let's Encrypt or Cloudflare SSL)
+* **Important Headers:** Ensure standard proxy headers are passed (`Host`, `X-Forwarded-Proto: https`, `X-Forwarded-Host`)
+
+### 3. Database Data Persistence (No Data Loss on Restart)
+PostgreSQL data is stored in a dedicated named Docker volume:
+* **Volume Name:** `culibspace_postgres_data`
+* **Restarting containers:**
+  ```bash
+  # Stop containers safely (keeps all database data, users, bookings, and tickets intact):
+  docker compose down
+
+  # Start containers again:
+  docker compose up -d
+  ```
+> [!CAUTION]
+> **Never run `docker compose down -v`** on your server! The `-v` flag deletes Docker volumes, which will wipe your database files. Regular `docker compose down` safely preserves all database volumes.
+
+> [!NOTE]
+> Database seeding (`prisma/seed.ts`) is equipped with an automatic safeguard: it only seeds if the database is completely empty. On every subsequent restart, it automatically skips seeding to prevent overwriting your existing user records and bookings. If you ever want to force a re-seed, run with `FORCE_SEED=true`.
+
+---
+
 ## 🔑 Demo & Test Accounts (Pre-seeded)
 
 When testing with your teacher, you can use the pre-seeded accounts:
