@@ -43,3 +43,30 @@ export async function setBookingRules(request: APIRequestContext, rules: Booking
   const response = await request.put(POLICY_URL(), { headers: authHeaders(), data: rules });
   expect(response.ok(), await response.text()).toBe(true);
 }
+
+export type IssueStatus = 'Pending' | 'In Progress' | 'Completed';
+
+/** The id of the one issue whose description contains `text`. */
+export async function findIssueId(request: APIRequestContext, text: string): Promise<number> {
+  const response = await request.get(`${testEnv.apiUrl}/api/admin/issues`, {
+    headers: authHeaders(),
+    params: { q: text },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  const { data } = (await response.json()) as { data: { issues: { issueId: number }[] } };
+  expect(data.issues, `issues matching "${text}"`).toHaveLength(1);
+  return data.issues[0].issueId;
+}
+
+export async function updateIssue(
+  request: APIRequestContext,
+  issueId: number,
+  update: { status: IssueStatus; blocksTable: boolean; notes?: string }
+) {
+  // The API needs `notes` on every update; "" clears it.
+  const response = await request.patch(`${testEnv.apiUrl}/api/admin/issues/${issueId}`, {
+    headers: authHeaders(),
+    data: { notes: '', ...update },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+}
