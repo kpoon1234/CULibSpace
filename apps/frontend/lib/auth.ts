@@ -6,6 +6,8 @@ export const AUTH_TOKEN_KEY = 'culibspace_token';
 export const AUTH_USER_KEY = 'culibspace_user';
 const AUTH_CHANGE_EVENT = 'culibspace-auth-change';
 
+export const CURRENT_CONSENT_VERSION = '2026-11';
+
 export type AuthUser = {
   uid?: number;
   adminId?: number;
@@ -21,6 +23,8 @@ export type AuthUser = {
   citizenId?: string;
   passportId?: string;
   imageUrl?: string | null;
+  consentedAt?: string | Date | null;
+  consentVersion?: string | null;
 };
 
 export function saveAuth(token: string, user: AuthUser): void {

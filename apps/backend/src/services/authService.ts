@@ -2,6 +2,8 @@ import { PrismaClient, UserType } from '@prisma/client';
 import { classifyEmail, AppRole } from '../utils/roleMapper.js';
 import { signJwt, AuthTokenPayload } from '../utils/jwt.js';
 
+export const CURRENT_CONSENT_VERSION = '2026-11';
+
 const prisma = new PrismaClient();
 
 export interface AuthenticateUserInput {
@@ -10,6 +12,8 @@ export interface AuthenticateUserInput {
   lastname: string;
   phone?: string;
   studentId?: string;
+  consent?: boolean;
+  consentVersion?: string;
 }
 
 export interface CompleteProfileInput {
@@ -26,11 +30,11 @@ export class AuthService {
   /**
    * Role Mapping & Session/JWT Management for Student/Staff (US1-1 / FR-1.1)
    */
-  static async authenticateUser(input: AuthenticateUserInput) {
+  static async authenticateUser(input: AuthenticateUserInput, prismaClient: any = prisma) {
     const email = input.email.trim().toLowerCase();
     const classification = classifyEmail(email);
 
-    let user = await prisma.user.findUnique({
+    let user = await prismaClient.user.findUnique({
       where: { email },
       include: {
         universityUser: true,
@@ -39,20 +43,38 @@ export class AuthService {
 
     let studentId: string | undefined;
 
+    if (
+      input.consentVersion !== undefined &&
+      (typeof input.consentVersion !== 'string' ||
+        input.consentVersion.trim() !== CURRENT_CONSENT_VERSION)
+    ) {
+      const error: any = new Error(
+        `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`
+      );
+      error.status = 400;
+      throw error;
+    }
+
     if (!user) {
-      // First-time user creation: phone is optional until onboarding completion
+      // First-time user creation: phone is optional until onboarding completion.
+      // Save consentedAt ONLY when consent === true (Must Fix 1).
       const phone = input.phone?.trim() || null;
       const isProfileComplete = Boolean(phone);
+      const consentedAt = input.consent === true ? new Date() : null;
+      const consentVersion =
+        input.consent === true ? input.consentVersion?.trim() || CURRENT_CONSENT_VERSION : null;
 
       if (classification.isUniversityMember) {
         studentId = input.studentId || classification.studentId;
-        user = await prisma.user.create({
+        user = await prismaClient.user.create({
           data: {
             email,
             firstname: input.firstname,
             lastname: input.lastname,
             phone,
             isProfileComplete,
+            consentedAt,
+            consentVersion,
             userType: classification.userType,
             universityUser: studentId
               ? {
@@ -68,13 +90,15 @@ export class AuthService {
         });
       } else {
         // Fallback outsider user
-        user = await prisma.user.create({
+        user = await prismaClient.user.create({
           data: {
             email,
             firstname: input.firstname,
             lastname: input.lastname,
             phone,
             isProfileComplete,
+            consentedAt,
+            consentVersion,
             userType: UserType.THAI,
           },
           include: {
@@ -83,7 +107,36 @@ export class AuthService {
         });
       }
     } else {
-      // Existing user
+      // Existing user: NEVER overwrite the first consent time (Must Fix 2) UNLESS version changes.
+      // If accepting a new consentVersion, update consentedAt to new acceptance date.
+      if (!user.consentedAt && input.consent === true) {
+        user = await prismaClient.user.update({
+          where: { uid: user.uid },
+          data: {
+            consentedAt: new Date(),
+            consentVersion: input.consentVersion?.trim() || CURRENT_CONSENT_VERSION,
+          },
+          include: {
+            universityUser: true,
+          },
+        });
+      } else if (
+        user.consentedAt &&
+        input.consentVersion &&
+        input.consentVersion.trim() !== user.consentVersion
+      ) {
+        user = await prismaClient.user.update({
+          where: { uid: user.uid },
+          data: {
+            consentedAt: new Date(),
+            consentVersion: input.consentVersion.trim(),
+          },
+          include: {
+            universityUser: true,
+          },
+        });
+      }
+
       if (user.userType === UserType.UNIVERSITY) {
         studentId = user.universityUser?.studentId;
       }
@@ -113,6 +166,8 @@ export class AuthService {
         imageUrl: user.imageUrl,
         isProfileComplete: user.isProfileComplete,
         behaviourScore: Number(user.behaviourScore),
+        consentedAt: user.consentedAt,
+        consentVersion: user.consentVersion,
         role: classification.role,
         userType: user.userType,
         studentId: studentId || user.universityUser?.studentId,
@@ -168,11 +223,58 @@ export class AuthService {
       imageUrl: user.imageUrl,
       isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
+      consentedAt: user.consentedAt,
+      consentVersion: user.consentVersion,
       role: payload.role,
       userType: user.userType,
       studentId: user.universityUser?.studentId,
       citizenId: user.outsideUser?.thaiUser?.citizenId,
       passportId: user.outsideUser?.foreignUser?.passportId,
+    };
+  }
+
+  /**
+   * Record or update user consent for Terms and PDPA (Must Fix 3)
+   */
+  static async recordConsent(
+    uid: number,
+    consentVersion: string = CURRENT_CONSENT_VERSION,
+    prismaClient: any = prisma
+  ) {
+    const user = await prismaClient.user.findUnique({
+      where: { uid },
+    });
+
+    if (!user) {
+      const error: any = new Error('User not found');
+      error.status = 404;
+      throw error;
+    }
+
+    const version = consentVersion?.trim() || CURRENT_CONSENT_VERSION;
+    if (version !== CURRENT_CONSENT_VERSION) {
+      const error: any = new Error(
+        `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`
+      );
+      error.status = 400;
+      throw error;
+    }
+
+    const isNewVersion = user.consentVersion !== version;
+    const updated = await prismaClient.user.update({
+      where: { uid },
+      data: {
+        consentedAt: !user.consentedAt || isNewVersion ? new Date() : user.consentedAt,
+        consentVersion: version,
+      },
+      include: {
+        universityUser: true,
+      },
+    });
+
+    return {
+      consentedAt: updated.consentedAt,
+      consentVersion: updated.consentVersion,
     };
   }
 
