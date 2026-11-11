@@ -35,6 +35,18 @@ function buildServers(environment: NodeJS.ProcessEnv): JsonObject[] {
   return configured.map((url) => ({ url }));
 }
 
+/**
+ * Whether /api-docs and /api-docs.json are mounted.
+ * The docs list every admin and webhook route, so they are off in production
+ * by default. ENABLE_API_DOCS=true / false overrides in any environment.
+ */
+export function isApiDocsEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  const flag = environment.ENABLE_API_DOCS?.trim().toLowerCase();
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
+  return environment.NODE_ENV !== 'production';
+}
+
 export function buildOpenApiSpec(environment: NodeJS.ProcessEnv = process.env): JsonObject {
   return {
     openapi: '3.0.3',
@@ -45,9 +57,9 @@ export function buildOpenApiSpec(environment: NodeJS.ProcessEnv = process.env): 
         'REST API for **CU LibSpace**, Chulalongkorn University’s library seat booking system.',
         '',
         '**Authentication.** Most endpoints need a JWT in `Authorization: Bearer <token>`. Get one from:',
-        '- `POST /api/auth/login`: library users (Google-verified email)',
+        '- the Google OAuth redirect flow (`GET /api/auth/google?consent=true`), which hands the token to the frontend: the real user sign-in',
         '- `POST /api/auth/admin-login`: admins (email + password)',
-        '- the Google OAuth redirect flow (`GET /api/auth/google`), which hands the token to the frontend',
+        '- `POST /api/auth/login`: **dev/mock login with no verification** (any email gets a token): for local testing only',
         '',
         'Click **Authorize** and paste the token (without the `Bearer ` prefix).',
         '',

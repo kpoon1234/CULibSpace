@@ -107,6 +107,19 @@ export const schemas: JsonObject = {
       }),
       isProfileComplete: { type: 'boolean', example: true },
       behaviourScore: { type: 'integer', minimum: 0, maximum: 100, example: 100 },
+      consentedAt: nullable({
+        type: 'string',
+        format: 'date-time',
+        description:
+          'When the user accepted the Terms & PDPA (null = not yet). Returned by login and /me.',
+        example: '2026-11-11T07:00:00.000Z',
+      }),
+      consentVersion: nullable({
+        type: 'string',
+        maxLength: 20,
+        description: 'Terms & PDPA version the user accepted.',
+        example: '2026-11',
+      }),
       role: ref('AppRole'),
       userType: ref('UserType'),
       studentId: nullable({ type: 'string', pattern: '^\\d{10}$', example: '6731234521' }),

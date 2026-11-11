@@ -26,12 +26,25 @@ const loginBody = body(
         pattern: '^\\d{10}$',
         description: 'Optional; otherwise extracted from a 10-digit student email.',
       },
+      consent: {
+        type: 'boolean',
+        description:
+          'Terms & PDPA acceptance. Only `true` records consent (sets `consentedAt` if the user has none yet).',
+      },
+      consentVersion: {
+        type: 'string',
+        enum: ['2026-11'],
+        description:
+          'Optional. If sent, must equal the current consent version, otherwise 400. Sending a newer version than the one stored re-records consent.',
+      },
     },
   },
   {
     email: '6731234521@student.chula.ac.th',
     firstname: 'Somchai',
     lastname: 'Jaidee',
+    consent: true,
+    consentVersion: '2026-11',
   }
 );
 
@@ -40,8 +53,10 @@ const loginOperation = (operationId: string, summary: string, extra = ''): JsonO
   operationId,
   summary,
   description:
-    'Finds or creates the user by email, maps the role from the email domain, and returns a signed JWT. ' +
-    'The caller is expected to have already verified the email with Google.' +
+    '⚠️ **Dev / mock login — no verification.** The server does not check Google or any password: ' +
+    'it trusts the email in the body, finds or creates that user, maps the role from the email domain, and returns a signed JWT. ' +
+    'Anyone can obtain a token for any email this way, so do not build production features on it. ' +
+    'The real sign-in is the Google OAuth flow (`GET /api/auth/google`).' +
     extra,
   security: publicAccess,
   requestBody: loginBody,
@@ -59,12 +74,16 @@ const loginOperation = (operationId: string, summary: string, extra = ''): JsonO
         imageUrl: 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y',
         isProfileComplete: false,
         behaviourScore: 100,
+        consentedAt: '2026-11-11T07:00:00.000Z',
+        consentVersion: '2026-11',
         role: 'STUDENT',
         userType: 'UNIVERSITY',
         studentId: '6731234521',
       },
     }),
-    400: error('Missing required fields', { error: 'Email, firstname, and lastname are required' }),
+    400: error('Missing required fields, or wrong consent version', {
+      error: 'Email, firstname, and lastname are required',
+    }),
     500: R.internal,
   },
 });
@@ -105,14 +124,39 @@ export const authPaths: JsonObject = {
       operationId: 'googleOAuthStart',
       summary: 'Start Google OAuth sign-in',
       description:
-        'Browser redirect to Google’s consent screen (scopes: profile, email). Open in a browser — not callable from Swagger UI.',
+        'Browser redirect to Google’s sign-in screen (scopes: profile, email). The user must have accepted the Terms & PDPA first: ' +
+        'without `?consent=true` the server redirects to `{CLIENT_URL}/login?error=consent_required` instead. ' +
+        'The consent is carried through Google in the OAuth `state` and checked again in the callback. ' +
+        'Open in a browser — not callable from Swagger UI.',
       security: publicAccess,
-      responses: { 302: { description: 'Redirect to accounts.google.com' } },
+      parameters: [
+        {
+          name: 'consent',
+          in: 'query',
+          required: true,
+          description: 'Must be `true` (or `1`): the user accepted the Terms & PDPA.',
+          schema: { type: 'string', enum: ['true', '1'] },
+          example: 'true',
+        },
+      ],
+      responses: {
+        302: {
+          description:
+            'Redirect to accounts.google.com, or to `{CLIENT_URL}/login?error=consent_required` if consent is missing.',
+          headers: {
+            Location: {
+              schema: { type: 'string' },
+              example:
+                'https://accounts.google.com/o/oauth2/v2/auth?response_type=code&state=eyJjb25zZW50Ijp0cnVlfQ',
+            },
+          },
+        },
+      },
     },
     post: loginOperation(
       'loginGoogleAlias',
-      'Log in with a Google-verified profile (alias of /login)',
-      ' Identical to `POST /api/auth/login`.'
+      'Dev / mock login without verification (alias of /login)',
+      ' Identical to `POST /api/auth/login`, despite the `/google` path.'
     ),
   },
   '/api/auth/google/callback': {
@@ -121,7 +165,8 @@ export const authPaths: JsonObject = {
       operationId: 'googleOAuthCallback',
       summary: 'Google OAuth callback',
       description:
-        'Google redirects here after consent. On success, creates the session and redirects to `{CLIENT_URL}/auth/callback?token=<JWT>`; on failure, redirects to `{CLIENT_URL}/login`.',
+        'Google redirects here after sign-in. The `state` must carry the consent set by `GET /api/auth/google`; if it is missing or invalid, redirects to `{CLIENT_URL}/login?error=consent_required`. ' +
+        'On success, creates the session and redirects to `{CLIENT_URL}/auth/callback?token=<JWT>`; on a Google failure, redirects to `{CLIENT_URL}/login`.',
       security: publicAccess,
       parameters: [
         {
@@ -131,10 +176,19 @@ export const authPaths: JsonObject = {
           schema: { type: 'string' },
           description: 'OAuth authorization code from Google.',
         },
+        {
+          name: 'state',
+          in: 'query',
+          required: true,
+          schema: { type: 'string' },
+          description:
+            'base64url JSON `{ consent: true, timestamp }` created by `GET /api/auth/google` and echoed back by Google.',
+        },
       ],
       responses: {
         302: {
-          description: 'Redirect to the frontend',
+          description:
+            'Redirect to the frontend: `/auth/callback?token=…` on success, `/login?error=consent_required` without consent, `/login` on failure.',
           headers: {
             Location: {
               schema: { type: 'string' },
@@ -146,7 +200,62 @@ export const authPaths: JsonObject = {
     },
   },
   '/api/auth/login': {
-    post: loginOperation('login', 'Log in / register with a Google-verified profile'),
+    post: loginOperation('login', 'Dev / mock login without verification'),
+  },
+  '/api/auth/consent': {
+    post: {
+      tags: TAG,
+      operationId: 'recordConsent',
+      summary: 'Record my Terms & PDPA consent',
+      description:
+        'Saves that the signed-in user accepted the Terms & PDPA. `consentedAt` is set the first time, and set again when the version changes. ' +
+        'Re-accepting the same version keeps the original time. Admin tokens are rejected (no user ID).',
+      security: bearer,
+      requestBody: body(
+        {
+          type: 'object',
+          required: ['consent'],
+          properties: {
+            consent: { type: 'boolean', enum: [true], description: 'Must be `true`.' },
+            consentVersion: {
+              type: 'string',
+              enum: ['2026-11'],
+              description:
+                'Optional; defaults to the current version. Any other value is rejected.',
+            },
+          },
+        },
+        { consent: true, consentVersion: '2026-11' }
+      ),
+      responses: {
+        200: json(
+          'Consent recorded',
+          {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              consentedAt: { type: 'string', format: 'date-time' },
+              consentVersion: { type: 'string' },
+            },
+          },
+          {
+            success: true,
+            message: 'Consent recorded successfully',
+            consentedAt: '2026-11-11T07:00:00.000Z',
+            consentVersion: '2026-11',
+          }
+        ),
+        400: error('consent is not true, or wrong version', {
+          error: "Invalid consent version. Expected '2026-11'",
+        }),
+        401: error('Missing/invalid token, or an admin token', {
+          error: 'Unauthorized: User session required',
+        }),
+        404: error('User no longer exists', { error: 'User not found' }),
+        500: R.internal,
+      },
+    },
   },
   '/api/auth/admin-login': {
     post: {
