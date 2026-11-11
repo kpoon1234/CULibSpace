@@ -12,6 +12,7 @@
     "dev:frontend": "npm run dev --workspace=apps/frontend",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report",
+    "test:e2e:cleanup": "tsx e2e/cleanup.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:fresh": "docker compose up -d && npm run db:fresh --workspace=apps/backend"

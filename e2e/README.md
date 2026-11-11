@@ -9,8 +9,12 @@ against the dev servers and your local PostgreSQL database.
 npm install
 npx playwright install chromium
 npm run test:e2e          # starts the dev servers if they are not running
-npm run test:e2e:report   # open the HTML report
+npm run test:e2e:report   # open the HTML report (a video for every test)
+npm run test:e2e:cleanup  # delete the issues created by tests ("E2E ..."), local DB only
 ```
+
+`test:e2e:cleanup -- --dry-run` shows what would be deleted without deleting. It
+skips any test issue that is not Completed or still closes a table.
 
 If your local accounts differ from `apps/backend/prisma/seed.ts`, copy
 `e2e/.env.example` to `e2e/.env` and change the values.

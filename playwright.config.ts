@@ -23,7 +23,9 @@ export default defineConfig({
     baseURL: FRONTEND_URL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    // Every test is recorded (as on the earlier playwright-kaopoon branch), so the
+    // HTML report has a video for each test case.
+    video: 'on',
   },
   projects: [
     // Signs in once as admin and as a user, and saves the sessions for the other tests.
