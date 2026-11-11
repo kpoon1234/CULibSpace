@@ -8,6 +8,7 @@ import { TermsContent } from '@/components/Legal/TermsContent';
 import { PdpaContent } from '@/components/Legal/PdpaContent';
 import {
   API_URL,
+  CURRENT_CONSENT_VERSION,
   saveAuth,
   getAuthToken,
   getStoredUser,
@@ -187,7 +188,7 @@ function LoginPageContent() {
     try {
       sessionStorage.setItem(
         'culibspace_pending_consent',
-        JSON.stringify({ consent: true, version: '2026-11', timestamp: Date.now() })
+        JSON.stringify({ consent: true, version: CURRENT_CONSENT_VERSION, timestamp: Date.now() })
       );
     } catch {
       // Ignore sessionStorage restrictions

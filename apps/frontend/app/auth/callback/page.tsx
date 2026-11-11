@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { API_URL, saveAuth, type AuthUser } from '@/lib/auth';
+import { API_URL, CURRENT_CONSENT_VERSION, saveAuth, type AuthUser } from '@/lib/auth';
 
 function AuthCallbackContent() {
   const router = useRouter();
@@ -38,7 +38,7 @@ function AuthCallbackContent() {
 
         if (pendingConsent?.consent) {
           try {
-            await fetch(`${API_URL}/api/auth/consent`, {
+            const consentRes = await fetch(`${API_URL}/api/auth/consent`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -47,12 +47,21 @@ function AuthCallbackContent() {
               credentials: 'include',
               body: JSON.stringify({
                 consent: true,
-                consentVersion: pendingConsent.version || '2026-11',
+                consentVersion: pendingConsent.version || CURRENT_CONSENT_VERSION,
               }),
             });
+
+            if (!consentRes.ok) {
+              // If consent saving fails, keep the pending item and redirect to login
+              router.replace('/login?error=consent_required');
+              return;
+            }
+
             sessionStorage.removeItem('culibspace_pending_consent');
           } catch (e) {
             console.error('[auth/callback] Failed to record consent:', e);
+            router.replace('/login?error=consent_required');
+            return;
           }
         } else if (!user.consentedAt) {
           // If the user has never consented and did not check the boxes, redirect to consent error

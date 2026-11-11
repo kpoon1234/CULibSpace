@@ -64,10 +64,10 @@ export function TermsContent({ lang = 'en' }: LegalContentProps) {
             <li>
               อีเมล:{' '}
               <a
-                href="mailto:chulalibrary@car.chula.ac.th"
+                href="mailto:contact@culibspace.example"
                 className="text-claret-600 underline font-medium hover:text-claret-700"
               >
-                chulalibrary@car.chula.ac.th
+                contact@culibspace.example
               </a>
             </li>
             <li>หอสมุดกลาง สำนักงานวิทยทรัพยากร จุฬาลงกรณ์มหาวิทยาลัย</li>
@@ -135,10 +135,10 @@ export function TermsContent({ lang = 'en' }: LegalContentProps) {
         <p>
           If you have any questions about these terms, please contact us at{' '}
           <a
-            href="mailto:chulalibrary@car.chula.ac.th"
+            href="mailto:contact@culibspace.example"
             className="text-claret-600 underline font-medium hover:text-claret-700"
           >
-            chulalibrary@car.chula.ac.th
+            contact@culibspace.example
           </a>{' '}
           or Chulalongkorn University Central Library (Office of Academic Resources).
         </p>

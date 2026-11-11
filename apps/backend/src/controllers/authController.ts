@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AuthService } from '../services/authService.js';
+import { AuthService, CURRENT_CONSENT_VERSION } from '../services/authService.js';
 import { AuthenticatedRequest } from '../middlewares/authMiddleware.js';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
@@ -34,6 +34,17 @@ export class AuthController {
         res.status(400).json({
           success: false,
           error: 'Email, firstname, and lastname are required',
+        });
+        return;
+      }
+
+      if (
+        consentVersion !== undefined &&
+        (typeof consentVersion !== 'string' || consentVersion.trim() !== CURRENT_CONSENT_VERSION)
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`,
         });
         return;
       }
@@ -83,6 +94,17 @@ export class AuthController {
         res.status(400).json({
           success: false,
           error: 'Consent confirmation is required',
+        });
+        return;
+      }
+
+      if (
+        consentVersion !== undefined &&
+        (typeof consentVersion !== 'string' || consentVersion.trim() !== CURRENT_CONSENT_VERSION)
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`,
         });
         return;
       }

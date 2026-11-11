@@ -2,6 +2,8 @@ import { PrismaClient, UserType } from '@prisma/client';
 import { classifyEmail, AppRole } from '../utils/roleMapper.js';
 import { signJwt, AuthTokenPayload } from '../utils/jwt.js';
 
+export const CURRENT_CONSENT_VERSION = '2026-11';
+
 const prisma = new PrismaClient();
 
 export interface AuthenticateUserInput {
@@ -41,6 +43,18 @@ export class AuthService {
 
     let studentId: string | undefined;
 
+    if (
+      input.consentVersion !== undefined &&
+      (typeof input.consentVersion !== 'string' ||
+        input.consentVersion.trim() !== CURRENT_CONSENT_VERSION)
+    ) {
+      const error: any = new Error(
+        `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`
+      );
+      error.status = 400;
+      throw error;
+    }
+
     if (!user) {
       // First-time user creation: phone is optional until onboarding completion.
       // Save consentedAt ONLY when consent === true (Must Fix 1).
@@ -48,7 +62,7 @@ export class AuthService {
       const isProfileComplete = Boolean(phone);
       const consentedAt = input.consent === true ? new Date() : null;
       const consentVersion =
-        input.consent === true ? input.consentVersion?.trim() || '2026-11' : null;
+        input.consent === true ? input.consentVersion?.trim() || CURRENT_CONSENT_VERSION : null;
 
       if (classification.isUniversityMember) {
         studentId = input.studentId || classification.studentId;
@@ -93,14 +107,14 @@ export class AuthService {
         });
       }
     } else {
-      // Existing user: NEVER overwrite the first consent time (Must Fix 2).
-      // Keep the first consent date, and update consentVersion if provided.
+      // Existing user: NEVER overwrite the first consent time (Must Fix 2) UNLESS version changes.
+      // If accepting a new consentVersion, update consentedAt to new acceptance date.
       if (!user.consentedAt && input.consent === true) {
         user = await prismaClient.user.update({
           where: { uid: user.uid },
           data: {
             consentedAt: new Date(),
-            consentVersion: input.consentVersion?.trim() || '2026-11',
+            consentVersion: input.consentVersion?.trim() || CURRENT_CONSENT_VERSION,
           },
           include: {
             universityUser: true,
@@ -114,6 +128,7 @@ export class AuthService {
         user = await prismaClient.user.update({
           where: { uid: user.uid },
           data: {
+            consentedAt: new Date(),
             consentVersion: input.consentVersion.trim(),
           },
           include: {
@@ -223,7 +238,7 @@ export class AuthService {
    */
   static async recordConsent(
     uid: number,
-    consentVersion: string = '2026-11',
+    consentVersion: string = CURRENT_CONSENT_VERSION,
     prismaClient: any = prisma
   ) {
     const user = await prismaClient.user.findUnique({
@@ -236,11 +251,20 @@ export class AuthService {
       throw error;
     }
 
-    const version = consentVersion?.trim() || '2026-11';
+    const version = consentVersion?.trim() || CURRENT_CONSENT_VERSION;
+    if (version !== CURRENT_CONSENT_VERSION) {
+      const error: any = new Error(
+        `Invalid consent version. Expected '${CURRENT_CONSENT_VERSION}'`
+      );
+      error.status = 400;
+      throw error;
+    }
+
+    const isNewVersion = user.consentVersion !== version;
     const updated = await prismaClient.user.update({
       where: { uid },
       data: {
-        consentedAt: user.consentedAt || new Date(),
+        consentedAt: !user.consentedAt || isNewVersion ? new Date() : user.consentedAt,
         consentVersion: version,
       },
       include: {

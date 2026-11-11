@@ -76,19 +76,19 @@ export function PdpaContent({ lang = 'en' }: LegalContentProps) {
             <li>
               เจ้าหน้าที่คุ้มครองข้อมูลส่วนบุคคล (DPO):{' '}
               <a
-                href="mailto:dpo@chula.ac.th"
+                href="mailto:dpo@culibspace.example"
                 className="text-claret-600 underline font-medium hover:text-claret-700"
               >
-                dpo@chula.ac.th
+                dpo@culibspace.example
               </a>
             </li>
             <li>
               หอสมุดกลาง จุฬาลงกรณ์มหาวิทยาลัย:{' '}
               <a
-                href="mailto:chulalibrary@car.chula.ac.th"
+                href="mailto:contact@culibspace.example"
                 className="text-claret-600 underline font-medium hover:text-claret-700"
               >
-                chulalibrary@car.chula.ac.th
+                contact@culibspace.example
               </a>
             </li>
           </ul>
@@ -166,17 +166,17 @@ export function PdpaContent({ lang = 'en' }: LegalContentProps) {
           If you have any questions or wish to exercise your rights as a data subject, please
           contact our Data Protection Officer (DPO) at{' '}
           <a
-            href="mailto:dpo@chula.ac.th"
+            href="mailto:dpo@culibspace.example"
             className="text-claret-600 underline font-medium hover:text-claret-700"
           >
-            dpo@chula.ac.th
+            dpo@culibspace.example
           </a>{' '}
           or Central Library at{' '}
           <a
-            href="mailto:chulalibrary@car.chula.ac.th"
+            href="mailto:contact@culibspace.example"
             className="text-claret-600 underline font-medium hover:text-claret-700"
           >
-            chulalibrary@car.chula.ac.th
+            contact@culibspace.example
           </a>
           .
         </p>
