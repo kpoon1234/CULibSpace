@@ -89,6 +89,8 @@ passport.deserializeUser(async (uid: number, done) => {
       phone: user.phone,
       isProfileComplete: user.isProfileComplete,
       behaviourScore: Number(user.behaviourScore),
+      consentedAt: user.consentedAt,
+      consentVersion: user.consentVersion,
       role: classification.role,
       userType: user.userType,
       studentId: user.universityUser?.studentId,

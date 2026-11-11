@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { API_URL, saveAuth, type AuthUser } from '@/lib/auth';
+import { API_URL, CURRENT_CONSENT_VERSION, saveAuth, type AuthUser } from '@/lib/auth';
 
 function AuthCallbackContent() {
   const router = useRouter();
@@ -17,13 +17,60 @@ function AuthCallbackContent() {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
 
-        if (res.ok) {
-          const data = (await res.json()) as { user: AuthUser };
-          if (token) saveAuth(token, data.user);
-          router.replace(data.user.isProfileComplete ? '/' : '/onboarding');
-        } else {
+        if (!res.ok) {
           router.replace('/login');
+          return;
         }
+
+        const data = (await res.json()) as { user: AuthUser };
+        const user = data.user;
+
+        // Check for pending consent saved from login page before Google redirect (Must Fix 3)
+        let pendingConsent: { consent: boolean; version?: string } | null = null;
+        try {
+          const raw = sessionStorage.getItem('culibspace_pending_consent');
+          if (raw) {
+            pendingConsent = JSON.parse(raw);
+          }
+        } catch {
+          pendingConsent = null;
+        }
+
+        if (pendingConsent?.consent) {
+          try {
+            const consentRes = await fetch(`${API_URL}/api/auth/consent`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              credentials: 'include',
+              body: JSON.stringify({
+                consent: true,
+                consentVersion: pendingConsent.version || CURRENT_CONSENT_VERSION,
+              }),
+            });
+
+            if (!consentRes.ok) {
+              // If consent saving fails, keep the pending item and redirect to login
+              router.replace('/login?error=consent_required');
+              return;
+            }
+
+            sessionStorage.removeItem('culibspace_pending_consent');
+          } catch (e) {
+            console.error('[auth/callback] Failed to record consent:', e);
+            router.replace('/login?error=consent_required');
+            return;
+          }
+        } else if (!user.consentedAt) {
+          // If the user has never consented and did not check the boxes, redirect to consent error
+          router.replace('/login?error=consent_required');
+          return;
+        }
+
+        if (token) saveAuth(token, user);
+        router.replace(user.isProfileComplete ? '/' : '/onboarding');
       } catch {
         router.replace('/login');
       }

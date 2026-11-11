@@ -146,6 +146,18 @@
   --color-gray-800: var(--stone-800);
   --color-gray-900: var(--stone-900);
 
+  /* claret-* utility mapping (action color) */
+  --color-claret-50: var(--claret-50);
+  --color-claret-100: var(--claret-100);
+  --color-claret-200: var(--claret-200);
+  --color-claret-300: var(--claret-300);
+  --color-claret-400: var(--claret-400);
+  --color-claret-500: var(--claret-500);
+  --color-claret-600: var(--claret-600);
+  --color-claret-700: var(--claret-700);
+  --color-claret-800: var(--claret-800);
+  --color-claret-900: var(--claret-900);
+
   /* rose-* remapped to claret */
   --color-rose-50: var(--claret-50);
   --color-rose-100: var(--claret-100);
@@ -218,6 +230,15 @@ body {
 /* Numerals in data positions should not jitter as values change. */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Self-contained muted panel (DESIGN.md):
+ * Used to demote secondary flows or group consent checkboxes cleanly.
+ */
+.panel-muted {
+  background-color: var(--stone-50);
+  border: 1px solid var(--stone-200);
 }
 
 /*
