@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
-import { verifyStoredSession } from '../lib/auth';
+import { resolveApiUrl, verifyStoredSession } from '../lib/auth';
 
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const originalNextPublicApiUrl = process.env.NEXT_PUBLIC_API_URL;
 let values: Map<string, string>;
 
 /** An unsigned JWT-shaped token; only the client-side `exp` read matters here. */
@@ -36,6 +38,10 @@ afterEach(() => {
   mock.restoreAll();
   if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
   else Reflect.deleteProperty(globalThis, 'localStorage');
+  if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+  else Reflect.deleteProperty(globalThis, 'window');
+  if (originalNextPublicApiUrl === undefined) delete process.env.NEXT_PUBLIC_API_URL;
+  else process.env.NEXT_PUBLIC_API_URL = originalNextPublicApiUrl;
 });
 
 test('no stored token is invalid without asking the server', async () => {
@@ -94,4 +100,22 @@ test('an unreachable or failing server leaves the session alone', async () => {
     throw new TypeError('fetch failed');
   });
   assert.equal(await verifyStoredSession(), 'unknown');
+});
+
+test('resolveApiUrl uses same-origin relative path on remote domains and respects explicit empty env', () => {
+  Object.defineProperty(globalThis, 'window', {
+    value: { location: { hostname: 'culibspace.andyntk.online' } },
+    configurable: true,
+  });
+  process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8080';
+  assert.equal(resolveApiUrl(), '');
+
+  Object.defineProperty(globalThis, 'window', {
+    value: { location: { hostname: 'localhost' } },
+    configurable: true,
+  });
+  assert.equal(resolveApiUrl(), 'http://localhost:8080');
+
+  process.env.NEXT_PUBLIC_API_URL = '';
+  assert.equal(resolveApiUrl(), '');
 });

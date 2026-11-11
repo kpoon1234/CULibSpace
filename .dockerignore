@@ -1,0 +1,32 @@
+# Version control and CI
+.git
+.github
+
+# Dependencies and build artifacts
+node_modules
+apps/*/node_modules
+.next
+apps/*/.next
+dist
+apps/*/dist
+out
+apps/*/out
+output
+coverage
+*.tsbuildinfo
+
+# Local secrets and environment files (inject at runtime only)
+.env
+.env.*
+apps/*/.env
+apps/*/.env.*
+!.env.example
+!apps/*/.env.example
+
+# Docs and editor/agent scratch files
+docs
+.agent
+.claude
+.impeccable
+.kilo
+.DS_Store
