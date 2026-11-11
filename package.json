@@ -35,6 +35,10 @@
     "proxy-addr": "2.0.8",
     "body-parser": "2.4.0",
     "qs": "6.16.2",
-    "deepmerge-ts": "^8.0.2"
+    "deepmerge-ts": "^8.0.2",
+    "uri-js": "npm:uri-js-replace@^1.0.2",
+    "@next/eslint-plugin-next": {
+      "fast-glob": "npm:tinyglobby@^0.2.17"
+    }
   }
 }
