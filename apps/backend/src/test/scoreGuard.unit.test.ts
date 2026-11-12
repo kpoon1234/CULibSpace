@@ -6,14 +6,18 @@ describe('Unit Test: ScoreGuard.enforceMinScore (US5-3)', () => {
   it('TC-01: should allow reservation when fetched user score is above minScoreToBook (75 >= 50)', async () => {
     const mockPrisma = {
       systemConfig: {
-        findFirst: jest.fn<() => Promise<{ minScoreToBook: number }>>().mockResolvedValue({
-          minScoreToBook: 50,
-        }),
+        findFirst: jest
+          .fn<(...args: unknown[]) => Promise<{ minScoreToBook: number }>>()
+          .mockResolvedValue({
+            minScoreToBook: 50,
+          }),
       },
       user: {
-        findUnique: jest.fn<() => Promise<{ behaviourScore: number }>>().mockResolvedValue({
-          behaviourScore: 75,
-        }),
+        findUnique: jest
+          .fn<(...args: unknown[]) => Promise<{ behaviourScore: number }>>()
+          .mockResolvedValue({
+            behaviourScore: 75,
+          }),
       },
     };
 
