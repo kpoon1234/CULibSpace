@@ -145,6 +145,9 @@ export default function IssueReportModal({ location, source, onClose }: IssueRep
                 setDetails(event.target.value);
                 setValidationError(null);
               }}
+              onBlur={() => {
+                setValidationError(validateDetails(details));
+              }}
               placeholder="Describe the issue..."
               className="w-full resize-none rounded-xl bg-gray-200 px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
