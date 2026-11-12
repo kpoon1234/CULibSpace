@@ -11,7 +11,8 @@
     "dev:frontend": "npm run dev --workspace=apps/frontend",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:fresh": "docker compose up -d && npm run db:fresh --workspace=apps/backend"
+    "db:fresh": "docker compose up -d && npm run db:fresh --workspace=apps/backend",
+    "test:jest": "npm run test:jest --workspace=apps/backend"
   },
   "lint-staged": {
     "apps/**/*.{js,jsx,ts,tsx,json,css,md}": [
