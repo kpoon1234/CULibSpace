@@ -10,9 +10,17 @@ import { FloorPlanView } from '@/components/FloorPlan';
 // with a retry button instead of the plan.
 export default function ZonesPreviewPage() {
   const router = useRouter();
-  const token = useSyncExternalStore(subscribeToAuth, getAuthToken, () => null);
+  // `undefined` on the server and the first hydration pass, before localStorage has
+  // been read. Treating that as "signed out" redirected every direct load or refresh
+  // of /zones to /login (same approach as useAdminGuard).
+  const token = useSyncExternalStore<string | null | undefined>(
+    subscribeToAuth,
+    getAuthToken,
+    () => undefined
+  );
 
   useEffect(() => {
+    if (token === undefined) return;
     if (!token) {
       router.replace('/login');
       return;
