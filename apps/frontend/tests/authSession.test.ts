@@ -102,20 +102,24 @@ test('an unreachable or failing server leaves the session alone', async () => {
   assert.equal(await verifyStoredSession(), 'unknown');
 });
 
-test('resolveApiUrl uses same-origin relative path on remote domains and respects explicit empty env', () => {
-  Object.defineProperty(globalThis, 'window', {
-    value: { location: { hostname: 'culibspace.andyntk.online' } },
-    configurable: true,
-  });
-  process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8080';
-  assert.equal(resolveApiUrl(), '');
+test('resolveApiUrl respects configured URLs, same-origin and defaults on every hostname', () => {
+  for (const hostname of ['culibspace.example.com', 'localhost', '127.0.0.1', undefined]) {
+    if (hostname) {
+      Object.defineProperty(globalThis, 'window', {
+        value: { location: { hostname } },
+        configurable: true,
+      });
+    } else {
+      Reflect.deleteProperty(globalThis, 'window');
+    }
 
-  Object.defineProperty(globalThis, 'window', {
-    value: { location: { hostname: 'localhost' } },
-    configurable: true,
-  });
-  assert.equal(resolveApiUrl(), 'http://localhost:8080');
+    process.env.NEXT_PUBLIC_API_URL = 'https://api.culibspace.example.com';
+    assert.equal(resolveApiUrl(), 'https://api.culibspace.example.com');
 
-  process.env.NEXT_PUBLIC_API_URL = '';
-  assert.equal(resolveApiUrl(), '');
+    process.env.NEXT_PUBLIC_API_URL = '';
+    assert.equal(resolveApiUrl(), '');
+
+    delete process.env.NEXT_PUBLIC_API_URL;
+    assert.equal(resolveApiUrl(), 'http://localhost:8080');
+  }
 });

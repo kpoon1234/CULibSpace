@@ -6,7 +6,10 @@ const internalApiUrl = (process.env.INTERNAL_API_URL || 'http://localhost:8080')
 );
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ['culibspace.andyntk.online', '*.trycloudflare.com'],
+  allowedDevOrigins: (process.env.ALLOWED_DEV_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   async rewrites() {
     return [
       {

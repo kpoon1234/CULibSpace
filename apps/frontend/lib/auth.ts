@@ -1,15 +1,6 @@
-// Use same-origin relative /api/* paths when accessed remotely (e.g. Cloudflare Tunnel)
-// or when NEXT_PUBLIC_API_URL is explicitly set to "". Locally without .env, fall back to localhost:8080.
+// An explicit empty URL selects same-origin /api/* rewrites (Docker).
+// Respect a configured backend URL on every hostname, including split-domain deployments.
 export function resolveApiUrl(): string {
-  if (typeof window !== 'undefined') {
-    const isLocalhost =
-      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-    if (!isLocalhost) {
-      return '';
-    }
-  }
-
   return process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
 }
 

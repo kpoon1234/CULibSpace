@@ -111,7 +111,7 @@ async function main() {
   });
   console.log('✅ Seeded System Configuration');
 
-  // 4. Seed Admin Accounts (Password: admin)
+  // 4. Seed Admin Accounts (Password: admin@example)
   const admin1 = await prisma.admin.create({
     data: {
       adminId: 1,
@@ -131,7 +131,9 @@ async function main() {
       lastname: 'Jaidee',
     },
   });
-  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: admin)`);
+  console.log(
+    `✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: admin@example)`
+  );
 
   // 5. Seed Zones
   const zoneSilent = await prisma.zone.create({
@@ -546,7 +548,7 @@ async function main() {
   console.log('✅ Synchronized all PostgreSQL autoincrement sequences.');
 
   console.log(
-    '🎉 Database seeding completed successfully! Admin Login: admin@chula.ac.th / "admin"'
+    '🎉 Database seeding completed successfully! Admin Login: admin@chula.ac.th / "admin@example"'
   );
 }
 

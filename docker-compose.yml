@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-culibspace}
     # Security: ผูกกับ Loopback Interface (127.0.0.1) เท่านั้น เพื่อป้องกันไม่ให้
     # Docker แทรกลง iptables ทะลุ UFW Firewall บน Ubuntu ออกสู่อินเทอร์เน็ตสาธารณะ
@@ -50,7 +50,7 @@ services:
       - apps/backend/.env
     environment:
       # เชื่อมต่อไปยัง postgres container ภายในวงเน็ตเวิร์กของ Docker
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-culibspace}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-culibspace}?schema=public
     # คำสั่งรัน Migration ไปยัง Database
     command: ["npx", "prisma", "migrate", "deploy"]
 
@@ -74,8 +74,10 @@ services:
     env_file:
       - apps/backend/.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-culibspace}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-culibspace}?schema=public
       PORT: 8080
+      # Trust forwarded HTTPS headers only from this deployment's Docker network.
+      TRUST_PROXY: ${DOCKER_SUBNET:-172.30.85.0/24}
     # Network Isolation: ไม่เปิด Port 8080 ออกสู่ Host หรือภายนอก
     # Backend จะสื่อสารเฉพาะกับ Frontend ภายในวง Private Network ของ Docker เท่านั้น
     healthcheck:
@@ -144,8 +146,14 @@ services:
     mem_limit: 512m
 
 # ------------------------------------------------------------------------------
-# Persistent Volumes Configuration
+# Dedicated Network & Persistent Volumes
 # ------------------------------------------------------------------------------
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.30.85.0/24}
+
 volumes:
   # กำหนดชื่อ Volume เป็น 'culibspace_postgres_data' อย่างชัดเจน
   # ป้องกันไม่ให้ Docker สร้าง Volume ใหม่หากผู้ใช้นำไป clone ไว้ในโฟลเดอร์ชื่ออื่น
