@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
+import { API_URL, getAuthToken, saveAuth, type AuthUser } from '@/lib/auth';
 import { getExtraIdFields, getProfileFields } from '@/lib/fieldLock';
 import { useProfileModal } from '@/lib/profileModalContext';
 
@@ -35,12 +35,9 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
     }
 
     async function loadUser() {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/auth/me`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const res = await fetch(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (!res.ok) {
         router.replace('/login');
@@ -94,21 +91,18 @@ export default function ProfileContent({ onClose }: ProfileContentProps) {
       // Photo upload is still UI-only: the API can set an imageUrl string,
       // but there's no file-storage endpoint yet to turn the local file the
       // user picked into a hosted URL, so it can't be sent along here.
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/profile`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            firstname: firstname.trim(),
-            lastname: lastname.trim(),
-            phone,
-          }),
-        }
-      );
+      const res = await fetch(`${API_URL}/api/profile`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          firstname: firstname.trim(),
+          lastname: lastname.trim(),
+          phone,
+        }),
+      });
 
       const data = await res.json();
       if (!res.ok || !data.success) {

@@ -10,6 +10,25 @@ import {
 const prisma = new PrismaClient();
 
 async function main() {
+  const forceSeed = process.env.FORCE_SEED === 'true';
+
+  // Safeguard: Check if database has already been initialized (e.g. admin accounts or zones exist)
+  // This prevents accidental re-seeding from wiping persistent user data, bookings, and tickets!
+  const [existingAdminCount, existingZoneCount] = await Promise.all([
+    prisma.admin.count().catch(() => 0),
+    prisma.zone.count().catch(() => 0),
+  ]);
+
+  if (!forceSeed && (existingAdminCount > 0 || existingZoneCount > 0)) {
+    console.log(
+      'ℹ️ Database already initialized (found existing admins/zones). Skipping seed to preserve persistent data.'
+    );
+    console.log(
+      '💡 Tip: Set FORCE_SEED=true if you intentionally want to wipe and re-seed the database.'
+    );
+    return;
+  }
+
   console.log('🌱 Seeding CU LibSpace database with comprehensive developer test dataset...');
 
   // 1. Clean existing data in reverse dependency order
@@ -92,7 +111,7 @@ async function main() {
   });
   console.log('✅ Seeded System Configuration');
 
-  // 4. Seed Admin Accounts (Password: admin)
+  // 4. Seed Admin Accounts (Password: admin@example)
   const admin1 = await prisma.admin.create({
     data: {
       adminId: 1,
@@ -112,7 +131,9 @@ async function main() {
       lastname: 'Jaidee',
     },
   });
-  console.log(`✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: admin)`);
+  console.log(
+    `✅ Seeded 2 Admins: ${admin1.firstname}, ${admin2.firstname} (Password: admin@example)`
+  );
 
   // 5. Seed Zones
   const zoneSilent = await prisma.zone.create({
@@ -527,7 +548,7 @@ async function main() {
   console.log('✅ Synchronized all PostgreSQL autoincrement sequences.');
 
   console.log(
-    '🎉 Database seeding completed successfully! Admin Login: admin@chula.ac.th / "admin"'
+    '🎉 Database seeding completed successfully! Admin Login: admin@chula.ac.th / "admin@example"'
   );
 }
 
