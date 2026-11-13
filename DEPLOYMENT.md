@@ -19,6 +19,8 @@ This setup maps container port `3000` of `frontend` to host port `127.0.0.1:6400
 cp .env.example .env
 ```
 
+For local development, also copy the root `.env.example` to `.env` and set `POSTGRES_PASSWORD=postgres` before `npm run db:up` or `npm run db:fresh`, matching the local `DATABASE_URL` in `apps/backend/.env.example`; use a strong password for production.
+
 Recommended overrides in `.env`:
 
 ```env
