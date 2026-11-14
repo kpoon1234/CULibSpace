@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "build:dist": "tsc -p tsconfig.build.json",
     "test": "tsx src/test/test_express_security.ts && tsx src/test/test_prisma_deepmerge_security.ts && tsx src/test/test_openapi_spec.ts && tsx src/test/test_unit.ts && tsx src/test/test_admin_score.ts && tsx src/test/test_admin_user_search.ts && tsx src/test/test_admin_audit_logs.ts && tsx src/test/test_checkin_window.ts && tsx src/test_cancel_booking.ts && tsx src/test/test_noshow_worker.ts && tsx src/test/test_score_concurrency.ts && tsx src/test/test_score_guard.ts && tsx src/test/test_completion_worker.ts && tsx src/test/test_ticket_purchase.ts && tsx src/test/test_ticket_history.ts && tsx src/test/test_payment_confirmation.ts && tsx src/test/test_issue_management.ts && tsx src/test/test_facility_availability.ts && tsx src/test/test_lock_expiration.ts && tsx src/test/test_booking_policy_config.ts && tsx src/test/test_admin_issue_update.ts && tsx src/test/test_booking_policy.ts && tsx src/test/test_saved_schedules.ts && tsx src/test/test_admin_schedule.ts",
     "test:security": "tsx src/test/test_express_security.ts",
     "test:prisma-security": "tsx src/test/test_prisma_deepmerge_security.ts",
@@ -21,7 +22,8 @@
     "db:fresh": "prisma migrate reset --force",
     "test:issues": "tsx src/test/test_issue_management.ts && tsx src/test/test_admin_issue_update.ts && tsx src/test/test_facility_availability.ts",
     "test:issues:integration": "tsx src/test/test_admin_issue_update_integration.ts",
-    "test:openapi": "tsx src/test/test_openapi_spec.ts"
+    "test:openapi": "tsx src/test/test_openapi_spec.ts",
+    "test:jest": "node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config jest.config.cjs --coverage"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -37,16 +39,20 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "@jest/globals": "^30.5.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/express-session": "^1.19.0",
+    "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.4.0",
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.17",
     "@types/swagger-ui-express": "^4.1.8",
+    "jest": "^30.5.2",
     "prisma": "^6.19.3",
+    "ts-jest": "^29.4.15",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.12",
     "typescript": "^5.9.3"

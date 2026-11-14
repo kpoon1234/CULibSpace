@@ -1,21 +1,162 @@
+# ==============================================================================
+# CULibSpace Docker Compose Configuration (Production Architecture)
+# ==============================================================================
+
 services:
+  # ----------------------------------------------------------------------------
+  # 1. Database Service: PostgreSQL 16
+  # ----------------------------------------------------------------------------
   postgres:
+    # ใช้อิมเมจ PostgreSQL 16 บน Alpine Linux (ขนาดเล็ก ประสิทธิภาพสูง)
     image: postgres:16-alpine
     container_name: culibspace_postgres
-    restart: always
+    # ให้ Container รีสตาร์ทอัตโนมัติหากเกิดข้อผิดพลาดหรือระบบรีบูต (ยกเว้นสั่งหยุดเอง)
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: culibspace
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-culibspace}
+    # Security: ผูกกับ Loopback Interface (127.0.0.1) เท่านั้น เพื่อป้องกันไม่ให้
+    # Docker แทรกลง iptables ทะลุ UFW Firewall บน Ubuntu ออกสู่อินเทอร์เน็ตสาธารณะ
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    # เชื่อมโยงไดเรกทอรีเก็บข้อมูลของ Postgres เข้ากับ Named Volume ด้านล่าง
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # ตรวจสอบความพร้อมของฐานข้อมูลว่าพร้อมรับ Connection แล้วหรือยังก่อนเริ่ม Service ถัดไป
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d culibspace"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-culibspace}"]
       interval: 5s
       timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------------------------
+  # 2. Migration Service: Prisma Migrate Deploy (One-Shot Container)
+  # ----------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      # ใช้ stage 'builder' ซึ่งมี Prisma CLI และ Schema พร้อมใช้งาน
+      target: builder
+    container_name: culibspace_migrate
+    # รันเสร็จแล้วให้จบการทำงานทันที ไม่ต้องรีสตาร์ทขึ้นมาใหม่
+    restart: "no"
+    depends_on:
+      postgres:
+        # รอจนกระทั่ง Database ผ่าน Healthcheck ก่อนเริ่ม Migrate
+        condition: service_healthy
+    env_file:
+      - apps/backend/.env
+    environment:
+      # เชื่อมต่อไปยัง postgres container ภายในวงเน็ตเวิร์กของ Docker
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-culibspace}?schema=public
+    # คำสั่งรัน Migration ไปยัง Database
+    command: ["npx", "prisma", "migrate", "deploy"]
+
+  # ----------------------------------------------------------------------------
+  # 3. Backend Service: Express.js REST API
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      # ใช้ stage 'runtime' ที่มีเฉพาะ Production dependencies และโค้ด JS ที่ build แล้ว
+      target: runtime
+    container_name: culibspace_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        # รอจนกว่าคำสั่ง Migrate จะรันสำเร็จเรียบร้อยก่อนเปิด Backend
+        condition: service_completed_successfully
+    env_file:
+      - apps/backend/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-culibspace}?schema=public
+      PORT: 8080
+      # Trust forwarded HTTPS headers only from this deployment's Docker network.
+      TRUST_PROXY: ${DOCKER_SUBNET:-172.30.85.0/24}
+    # Network Isolation: ไม่เปิด Port 8080 ออกสู่ Host หรือภายนอก
+    # Backend จะสื่อสารเฉพาะกับ Frontend ภายในวง Private Network ของ Docker เท่านั้น
+    healthcheck:
+      # ยิง HTTP Request เช็คความพร้อมของ Backend ผ่าน endpoint /api/hello
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/hello').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 10s
+    # DevSecOps Hardening: ปลด Linux Kernel Capabilities ทั้งหมดที่ไม่จำเป็นทิ้ง
+    cap_drop:
+      - ALL
+    # ป้องกันไม่ให้ Process ใน Container ยกระดับสิทธิ์ตัวเองได้ (Privilege Escalation Protection)
+    security_opt:
+      - no-new-privileges:true
+    # กำหนดเพดานการใช้หน่วยความจำสูงสุด 512MB เพื่อป้องกันไม่ให้ Memory Leak ดึงแรมเครื่อง Host จนค้าง
+    mem_limit: 512m
+
+  # ----------------------------------------------------------------------------
+  # 4. Frontend Service: Next.js (SSR & Reverse Proxy)
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      target: runtime
+      args:
+        # กำหนดให้ Client เรียก API ผ่าน Same-Origin และ Forward ไปยัง Backend ภายใน
+        NEXT_PUBLIC_API_URL: ""
+        INTERNAL_API_URL: http://backend:8080
+    container_name: culibspace_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        # รอจนกว่า Backend จะเปิดและผ่าน Healthcheck
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      INTERNAL_API_URL: http://backend:8080
+    # ผูกเข้ากับ Loopback IP (127.0.0.1) พอร์ต 64000 สำหรับให้ Cloudflare Tunnel หรือ Nginx เชื่อมต่อเข้ามา
+    ports:
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-64000}:3000"
+    healthcheck:
+      # ยิง Request เช็คว่า Next.js พร้อมให้บริการหน้าแรกหรือยัง
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+# ------------------------------------------------------------------------------
+# Dedicated Network & Persistent Volumes
+# ------------------------------------------------------------------------------
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.30.85.0/24}
 
 volumes:
+  # กำหนดชื่อ Volume เป็น 'culibspace_postgres_data' อย่างชัดเจน
+  # ป้องกันไม่ให้ Docker สร้าง Volume ใหม่หากผู้ใช้นำไป clone ไว้ในโฟลเดอร์ชื่ออื่น
+  # ข้อมูลในฐานข้อมูลจะอยู่ครบถ้วนแม้สั่ง 'docker compose down'
   postgres_data:
+    name: culibspace_postgres_data

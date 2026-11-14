@@ -1,0 +1,42 @@
+# ==============================================================================
+# CULibSpace .dockerignore
+# ระบุไฟล์และโฟลเดอร์ที่ไม่ต้องส่งเข้าไปใน Docker Build Context
+# ช่วยลดขนาด Context, เพิ่มความเร็วในการ build, และป้องกัน Secret รั่วไหล
+# ==============================================================================
+
+# 1. Version Control & CI/CD Metadata
+# ไม่มีความจำเป็นต่อการ Build และลดขนาด Context ได้มหาศาล
+.git
+.github
+
+# 2. Dependencies & Build Artifacts ของเครื่อง Host
+# ป้องกันไม่ให้ node_modules หรือ dist บนเครื่อง Host ปนเปื้อนเข้าไปใน Linux Container
+node_modules
+apps/*/node_modules
+.next
+apps/*/.next
+dist
+apps/*/dist
+out
+apps/*/out
+output
+coverage
+*.tsbuildinfo
+
+# 3. Environment & Secret Files (Security Rule)
+# ป้องกันการเผลอ Copy API Keys / Passwords เข้าไปฝังใน Docker Image Layers
+# ค่าทั้งหมดจะถูกส่งผ่าน Environment Variables หรือ Volume ตอน Runtime เท่านั้น
+.env
+.env.*
+apps/*/.env
+apps/*/.env.*
+!.env.example
+!apps/*/.env.example
+
+# 4. เอกสารและไฟล์ชั่วคราวของ IDE / Editor / AI Agents
+docs
+.agent
+.claude
+.impeccable
+.kilo
+.DS_Store

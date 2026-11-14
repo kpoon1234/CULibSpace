@@ -3,6 +3,7 @@ node_modules/
 .next/
 dist/
 out/
+coverage/
 
 # Environment & Database
 .env
