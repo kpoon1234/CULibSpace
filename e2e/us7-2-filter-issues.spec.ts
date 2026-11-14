@@ -1,15 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ADMIN_STATE } from './helpers/auth';
-import {
-  findIssueId,
-  updateIssue,
-  type IssueStatus,
-} from './helpers/adminApi';
-import {
-  reportIssueAsUser,
-  type ReportedTable,
-} from './helpers/issues';
+import { findIssueId, updateIssue, type IssueStatus } from './helpers/adminApi';
+import { reportIssueAsUser, type ReportedTable } from './helpers/issues';
 
 test.use({ storageState: ADMIN_STATE });
 test.setTimeout(90_000);
@@ -73,35 +66,25 @@ function ownRow(page: Page, issue: OwnIssue) {
 }
 
 async function ready(page: Page) {
-  await expect(
-    page.getByRole('button', { name: 'Refresh', exact: true })
-  ).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await expect(page.locator('#main-content').getByRole('alert')).toHaveCount(0);
 }
 
 async function openIssues(page: Page) {
   await page.goto('/admin/issues');
-  await expect(
-    page.getByRole('heading', { name: 'Reported issues', exact: true })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reported issues', exact: true })).toBeVisible();
   await ready(page);
 }
 
 // Wait for the request for the intended filter, including the search debounce.
 // No fixed sleep and no assumption about the total number of database rows.
-async function filter(
-  page: Page,
-  next: { q?: string; status?: IssueStatus | '' }
-) {
+async function filter(page: Page, next: { q?: string; status?: IssueStatus | '' }) {
   const search = page.getByLabel('Search description or table number');
   const status = page.getByLabel('Filter by status');
   const q = next.q ?? (await search.inputValue());
   const selected = next.status ?? (await status.inputValue());
 
-  if (
-    q === (await search.inputValue()) &&
-    selected === (await status.inputValue())
-  ) {
+  if (q === (await search.inputValue()) && selected === (await status.inputValue())) {
     await ready(page);
     return;
   }
@@ -125,10 +108,7 @@ async function filter(
   await ready(page);
 }
 
-async function inspectEveryPage(
-  page: Page,
-  inspect: (row: Locator) => Promise<void>
-) {
+async function inspectEveryPage(page: Page, inspect: (row: Locator) => Promise<void>) {
   await expect(rows(page).first()).toBeVisible();
 
   while (true) {
@@ -149,18 +129,13 @@ async function inspectEveryPage(
   }
 }
 
-test('TC-7.2-01 every displayed issue has its required information', async ({
-  page,
-}) => {
+test('TC-7.2-01 every displayed issue has its required information', async ({ page }) => {
   await openIssues(page);
 
   await inspectEveryPage(page, async (row) => {
-    await expect(row.getByRole('heading', { name: /^Issue #\d+$/ }))
-      .toBeVisible();
+    await expect(row.getByRole('heading', { name: /^Issue #\d+$/ })).toBeVisible();
     await expect(row.locator('p').first()).toHaveText(/\S/);
-    await expect(row.getByText(/^Reported /).first()).toHaveText(
-      /^Reported .+\d/
-    );
+    await expect(row.getByText(/^Reported /).first()).toHaveText(/^Reported .+\d/);
     await expect(row.getByText(/^Table \d+ · Zone \d+/)).toBeVisible();
     await expect(row.getByRole('combobox')).toHaveValue(/^(Pending|In Progress|Completed)$/);
   });
@@ -187,20 +162,18 @@ for (const [index, status] of STATUSES.entries()) {
     }
 
     await inspectEveryPage(page, async (row) => {
-        await expect(row.getByRole('combobox')).toHaveValue(status);
+      await expect(row.getByRole('combobox')).toHaveValue(status);
 
-        await expect(
-            row.locator('span').filter({
-                hasText: new RegExp(`^${status}$`),
-            })
-        ).toBeVisible();
+      await expect(
+        row.locator('span').filter({
+          hasText: new RegExp(`^${status}$`),
+        })
+      ).toBeVisible();
     });
   });
 }
 
-test('TC-7.2-06 All statuses brings the pending issue back', async ({
-  page,
-}) => {
+test('TC-7.2-06 All statuses brings the pending issue back', async ({ page }) => {
   await openIssues(page);
   await filter(page, { q: marker, status: 'Completed' });
   await expect(ownRow(page, ownIssues[0])).toHaveCount(0);
@@ -211,9 +184,7 @@ test('TC-7.2-06 All statuses brings the pending issue back', async ({
   }
 });
 
-test('TC-7.2-07 description search returns matching issues only', async ({
-  page,
-}) => {
+test('TC-7.2-07 description search returns matching issues only', async ({ page }) => {
   await openIssues(page);
   await filter(page, { q: ownIssues[0].text });
 
@@ -227,18 +198,14 @@ test('TC-7.2-07 description search returns matching issues only', async ({
   }
 });
 
-test('TC-7.2-08 table number search returns issues for that table', async ({
-  page,
-}) => {
+test('TC-7.2-08 table number search returns issues for that table', async ({ page }) => {
   await openIssues(page);
   const tableId = ownIssues[0].table.tableId;
   await filter(page, { q: String(tableId) });
 
   await expect(ownRow(page, ownIssues[0])).toBeVisible();
   await inspectEveryPage(page, async (row) => {
-    await expect(
-      row.getByText(new RegExp(`^Table ${tableId} · Zone \\d+`))
-    ).toBeVisible();
+    await expect(row.getByText(new RegExp(`^Table ${tableId} · Zone \\d+`))).toBeVisible();
   });
 });
 
@@ -247,8 +214,7 @@ test('TC-7.2-09 unmatched search shows the empty state', async ({ page }) => {
   await filter(page, { q: `zz-no-match-${randomUUID()}` });
 
   await expect(rows(page)).toHaveCount(0);
-  await expect(page.getByText('No issues found.', { exact: true }))
-    .toBeVisible();
+  await expect(page.getByText('No issues found.', { exact: true })).toBeVisible();
 });
 
 test('TC-7.2-10 search and status must both match', async ({ page }) => {
@@ -260,6 +226,5 @@ test('TC-7.2-10 search and status must both match', async ({ page }) => {
 
   await filter(page, { status: 'Completed' });
   await expect(rows(page)).toHaveCount(0);
-  await expect(page.getByText('No issues found.', { exact: true }))
-    .toBeVisible();
+  await expect(page.getByText('No issues found.', { exact: true })).toBeVisible();
 });

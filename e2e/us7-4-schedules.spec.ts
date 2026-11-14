@@ -1,11 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Locator,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { ADMIN_STATE, testEnv } from './helpers/auth';
 import { adminToken } from './helpers/adminApi';
 
@@ -44,9 +38,11 @@ const schedules = (page: Page) =>
   page.getByRole('region', { name: 'Operating schedules', exact: true });
 
 function row(page: Page, scheduleName: string) {
-  return schedules(page).getByRole('row').filter({
-    has: page.getByRole('cell', { name: scheduleName, exact: true }),
-  });
+  return schedules(page)
+    .getByRole('row')
+    .filter({
+      has: page.getByRole('cell', { name: scheduleName, exact: true }),
+    });
 }
 
 async function listSchedules(request: APIRequestContext): Promise<Schedule[]> {
@@ -95,24 +91,19 @@ test.beforeEach(async ({ page, request }) => {
 
   await page.goto('/admin/settings');
   await expect(schedules(page)).toBeVisible();
-  await expect(
-    schedules(page).getByRole('button', { name: 'Refresh', exact: true })
-  ).toBeEnabled();
+  await expect(schedules(page).getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
 });
 
 test.afterEach(async ({ request }) => {
   // Query by this test's unique prefix, so cleanup still finds records
   // when the UI assertion failed after the server saved them.
-  const owned = (await listSchedules(request)).filter(
-    (schedule) => schedule.name.startsWith(`${prefix} `)
+  const owned = (await listSchedules(request)).filter((schedule) =>
+    schedule.name.startsWith(`${prefix} `)
   );
 
   const failures: string[] = [];
   for (const schedule of owned) {
-    const response = await request.delete(
-      `${API}/${schedule.scheduleId}`,
-      { headers: headers() }
-    );
+    const response = await request.delete(`${API}/${schedule.scheduleId}`, { headers: headers() });
     if (!response.ok() && response.status() !== 404) {
       failures.push(`${schedule.scheduleId}: ${await response.text()}`);
     }
@@ -121,10 +112,7 @@ test.afterEach(async ({ request }) => {
   expect(failures, 'Schedule cleanup failed').toEqual([]);
 });
 
-async function openForm(
-  page: Page,
-  overrides: Partial<Draft> = {}
-): Promise<Locator> {
+async function openForm(page: Page, overrides: Partial<Draft> = {}): Promise<Locator> {
   const draft: Draft = {
     name,
     start: START,
@@ -137,10 +125,12 @@ async function openForm(
   };
 
   const regular = draft.priority === '1';
-  await schedules(page).getByRole('button', {
-    name: regular ? 'Add regular schedule' : 'Add exception',
-    exact: true,
-  }).click();
+  await schedules(page)
+    .getByRole('button', {
+      name: regular ? 'Add regular schedule' : 'Add exception',
+      exact: true,
+    })
+    .click();
 
   const form = page.getByRole('form', {
     name: regular ? 'New regular schedule' : 'New exception',
@@ -154,8 +144,7 @@ async function openForm(
 
   // Click the visible label because the radio input is visually hidden.
   await form.getByText(draft.hours, { exact: true }).click();
-  await expect(form.getByRole('radio', { name: draft.hours, exact: true }))
-    .toBeChecked();
+  await expect(form.getByRole('radio', { name: draft.hours, exact: true })).toBeChecked();
 
   if (draft.hours === 'Set hours') {
     await form.getByLabel(/^Opens/).fill(draft.opens);
@@ -165,61 +154,37 @@ async function openForm(
   return form;
 }
 
-async function create(
-  page: Page,
-  overrides: Partial<Draft> = {}
-) {
+async function create(page: Page, overrides: Partial<Draft> = {}) {
   const scheduleName = overrides.name ?? name;
   const form = await openForm(page, overrides);
   await form.getByRole('button', { name: 'Add schedule', exact: true }).click();
 
-  await expect(schedules(page).getByRole('status')).toHaveText(
-    `Added “${scheduleName}”.`
-  );
+  await expect(schedules(page).getByRole('status')).toHaveText(`Added “${scheduleName}”.`);
   await expect(row(page, scheduleName)).toBeVisible();
 }
 
-async function expectPersisted(
-  page: Page,
-  scheduleName: string,
-  hours: string,
-  dates: string
-) {
+async function expectPersisted(page: Page, scheduleName: string, hours: string, dates: string) {
   await page.reload();
   const saved = row(page, scheduleName);
   await expect(saved).toBeVisible();
-  await expect(saved.getByRole('cell', { name: hours, exact: true }))
-    .toBeVisible();
-  await expect(saved.getByRole('cell', { name: dates, exact: true }))
-    .toBeVisible();
+  await expect(saved.getByRole('cell', { name: hours, exact: true })).toBeVisible();
+  await expect(saved.getByRole('cell', { name: dates, exact: true })).toBeVisible();
 }
 
-async function expectInvalid(
-  page: Page,
-  form: Locator,
-  field: RegExp,
-  message: string
-) {
+async function expectInvalid(page: Page, form: Locator, field: RegExp, message: string) {
   await form.getByRole('button', { name: 'Add schedule', exact: true }).click();
 
-  await expect(form.getByLabel(field)).toHaveAttribute(
-    'aria-invalid',
-    'true'
-  );
+  await expect(form.getByLabel(field)).toHaveAttribute('aria-invalid', 'true');
   await expect(form.getByLabel(field)).toHaveAccessibleDescription(message);
   await expect(form.getByText(message, { exact: true })).toBeVisible();
 
   // Check that an invalid form did not add a row.
   await page.reload();
-  await expect(
-    schedules(page).getByRole('button', { name: 'Refresh', exact: true })
-  ).toBeEnabled();
+  await expect(schedules(page).getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await expect(row(page, name)).toHaveCount(0);
 }
 
-test('TC-7.4-01 settings show regular hours and exceptions', async ({
-  page,
-}) => {
+test('TC-7.4-01 settings show regular hours and exceptions', async ({ page }) => {
   const regularName = `${prefix} regular`;
   const exceptionName = `${prefix} exception`;
 
@@ -240,39 +205,36 @@ test('TC-7.4-01 settings show regular hours and exceptions', async ({
     exact: true,
   });
 
-  await expect(regular.getByRole('cell', { name: regularName, exact: true }))
-    .toBeVisible();
-  await expect(regular.getByRole('row').filter({
-    has: page.getByRole('cell', { name: regularName, exact: true }),
-  })).toContainText('08:00–20:00');
+  await expect(regular.getByRole('cell', { name: regularName, exact: true })).toBeVisible();
+  await expect(
+    regular.getByRole('row').filter({
+      has: page.getByRole('cell', { name: regularName, exact: true }),
+    })
+  ).toContainText('08:00–20:00');
 
-  await expect(exceptions.getByRole('cell', {
-    name: exceptionName,
-    exact: true,
-  })).toBeVisible();
+  await expect(
+    exceptions.getByRole('cell', {
+      name: exceptionName,
+      exact: true,
+    })
+  ).toBeVisible();
   await expect(row(page, exceptionName)).toContainText('Open 24 hours');
 });
 
 test('TC-7.4-02 add a regular schedule', async ({ page }) => {
   await create(page);
-  await expectPersisted(
-    page, name, '08:00–20:00', '10 Jan 2030 – 20 Jan 2030'
-  );
+  await expectPersisted(page, name, '08:00–20:00', '10 Jan 2030 – 20 Jan 2030');
 });
 
 test('TC-7.4-03 add an Open 24 hours exception', async ({ page }) => {
   await create(page, { priority: '2', hours: 'Open 24 hours' });
-  await expectPersisted(
-    page, name, 'Open 24 hours', '10 Jan 2030 – 20 Jan 2030'
-  );
+  await expectPersisted(page, name, 'Open 24 hours', '10 Jan 2030 – 20 Jan 2030');
   await expect(row(page, name)).toContainText('Exam period');
 });
 
 test('TC-7.4-04 add a Closed holiday', async ({ page }) => {
   await create(page, { priority: '3', hours: 'Closed' });
-  await expectPersisted(
-    page, name, 'Closed', '10 Jan 2030 – 20 Jan 2030'
-  );
+  await expectPersisted(page, name, 'Closed', '10 Jan 2030 – 20 Jan 2030');
   await expect(row(page, name)).toContainText('Holiday / closure');
 });
 
@@ -301,37 +263,29 @@ test('TC-7.4-07 same start and end date is accepted', async ({ page }) => {
 
 test('TC-7.4-08 end date before start date is rejected', async ({ page }) => {
   const form = await openForm(page, { end: '2030-01-09' });
-  await expectInvalid(
-    page, form, /^End date/, 'End date cannot be before the start date.'
-  );
+  await expectInvalid(page, form, /^End date/, 'End date cannot be before the start date.');
 });
 
-test('TC-7.4-09 equal opening and closing times are rejected', async ({
-  page,
-}) => {
+test('TC-7.4-09 equal opening and closing times are rejected', async ({ page }) => {
   const form = await openForm(page, { closes: '08:00' });
-  await expectInvalid(
-    page, form, /^Closes/, 'Closing time must be after opening time.'
-  );
+  await expectInvalid(page, form, /^Closes/, 'Closing time must be after opening time.');
 });
 
-test('TC-7.4-10 closing one minute after opening is accepted', async ({
-  page,
-}) => {
+test('TC-7.4-10 closing one minute after opening is accepted', async ({ page }) => {
   await create(page, { closes: '08:01' });
-  await expectPersisted(
-    page, name, '08:00–08:01', '10 Jan 2030 – 20 Jan 2030'
-  );
+  await expectPersisted(page, name, '08:00–08:01', '10 Jan 2030 – 20 Jan 2030');
 });
 
 test('TC-7.4-11 edit the schedule name', async ({ page }) => {
   await create(page);
   const renamed = `${prefix} renamed`;
 
-  await row(page, name).getByRole('button', {
-    name: `Edit ${name}`,
-    exact: true,
-  }).click();
+  await row(page, name)
+    .getByRole('button', {
+      name: `Edit ${name}`,
+      exact: true,
+    })
+    .click();
 
   const form = page.getByRole('form', {
     name: `Edit “${name}”`,
@@ -340,38 +294,34 @@ test('TC-7.4-11 edit the schedule name', async ({ page }) => {
   await form.getByLabel(/^Name/).fill(renamed);
   await form.getByRole('button', { name: 'Save changes', exact: true }).click();
 
-  await expect(schedules(page).getByRole('status')).toHaveText(
-    `Saved changes to “${renamed}”.`
-  );
+  await expect(schedules(page).getByRole('status')).toHaveText(`Saved changes to “${renamed}”.`);
 
-  await expectPersisted(
-    page, renamed, '08:00–20:00', '10 Jan 2030 – 20 Jan 2030'
-  );
+  await expectPersisted(page, renamed, '08:00–20:00', '10 Jan 2030 – 20 Jan 2030');
   await expect(row(page, name)).toHaveCount(0);
 });
 
 test('TC-7.4-12 delete a schedule after confirmation', async ({ page }) => {
   await create(page);
 
-  await row(page, name).getByRole('button', {
-    name: `Delete ${name}`,
-    exact: true,
-  }).click();
+  await row(page, name)
+    .getByRole('button', {
+      name: `Delete ${name}`,
+      exact: true,
+    })
+    .click();
 
   // Asking for confirmation must not delete the row yet.
   await expect(row(page, name)).toBeVisible();
-  await row(page, name).getByRole('button', {
-    name: `Confirm deleting ${name}`,
-    exact: true,
-  }).click();
+  await row(page, name)
+    .getByRole('button', {
+      name: `Confirm deleting ${name}`,
+      exact: true,
+    })
+    .click();
 
-  await expect(schedules(page).getByRole('status')).toHaveText(
-    `Deleted “${name}”.`
-  );
+  await expect(schedules(page).getByRole('status')).toHaveText(`Deleted “${name}”.`);
 
   await page.reload();
-  await expect(
-    schedules(page).getByRole('button', { name: 'Refresh', exact: true })
-  ).toBeEnabled();
+  await expect(schedules(page).getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await expect(row(page, name)).toHaveCount(0);
 });
