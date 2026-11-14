@@ -9,9 +9,9 @@ export function uniqueIssueText(label: string): string {
 export type ReportedTable = { tableCode: string; tableId: number };
 
 /**
- * Opens the floor plan the way a user does: home page → "Report Issue".
- * Loading /zones directly currently redirects to /login and then home (defect:
- * the page sees no token during hydration), so tests must not use goto('/zones').
+ * Opens the floor plan the way a user reports an issue: home page → "Report Issue"
+ * (the US7-1 acceptance path). To just look at the plan, use goto('/zones'):
+ * direct loads work since the /zones redirect fix (#86).
  */
 export async function openFloorPlanFromHome(page: Page) {
   await page.goto('/');
@@ -84,7 +84,8 @@ export async function tableStatusOnFloorPlan(
   });
   const page = await context.newPage();
   try {
-    await openFloorPlanFromHome(page);
+    await page.goto('/zones');
+    await expect(page.getByRole('heading', { name: 'Floor plan' })).toBeVisible();
     const table = page.getByLabel(new RegExp(`^Table ${tableCode}, `));
     await expect(table).toBeVisible();
     const label = (await table.getAttribute('aria-label')) ?? '';

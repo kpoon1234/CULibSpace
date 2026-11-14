@@ -17,7 +17,7 @@ export const USER_STATE = 'playwright/.auth/user.json';
 export const testEnv = {
   apiUrl: process.env.E2E_API_URL || 'http://localhost:8080',
   adminEmail: process.env.E2E_ADMIN_EMAIL || 'admin@chula.ac.th',
-  adminPassword: process.env.E2E_ADMIN_PASSWORD || 'admin',
+  adminPassword: process.env.E2E_ADMIN_PASSWORD || 'admin@example',
   userEmail: process.env.E2E_USER_EMAIL || 'alice@student.chula.ac.th',
   userFirstname: process.env.E2E_USER_FIRSTNAME || 'Alice',
   userLastname: process.env.E2E_USER_LASTNAME || 'wonderland',

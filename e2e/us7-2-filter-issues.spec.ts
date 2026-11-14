@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { ADMIN_STATE } from './helpers/auth';
 import { findIssueId, updateIssue, type IssueStatus } from './helpers/adminApi';
 import { reportIssueAsUser, type ReportedTable } from './helpers/issues';
@@ -16,38 +16,40 @@ type OwnIssue = {
 
 const STATUSES: IssueStatus[] = ['Pending', 'In Progress', 'Completed'];
 
-let ownIssues: OwnIssue[];
-let createdIds: number[];
+let ownIssues: OwnIssue[] = [];
 let marker: string;
+let api: APIRequestContext | undefined;
 
-test.beforeEach(async ({ browser, request }, info) => {
-  ownIssues = [];
-  createdIds = [];
+// These tests only read and filter, so they share one set of three issues
+// (one per status), created once through the UI instead of before every test.
+test.beforeAll(async ({ browser, playwright }, info) => {
+  api = await playwright.request.newContext();
   marker = `E2E ${randomUUID()}`;
 
   for (const status of STATUSES) {
     const text = `${marker} ${status}`;
     const table = await reportIssueAsUser(browser, info, text);
-    const id = await findIssueId(request, text);
-    createdIds.push(id);
+    const id = await findIssueId(api, text);
+    // Register first, so afterAll still cleans up if the update below fails.
+    ownIssues.push({ id, text, status, table });
 
     if (status !== 'Pending') {
-      await updateIssue(request, id, { status, blocksTable: false });
+      await updateIssue(api, id, { status, blocksTable: false });
     }
-
-    ownIssues.push({ id, text, status, table });
   }
 });
 
-test.afterEach(async ({ request }) => {
+test.afterAll(async () => {
+  if (!api) return;
   await Promise.all(
-    createdIds.map((id) =>
-      updateIssue(request, id, {
+    ownIssues.map(({ id }) =>
+      updateIssue(api!, id, {
         status: 'Completed',
         blocksTable: false,
       })
     )
   );
+  await api.dispose();
 });
 
 function rows(page: Page) {
