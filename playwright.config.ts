@@ -10,6 +10,12 @@ const API_URL = process.env.E2E_API_URL || 'http://localhost:8080';
 const isLocal = (url: string) =>
   ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname);
 
+/** The port a URL points to, including the default for its scheme. */
+const portOf = (url: string) => {
+  const { port, protocol } = new URL(url);
+  return port || (protocol === 'https:' ? '443' : '80');
+};
+
 /**
  * Black-box E2E tests against the running app: the local dev servers by default,
  * or a deployed environment when E2E_BASE_URL / E2E_API_URL point to it.
@@ -42,12 +48,15 @@ export default defineConfig({
   ],
   // Local URLs: starts the dev servers if they are not already running (reuses them
   // if they are). A deployed URL is already running, so nothing is started.
+  // Each server starts on the port of its E2E URL, and is told where the other one is
+  // (backend CORS origin, frontend API URL), so custom local ports work end to end.
   webServer: [
     ...(isLocal(API_URL)
       ? [
           {
             command: 'npm run dev:backend',
             url: `${API_URL}/api/hello`,
+            env: { PORT: portOf(API_URL), CLIENT_URL: new URL(FRONTEND_URL).origin },
             reuseExistingServer: true,
             timeout: 120_000,
           },
@@ -58,6 +67,13 @@ export default defineConfig({
           {
             command: 'npm run dev:frontend',
             url: FRONTEND_URL,
+            env: {
+              PORT: portOf(FRONTEND_URL),
+              NEXT_PUBLIC_API_URL: new URL(API_URL).origin,
+              // next dev only serves its scripts to trusted hosts; trust the E2E host
+              // (e.g. 127.0.0.1), or the page never becomes interactive.
+              ALLOWED_DEV_ORIGINS: new URL(FRONTEND_URL).hostname.replace(/^\[(.*)\]$/, '$1'),
+            },
             reuseExistingServer: true,
             timeout: 180_000,
           },

@@ -31,12 +31,15 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const host = new URL(databaseUrl).hostname;
+// URL hostnames keep IPv6 brackets ("[::1]"); compare hosts without them.
+const unbracket = (h: string) => h.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+
+const host = unbracket(new URL(databaseUrl).hostname);
 const allowedHosts = [
   ...LOCAL_HOSTS,
   ...(process.env.E2E_CLEANUP_ALLOWED_HOSTS ?? '')
     .split(',')
-    .map((h) => h.trim())
+    .map((h) => unbracket(h.trim()))
     .filter(Boolean),
 ];
 if (!allowedHosts.includes(host)) {
