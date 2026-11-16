@@ -71,17 +71,35 @@ async function listSchedules(request: APIRequestContext): Promise<Schedule[]> {
   return result;
 }
 
+const inTestWindow = (schedule: Schedule) =>
+  [1, 2, 3].includes(schedule.priority) &&
+  schedule.startDate.slice(0, 10) <= END &&
+  schedule.endDate.slice(0, 10) >= START;
+
+async function deleteSchedule(request: APIRequestContext, scheduleId: number) {
+  const response = await request.delete(`${API}/${scheduleId}`, { headers: headers() });
+  return response.ok() || response.status() === 404
+    ? null
+    : `${scheduleId}: ${await response.text()}`;
+}
+
 test.beforeEach(async ({ page, request }) => {
   prefix = `E2E ${randomUUID()}`;
   name = `${prefix} schedule`;
 
-  const existing = await listSchedules(request);
-  const conflicts = existing.filter(
-    (schedule) =>
-      [1, 2, 3].includes(schedule.priority) &&
-      schedule.startDate.slice(0, 10) <= END &&
-      schedule.endDate.slice(0, 10) >= START
+  // An interrupted run (stopped before afterEach) can leave its E2E schedule in the
+  // test window. Remove those, so they don't break the precondition below.
+  const leftovers = (await listSchedules(request)).filter(
+    (schedule) => schedule.name.startsWith('E2E ') && inTestWindow(schedule)
   );
+  const leftoverFailures: string[] = [];
+  for (const schedule of leftovers) {
+    const failure = await deleteSchedule(request, schedule.scheduleId);
+    if (failure) leftoverFailures.push(failure);
+  }
+  expect(leftoverFailures, 'Removing leftover E2E schedules failed').toEqual([]);
+
+  const conflicts = (await listSchedules(request)).filter(inTestWindow);
 
   expect(
     conflicts,
@@ -103,10 +121,8 @@ test.afterEach(async ({ request }) => {
 
   const failures: string[] = [];
   for (const schedule of owned) {
-    const response = await request.delete(`${API}/${schedule.scheduleId}`, { headers: headers() });
-    if (!response.ok() && response.status() !== 404) {
-      failures.push(`${schedule.scheduleId}: ${await response.text()}`);
-    }
+    const failure = await deleteSchedule(request, schedule.scheduleId);
+    if (failure) failures.push(failure);
   }
 
   expect(failures, 'Schedule cleanup failed').toEqual([]);

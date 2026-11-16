@@ -158,15 +158,18 @@ test('TC-7.1-02 valid report appears in admin list', async ({ page, browser }, i
 });
 
 test('TC-7.1-03 empty details are blocked with an error', async () => {
+  // The error appears once the user has typed and left the field empty;
+  // an untouched field shows no error.
+  await details().fill('x');
   await details().fill('');
-  await details().focus();
   await details().blur();
 
   await expect(submitButton()).toBeDisabled();
-
-  // Keep the AC expectation. The current UI may fail here because
-  // disabling Submit prevents its validation message from appearing.
   await expect(form.getByRole('alert')).toHaveText('Please describe the issue before submitting.');
+  await expect(details()).toHaveAttribute('aria-invalid', 'true');
+  await expect(details()).toHaveAccessibleDescription(
+    'Please describe the issue before submitting.'
+  );
 });
 
 test('TC-7.1-04 whitespace-only details are rejected', async () => {

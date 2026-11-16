@@ -49,7 +49,8 @@ export default defineConfig({
   // Local URLs: starts the dev servers if they are not already running (reuses them
   // if they are). A deployed URL is already running, so nothing is started.
   // Each server starts on the port of its E2E URL, and is told where the other one is
-  // (backend CORS origin, frontend API URL), so custom local ports work end to end.
+  // (backend CORS origin, frontend API URL and /api rewrite), so custom local ports
+  // work end to end.
   webServer: [
     ...(isLocal(API_URL)
       ? [
@@ -70,6 +71,8 @@ export default defineConfig({
             env: {
               PORT: portOf(FRONTEND_URL),
               NEXT_PUBLIC_API_URL: new URL(API_URL).origin,
+              // Target of Next's /api/* rewrite (next.config.ts); defaults to localhost:8080.
+              INTERNAL_API_URL: new URL(API_URL).origin,
               // next dev only serves its scripts to trusted hosts; trust the E2E host
               // (e.g. 127.0.0.1), or the page never becomes interactive.
               ALLOWED_DEV_ORIGINS: new URL(FRONTEND_URL).hostname.replace(/^\[(.*)\]$/, '$1'),

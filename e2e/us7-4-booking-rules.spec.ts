@@ -46,10 +46,20 @@ const KEEP_VALID: Partial<Record<string, Partial<BookingRules>>> = {
   'lateThresholdMinutes=180': { maxBookingDurationMinutes: 1440 },
 };
 
-let original: BookingRules;
+// The admin's values, read once before any test changes them. If reading fails,
+// it stays undefined and nothing is "restored" over the real error.
+let original: BookingRules | undefined;
+
+test.beforeAll(async ({ playwright }) => {
+  const api = await playwright.request.newContext();
+  try {
+    original = await getBookingRules(api);
+  } finally {
+    await api.dispose();
+  }
+});
 
 test.beforeEach(async ({ page, request }) => {
-  original = await getBookingRules(request);
   await setBookingRules(request, BASELINE);
   await page.goto('/admin/settings');
   await expect(fieldInput(page, 'maxBookingDurationMinutes')).toHaveValue(
@@ -58,7 +68,7 @@ test.beforeEach(async ({ page, request }) => {
 });
 
 test.afterEach(async ({ request }) => {
-  await setBookingRules(request, original);
+  if (original) await setBookingRules(request, original);
 });
 
 function policySection(page: Page) {

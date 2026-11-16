@@ -23,6 +23,9 @@ export default function IssueReportModal({ location, source, onClose }: IssueRep
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateIssueReportResult | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Only validate on blur once the user has typed: tabbing past (or clicking Cancel
+  // from) an untouched field shows no error.
+  const [edited, setEdited] = useState(false);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -143,22 +146,33 @@ export default function IssueReportModal({ location, source, onClose }: IssueRep
               value={details}
               onChange={(event) => {
                 setDetails(event.target.value);
+                setEdited(true);
                 setValidationError(null);
               }}
               onBlur={() => {
-                setValidationError(validateDetails(details));
+                if (edited) setValidationError(validateDetails(details));
               }}
+              aria-invalid={validationError ? true : undefined}
+              aria-describedby="issue-details-hint"
               placeholder="Describe the issue..."
               className="w-full resize-none rounded-xl bg-gray-200 px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-400"
             />
-            <p className="ml-1 text-xs text-gray-500">5–1000 characters.</p>
+            {/* The error takes the hint's place (same line height), so the buttons
+                below never move while someone is clicking them. */}
+            {validationError ? (
+              <p
+                id="issue-details-hint"
+                role="alert"
+                className="ml-1 text-xs font-medium text-red-600"
+              >
+                {validationError}
+              </p>
+            ) : (
+              <p id="issue-details-hint" className="ml-1 text-xs text-gray-500">
+                5–1000 characters.
+              </p>
+            )}
           </div>
-
-          {validationError && (
-            <p role="alert" className="ml-1 text-sm font-medium text-red-600">
-              {validationError}
-            </p>
-          )}
 
           <div className="mt-8 flex justify-end gap-3 border-t border-gray-100 pt-4">
             <button
